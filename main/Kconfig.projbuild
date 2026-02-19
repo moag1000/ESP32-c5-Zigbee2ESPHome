@@ -907,6 +907,15 @@ menu "ESP32-C5 Zigbee2MQTT Gateway Configuration"
                     Disable only for testing purposes.
 
         endmenu
+
+        config ESPHOME_PRIMARY_INTEGRATION
+            bool "Use ESPHome Native API as primary HA integration"
+            default y
+            help
+                When enabled, Zigbee devices are exposed via ESPHome Native API
+                instead of MQTT Discovery. MQTT remains available for bridge
+                management and external clients.
+
     endmenu
 
     menu "Multi-PAN Configuration (EXPERIMENTAL)"

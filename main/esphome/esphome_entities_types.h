@@ -42,6 +42,7 @@ typedef struct {
     esphome_state_class_t state_class;                  /**< State class */
     bool disabled_by_default;                           /**< Disabled by default */
     uint8_t entity_category;                            /**< Entity category (0=NONE, 1=CONFIG, 2=DIAGNOSTIC) */
+    uint32_t device_id;                                 /**< Sub-device ID (0=gateway, >0=sub-device) */
 } esphome_sensor_config_t;
 
 /**
@@ -68,6 +69,7 @@ typedef struct {
     esphome_binary_device_class_t device_class;         /**< Device class */
     bool is_status_binary_sensor;                       /**< Is status sensor */
     bool disabled_by_default;                           /**< Disabled by default */
+    uint32_t device_id;                                 /**< Sub-device ID (0=gateway, >0=sub-device) */
 } esphome_binary_sensor_config_t;
 
 /**
@@ -103,6 +105,7 @@ typedef struct {
     bool assumed_state;                                 /**< Use assumed state */
     bool disabled_by_default;                           /**< Disabled by default */
     esphome_switch_command_cb_t command_callback;       /**< Command callback */
+    uint32_t device_id;                                 /**< Sub-device ID (0=gateway, >0=sub-device) */
 } esphome_switch_config_t;
 
 /**
@@ -126,6 +129,7 @@ typedef struct {
     char unique_id[ESPHOME_MAX_UNIQUE_ID_LEN];          /**< Unique ID for HA */
     char icon[ESPHOME_MAX_ICON_LEN];                    /**< MDI icon */
     bool disabled_by_default;                           /**< Disabled by default */
+    uint32_t device_id;                                 /**< Sub-device ID (0=gateway, >0=sub-device) */
 } esphome_text_sensor_config_t;
 
 /**
@@ -165,6 +169,7 @@ typedef struct {
     esphome_number_mode_t mode;                         /**< Display mode (box/slider) */
     esphome_number_command_cb_t command_callback;       /**< Command callback */
     bool disabled_by_default;                           /**< Disabled by default */
+    uint32_t device_id;                                 /**< Sub-device ID (0=gateway, >0=sub-device) */
 } esphome_number_config_t;
 
 /**
@@ -199,6 +204,7 @@ typedef struct {
     esphome_button_device_class_t device_class;         /**< Device class */
     esphome_button_press_cb_t press_callback;           /**< Press callback */
     bool disabled_by_default;                           /**< Disabled by default */
+    uint32_t device_id;                                 /**< Sub-device ID (0=gateway, >0=sub-device) */
 } esphome_button_config_t;
 
 /* ============================================================================
@@ -226,6 +232,7 @@ typedef struct {
     uint8_t option_count;                                               /**< Number of options */
     esphome_select_command_cb_t command_callback;                       /**< Command callback */
     bool disabled_by_default;                                           /**< Disabled by default */
+    uint32_t device_id;                                                 /**< Sub-device ID (0=gateway, >0=sub-device) */
 } esphome_select_config_t;
 
 /**
@@ -292,6 +299,7 @@ typedef struct {
     uint8_t effect_count;                                               /**< Number of effects */
     esphome_light_command_cb_t command_callback;                        /**< Command callback */
     bool disabled_by_default;                                           /**< Disabled by default */
+    uint32_t device_id;                                                 /**< Sub-device ID (0=gateway, >0=sub-device) */
 } esphome_light_config_t;
 
 /**
@@ -349,6 +357,7 @@ typedef struct {
     bool supports_tilt;                                 /**< Supports tilt control */
     esphome_cover_command_cb_t command_callback;        /**< Command callback */
     bool disabled_by_default;                           /**< Disabled by default */
+    uint32_t device_id;                                 /**< Sub-device ID (0=gateway, >0=sub-device) */
 } esphome_cover_config_t;
 
 /**
@@ -403,6 +412,7 @@ typedef struct {
     int32_t supported_speed_count;                      /**< Number of speed levels */
     esphome_fan_command_cb_t command_callback;          /**< Command callback */
     bool disabled_by_default;                           /**< Disabled by default */
+    uint32_t device_id;                                 /**< Sub-device ID (0=gateway, >0=sub-device) */
 } esphome_fan_config_t;
 
 /**
@@ -470,6 +480,7 @@ typedef struct {
     uint32_t supported_presets;                         /**< Bitmask of presets */
     esphome_climate_command_cb_t command_callback;      /**< Command callback */
     bool disabled_by_default;                           /**< Disabled by default */
+    uint32_t device_id;                                 /**< Sub-device ID (0=gateway, >0=sub-device) */
 } esphome_climate_config_t;
 
 /**
@@ -515,6 +526,7 @@ typedef struct {
     bool requires_code;                                 /**< Requires code to operate */
     esphome_lock_command_cb_t command_callback;         /**< Command callback */
     bool disabled_by_default;                           /**< Disabled by default */
+    uint32_t device_id;                                 /**< Sub-device ID (0=gateway, >0=sub-device) */
 } esphome_lock_config_t;
 
 /**
@@ -562,6 +574,7 @@ typedef struct {
     bool supports_pause;                                /**< Supports pause command */
     esphome_media_player_command_cb_t command_callback; /**< Command callback */
     bool disabled_by_default;                           /**< Disabled by default */
+    uint32_t device_id;                                 /**< Sub-device ID (0=gateway, >0=sub-device) */
 } esphome_media_player_config_t;
 
 /**
@@ -603,6 +616,7 @@ typedef struct {
     bool requires_code_to_arm;                          /**< Requires code to arm */
     esphome_alarm_command_cb_t command_callback;        /**< Command callback */
     bool disabled_by_default;                           /**< Disabled by default */
+    uint32_t device_id;                                 /**< Sub-device ID (0=gateway, >0=sub-device) */
 } esphome_alarm_config_t;
 
 /**
@@ -640,6 +654,7 @@ typedef struct {
     esphome_text_mode_t mode;                           /**< Display mode (text/password) */
     esphome_text_command_cb_t command_callback;         /**< Command callback */
     bool disabled_by_default;                           /**< Disabled by default */
+    uint32_t device_id;                                 /**< Sub-device ID (0=gateway, >0=sub-device) */
 } esphome_text_config_t;
 
 /**

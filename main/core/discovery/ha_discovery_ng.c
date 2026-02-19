@@ -1602,6 +1602,11 @@ esp_err_t ha_discovery_ng_deinit(void)
 
 esp_err_t ha_discovery_ng_publish_device(device_id_t id)
 {
+#ifdef CONFIG_ESPHOME_PRIMARY_INTEGRATION
+    /* Skip MQTT discovery when ESPHome Native API is primary */
+    return ESP_OK;
+#endif
+
     if (!s_enabled) {
         ESP_LOGD(TAG, "Discovery disabled, skipping device 0x%016" PRIx64, id);
         return ESP_OK;
@@ -1769,6 +1774,11 @@ static bool collect_ids_iterator(device_t *dev, void *ctx)
 
 esp_err_t ha_discovery_ng_publish_all(void)
 {
+#ifdef CONFIG_ESPHOME_PRIMARY_INTEGRATION
+    /* Skip MQTT discovery when ESPHome Native API is primary */
+    return ESP_OK;
+#endif
+
     if (!s_enabled) {
         ESP_LOGI(TAG, "Discovery disabled, skipping publish all");
         return ESP_OK;
@@ -1802,6 +1812,11 @@ esp_err_t ha_discovery_ng_publish_all(void)
 
 esp_err_t ha_discovery_ng_remove_device(device_id_t id)
 {
+#ifdef CONFIG_ESPHOME_PRIMARY_INTEGRATION
+    /* Skip MQTT discovery removal when ESPHome Native API is primary */
+    return ESP_OK;
+#endif
+
     REQUIRE_MQTT_CONNECTED(ESP_ERR_INVALID_STATE);
 
     device_t *dev = device_registry_get(id);

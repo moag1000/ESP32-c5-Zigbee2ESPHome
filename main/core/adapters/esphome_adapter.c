@@ -17,6 +17,7 @@
 #include "esphome/esphome_api.h"
 #include "esphome/esphome_entities.h"
 #include "esphome/esphome_common.h"
+#include "zigbee/converter/zb_converter.h"
 #include "cJSON.h"
 #include "esp_log.h"
 #include <string.h>
@@ -43,6 +44,8 @@ static void handle_device_joined(event_type_t type, void *data,
                                   size_t data_size, void *ctx);
 static void handle_device_left(event_type_t type, void *data,
                                 size_t data_size, void *ctx);
+static void handle_device_availability_changed(event_type_t type, void *data,
+                                                size_t data_size, void *ctx);
 
 /* ============================================================================
  * Forward Declarations - Entity Registration
@@ -102,6 +105,62 @@ esp_err_t esphome_adapter_parse_entity_key(uint32_t key, device_id_t *id,
     }
 
     return ESP_OK;
+}
+
+/* ============================================================================
+ * Helper Functions - Device Lookup from Entity Key
+ * ============================================================================ */
+
+/**
+ * @brief Context for device lookup by entity key
+ */
+typedef struct {
+    esphome_entity_key_t target_key;
+    device_capability_t cap;
+    device_t *result;
+} find_device_ctx_t;
+
+/**
+ * @brief Iterator callback to find device matching an entity key
+ */
+static bool find_device_by_key_cb(device_t *dev, void *ctx)
+{
+    find_device_ctx_t *fc = (find_device_ctx_t *)ctx;
+    uint32_t candidate_key = esphome_adapter_make_entity_key(dev->id, fc->cap);
+    if (candidate_key == fc->target_key) {
+        fc->result = dev;
+        return false; /* Stop iteration — found it */
+    }
+    return true; /* Continue */
+}
+
+/**
+ * @brief Find the device_t for a given ESPHome entity key
+ *
+ * Iterates the Zigbee device registry, regenerating the entity key for each
+ * device+capability pair until a match is found. O(n) but n is small (<50).
+ *
+ * @param[in] key Entity key from ESPHome command
+ * @param[out] out_cap Extracted capability type (optional, may be NULL)
+ * @return Pointer to device_t or NULL if not found
+ */
+static device_t *find_device_for_entity_key(esphome_entity_key_t key,
+                                              device_capability_t *out_cap)
+{
+    device_capability_t cap = 0;
+    esphome_adapter_parse_entity_key(key, NULL, &cap);
+
+    if (out_cap) {
+        *out_cap = cap;
+    }
+
+    find_device_ctx_t ctx = {
+        .target_key = key,
+        .cap = cap,
+        .result = NULL,
+    };
+    device_registry_iterate_zigbee(find_device_by_key_cb, &ctx);
+    return ctx.result;
 }
 
 /* ============================================================================
@@ -225,8 +284,10 @@ static bool get_state_bool(cJSON *state, const char *key, bool *value)
 static esp_err_t register_sensor_entity(const device_t *dev, device_capability_t cap)
 {
     esphome_sensor_config_t config = {0};
+    uint32_t device_id = (uint32_t)(dev->id & 0xFFFFFFFF);
 
     config.key = esphome_adapter_make_entity_key(dev->id, cap);
+    config.device_id = device_id;
     make_entity_name(dev, cap, config.name, sizeof(config.name));
     make_unique_id(dev, cap, config.unique_id, sizeof(config.unique_id));
 
@@ -323,8 +384,10 @@ static esp_err_t register_sensor_entity(const device_t *dev, device_capability_t
 static esp_err_t register_binary_sensor_entity(const device_t *dev, device_capability_t cap)
 {
     esphome_binary_sensor_config_t config = {0};
+    uint32_t device_id = (uint32_t)(dev->id & 0xFFFFFFFF);
 
     config.key = esphome_adapter_make_entity_key(dev->id, cap);
+    config.device_id = device_id;
     make_entity_name(dev, cap, config.name, sizeof(config.name));
     make_unique_id(dev, cap, config.unique_id, sizeof(config.unique_id));
 
@@ -384,26 +447,50 @@ static esp_err_t register_binary_sensor_entity(const device_t *dev, device_capab
 
 static esp_err_t switch_command_callback(esphome_entity_key_t key, bool state)
 {
-    ESP_LOGI(TAG, "Switch command received: key=0x%08lX, state=%s",
+    ESP_LOGI(TAG, "Switch command: key=0x%08lX, state=%s",
              (unsigned long)key, state ? "ON" : "OFF");
 
     s_stats.commands_received++;
 
-    /*
-     * Find the device by iterating the registry and matching entity keys.
-     * This is O(n) but acceptable for the number of devices we support.
-     */
-    /* TODO: Implement command forwarding to device via Zigbee/BLE */
+    /* Find the Zigbee device for this entity key */
+    device_t *dev = find_device_for_entity_key(key, NULL);
+    if (!dev) {
+        ESP_LOGW(TAG, "Switch command: device not found for key 0x%08lX", (unsigned long)key);
+        return ESP_ERR_NOT_FOUND;
+    }
 
-    /* For now, just update the entity state to reflect the command */
-    return esphome_entity_update_switch(key, state);
+    /* Build JSON command like MQTT command handler expects */
+    cJSON *cmd = cJSON_CreateObject();
+    if (!cmd) {
+        return ESP_ERR_NO_MEM;
+    }
+    cJSON_AddStringToObject(cmd, "state", state ? "ON" : "OFF");
+
+    /* Route to Zigbee converter chain */
+    uint8_t ep = dev->proto.zigbee.endpoint;
+    if (ep == 0) ep = 1; /* EP0 is ZDO, default to EP1 */
+
+    esp_err_t ret = zb_converter_handle_command(
+        dev->proto.zigbee.short_addr, ep, cmd);
+    cJSON_Delete(cmd);
+
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Switch command failed for 0x%04X: %s",
+                 dev->proto.zigbee.short_addr, esp_err_to_name(ret));
+    }
+
+    /* Optimistic state update — real state comes via EVT_DEVICE_STATE_CHANGED */
+    esphome_entity_update_switch(key, state);
+    return ret;
 }
 
 static esp_err_t register_switch_entity(const device_t *dev)
 {
     esphome_switch_config_t config = {0};
+    uint32_t device_id = (uint32_t)(dev->id & 0xFFFFFFFF);
 
     config.key = esphome_adapter_make_entity_key(dev->id, DEV_CAP_ON_OFF);
+    config.device_id = device_id;
     make_entity_name(dev, DEV_CAP_ON_OFF, config.name, sizeof(config.name));
     make_unique_id(dev, DEV_CAP_ON_OFF, config.unique_id, sizeof(config.unique_id));
 
@@ -434,46 +521,90 @@ static esp_err_t register_switch_entity(const device_t *dev)
 static esp_err_t light_command_callback(esphome_entity_key_t key,
                                          const esphome_light_command_t *cmd)
 {
-    ESP_LOGI(TAG, "Light command received: key=0x%08lX, state=%s, brightness=%.2f",
+    ESP_LOGI(TAG, "Light command: key=0x%08lX, state=%s, brightness=%.2f, color_temp=%.0f",
              (unsigned long)key,
-             cmd->has_state ? (cmd->state ? "ON" : "OFF") : "unchanged",
-             cmd->has_brightness ? cmd->brightness : -1.0f);
+             cmd->has_state ? (cmd->state ? "ON" : "OFF") : "-",
+             cmd->has_brightness ? cmd->brightness : -1.0f,
+             cmd->has_color_temp ? cmd->color_temp : -1.0f);
 
     s_stats.commands_received++;
 
-    /* TODO: Implement command forwarding to device via Zigbee/BLE */
+    /* Find the Zigbee device for this entity key */
+    device_t *dev = find_device_for_entity_key(key, NULL);
+    if (!dev) {
+        ESP_LOGW(TAG, "Light command: device not found for key 0x%08lX", (unsigned long)key);
+        return ESP_ERR_NOT_FOUND;
+    }
 
-    /* Update entity state to reflect command */
-    esphome_light_state_t state = {0};
-    state.key = key;
+    /* Build JSON command matching Zigbee2MQTT format */
+    cJSON *json = cJSON_CreateObject();
+    if (!json) {
+        return ESP_ERR_NO_MEM;
+    }
 
-    /* Get current state first */
-    esphome_entity_get_light(key, &state);
-
-    /* Apply command changes */
     if (cmd->has_state) {
-        state.state = cmd->state;
+        cJSON_AddStringToObject(json, "state", cmd->state ? "ON" : "OFF");
     }
     if (cmd->has_brightness) {
-        state.brightness = cmd->brightness;
+        /* ESPHome brightness is 0.0-1.0, Zigbee2MQTT expects 0-254 */
+        cJSON_AddNumberToObject(json, "brightness", (int)(cmd->brightness * 254.0f));
     }
     if (cmd->has_color_temp) {
-        state.color_temp = cmd->color_temp;
+        cJSON_AddNumberToObject(json, "color_temp", (int)cmd->color_temp);
     }
+    if (cmd->has_rgb) {
+        /* Convert ESPHome 0.0-1.0 RGB to Z2M color object */
+        cJSON *color = cJSON_CreateObject();
+        if (color) {
+            cJSON_AddNumberToObject(color, "r", (int)(cmd->red * 255.0f));
+            cJSON_AddNumberToObject(color, "g", (int)(cmd->green * 255.0f));
+            cJSON_AddNumberToObject(color, "b", (int)(cmd->blue * 255.0f));
+            cJSON_AddItemToObject(json, "color", color);
+        }
+    }
+    if (cmd->has_transition_length) {
+        /* ESPHome transition in ms, Z2M expects seconds */
+        cJSON_AddNumberToObject(json, "transition", cmd->transition_length / 1000.0f);
+    }
+
+    /* Route to Zigbee converter chain */
+    uint8_t ep = dev->proto.zigbee.endpoint;
+    if (ep == 0) ep = 1;
+
+    esp_err_t ret = zb_converter_handle_command(
+        dev->proto.zigbee.short_addr, ep, json);
+    cJSON_Delete(json);
+
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Light command failed for 0x%04X: %s",
+                 dev->proto.zigbee.short_addr, esp_err_to_name(ret));
+    }
+
+    /* Optimistic state update */
+    esphome_light_state_t state = {0};
+    state.key = key;
+    esphome_entity_get_light(key, &state);
+
+    if (cmd->has_state) state.state = cmd->state;
+    if (cmd->has_brightness) state.brightness = cmd->brightness;
+    if (cmd->has_color_temp) state.color_temp = cmd->color_temp;
     if (cmd->has_rgb) {
         state.red = cmd->red;
         state.green = cmd->green;
         state.blue = cmd->blue;
     }
+    esphome_entity_update_light(key, &state);
 
-    return esphome_entity_update_light(key, &state);
+    return ret;
 }
 
 static esp_err_t register_light_entity(const device_t *dev)
 {
     esphome_light_config_t config = {0};
+    uint32_t device_id = (uint32_t)(dev->id & 0xFFFFFFFF);
 
     config.key = esphome_adapter_make_entity_key(dev->id, DEV_CAP_BRIGHTNESS);
+    config.device_id = device_id;
     make_entity_name(dev, DEV_CAP_BRIGHTNESS, config.name, sizeof(config.name));
     make_unique_id(dev, DEV_CAP_BRIGHTNESS, config.unique_id, sizeof(config.unique_id));
 
@@ -821,6 +952,39 @@ static void handle_device_left(event_type_t type, void *data,
     esphome_adapter_remove_device(evt->ieee_addr);
 }
 
+/**
+ * @brief Handle EVT_DEVICE_AVAILABILITY_CHANGED event
+ *
+ * When a device goes offline, marks all its ESPHome entities as
+ * missing/unavailable. When a device comes back online, triggers
+ * a full state resync so entities reflect current values.
+ */
+static void handle_device_availability_changed(event_type_t type, void *data,
+                                                size_t data_size, void *ctx)
+{
+    (void)type;
+    (void)ctx;
+
+    if (!data || data_size < sizeof(evt_device_availability_t)) {
+        ESP_LOGW(TAG, "Invalid availability changed event data");
+        return;
+    }
+
+    const evt_device_availability_t *evt = (const evt_device_availability_t *)data;
+
+    ESP_LOGI(TAG, "Device 0x%016llX availability: %s",
+             (unsigned long long)evt->device_id,
+             evt->online ? "online" : "offline");
+
+    if (!evt->online) {
+        /* Device went offline — mark all entities as missing/unavailable */
+        esphome_adapter_remove_device(evt->device_id);
+    } else {
+        /* Device came back online — resync entities with current state */
+        esphome_adapter_sync_device(evt->device_id);
+    }
+}
+
 /* ============================================================================
  * Device Registry Iterator Callback
  * ============================================================================ */
@@ -889,6 +1053,18 @@ esp_err_t esphome_adapter_init(void)
         return ret;
     }
 
+    /* Subscribe to device availability changed events */
+    ret = event_subscribe(EVT_DEVICE_AVAILABILITY_CHANGED,
+                           handle_device_availability_changed, NULL);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to subscribe to EVT_DEVICE_AVAILABILITY_CHANGED: %s",
+                 esp_err_to_name(ret));
+        event_unsubscribe(EVT_DEVICE_STATE_CHANGED, handle_device_state_changed);
+        event_unsubscribe(EVT_DEVICE_JOINED, handle_device_joined);
+        event_unsubscribe(EVT_DEVICE_LEFT, handle_device_left);
+        return ret;
+    }
+
     /* Reset statistics */
     memset(&s_stats, 0, sizeof(s_stats));
 
@@ -910,6 +1086,7 @@ esp_err_t esphome_adapter_deinit(void)
     event_unsubscribe(EVT_DEVICE_STATE_CHANGED, handle_device_state_changed);
     event_unsubscribe(EVT_DEVICE_JOINED, handle_device_joined);
     event_unsubscribe(EVT_DEVICE_LEFT, handle_device_left);
+    event_unsubscribe(EVT_DEVICE_AVAILABILITY_CHANGED, handle_device_availability_changed);
 
     s_initialized = false;
 
@@ -1009,17 +1186,49 @@ esp_err_t esphome_adapter_remove_device(device_id_t id)
     /* For now, set entities to missing/unavailable state */
     device_t *dev = device_registry_get(id);
     if (dev) {
-        if (dev->capabilities & DEV_CAP_TEMPERATURE) {
-            esphome_entity_key_t key = esphome_adapter_make_entity_key(id, DEV_CAP_TEMPERATURE);
-            esphome_entity_set_sensor_missing(key);
-            s_stats.entities_removed++;
+        /* Sensor capabilities — all have set_sensor_missing() */
+        static const device_capability_t sensor_caps[] = {
+            DEV_CAP_TEMPERATURE, DEV_CAP_HUMIDITY, DEV_CAP_PRESSURE, DEV_CAP_BATTERY,
+            DEV_CAP_POWER, DEV_CAP_ENERGY, DEV_CAP_VOLTAGE, DEV_CAP_CURRENT
+        };
+        for (size_t i = 0; i < sizeof(sensor_caps) / sizeof(sensor_caps[0]); i++) {
+            if (dev->capabilities & sensor_caps[i]) {
+                esphome_entity_key_t key = esphome_adapter_make_entity_key(id, sensor_caps[i]);
+                esphome_entity_set_sensor_missing(key);
+                s_stats.entities_removed++;
+            }
         }
-        if (dev->capabilities & DEV_CAP_HUMIDITY) {
-            esphome_entity_key_t key = esphome_adapter_make_entity_key(id, DEV_CAP_HUMIDITY);
-            esphome_entity_set_sensor_missing(key);
-            s_stats.entities_removed++;
+
+        /* Binary sensor capabilities — all have set_binary_sensor_missing() */
+        static const device_capability_t binary_caps[] = {
+            DEV_CAP_MOTION, DEV_CAP_CONTACT, DEV_CAP_VIBRATION,
+            DEV_CAP_WATER_LEAK, DEV_CAP_SMOKE
+        };
+        for (size_t i = 0; i < sizeof(binary_caps) / sizeof(binary_caps[0]); i++) {
+            if (dev->capabilities & binary_caps[i]) {
+                esphome_entity_key_t key = esphome_adapter_make_entity_key(id, binary_caps[i]);
+                esphome_entity_set_binary_sensor_missing(key);
+                s_stats.entities_removed++;
+            }
         }
-        /* Add more capabilities as needed */
+
+        /* Light entity — no set_light_missing API, force state to OFF */
+        if (dev->capabilities & DEV_CAP_BRIGHTNESS) {
+            esphome_entity_key_t key = esphome_adapter_make_entity_key(id, DEV_CAP_BRIGHTNESS);
+            esphome_light_state_t light_state = {0};
+            light_state.key = key;
+            light_state.state = false;
+            esphome_entity_update_light(key, &light_state);
+            s_stats.entities_removed++;
+            ESP_LOGD(TAG, "Light entity set to OFF for removed device");
+        }
+        /* Switch entity (only if no brightness — mirrors registration logic) */
+        else if (dev->capabilities & DEV_CAP_ON_OFF) {
+            esphome_entity_key_t key = esphome_adapter_make_entity_key(id, DEV_CAP_ON_OFF);
+            esphome_entity_update_switch(key, false);
+            s_stats.entities_removed++;
+            ESP_LOGD(TAG, "Switch entity set to OFF for removed device");
+        }
     }
 
     return ESP_OK;

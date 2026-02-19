@@ -1718,6 +1718,11 @@ esp_err_t esphome_encode_switch_list_entry(const esphome_switch_config_t *config
         esphome_encode_bool(&buf, 7, config->disabled_by_default);
     }
 
+    /* Field 10: device_id (sub-device grouping) */
+    if (config->device_id != 0) {
+        esphome_encode_uint32(&buf, 10, config->device_id);
+    }
+
     if (esphome_buffer_overflow(&buf)) {
         return ESPHOME_ERR_BUFFER_OVERFLOW;
     }
@@ -1815,6 +1820,11 @@ esp_err_t esphome_encode_number_list_entry(const esphome_number_config_t *config
         esphome_encode_uint32(&buf, 11, (uint32_t)config->mode);
     }
 
+    /* Field 14: device_id (sub-device grouping) */
+    if (config->device_id != 0) {
+        esphome_encode_uint32(&buf, 14, config->device_id);
+    }
+
     if (esphome_buffer_overflow(&buf)) {
         return ESPHOME_ERR_BUFFER_OVERFLOW;
     }
@@ -1903,6 +1913,11 @@ esp_err_t esphome_encode_select_list_entry(const esphome_select_config_t *config
     /* Field 7: disabled_by_default (bool) */
     if (config->disabled_by_default) {
         esphome_encode_bool(&buf, 7, config->disabled_by_default);
+    }
+
+    /* Field 9: device_id (sub-device grouping) */
+    if (config->device_id != 0) {
+        esphome_encode_uint32(&buf, 9, config->device_id);
     }
 
     if (esphome_buffer_overflow(&buf)) {
@@ -2029,6 +2044,11 @@ esp_err_t esphome_encode_light_list_entry(const esphome_light_config_t *config,
     /* Field 11: disabled_by_default (bool) */
     if (config->disabled_by_default) {
         esphome_encode_bool(&buf, 11, config->disabled_by_default);
+    }
+
+    /* Field 16: device_id (sub-device grouping) */
+    if (config->device_id != 0) {
+        esphome_encode_uint32(&buf, 16, config->device_id);
     }
 
     if (esphome_buffer_overflow(&buf)) {
@@ -2169,6 +2189,11 @@ esp_err_t esphome_encode_cover_list_entry(const esphome_cover_config_t *config,
         esphome_encode_bool(&buf, 10, config->supports_tilt);
     }
 
+    /* Field 13: device_id (sub-device grouping) */
+    if (config->device_id != 0) {
+        esphome_encode_uint32(&buf, 13, config->device_id);
+    }
+
     if (esphome_buffer_overflow(&buf)) {
         return ESPHOME_ERR_BUFFER_OVERFLOW;
     }
@@ -2271,6 +2296,11 @@ esp_err_t esphome_encode_fan_list_entry(const esphome_fan_config_t *config,
     /* Field 10: disabled_by_default (bool) */
     if (config->disabled_by_default) {
         esphome_encode_bool(&buf, 10, config->disabled_by_default);
+    }
+
+    /* Field 13: device_id (sub-device grouping) */
+    if (config->device_id != 0) {
+        esphome_encode_uint32(&buf, 13, config->device_id);
     }
 
     if (esphome_buffer_overflow(&buf)) {
@@ -2418,6 +2448,11 @@ esp_err_t esphome_encode_climate_list_entry(const esphome_climate_config_t *conf
     /* Field 17: icon (string) */
     if (config->icon[0] != '\0') {
         esphome_encode_string(&buf, 17, config->icon);
+    }
+
+    /* Field 26: device_id (sub-device grouping) */
+    if (config->device_id != 0) {
+        esphome_encode_uint32(&buf, 26, config->device_id);
     }
 
     if (esphome_buffer_overflow(&buf)) {

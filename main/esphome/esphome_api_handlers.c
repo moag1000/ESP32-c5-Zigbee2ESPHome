@@ -17,6 +17,7 @@
 #include "core/memory/memory_manager_ng.h"
 #include "core/events/event_bus.h"
 #include "core/events/event_data.h"
+#include "core/device/device_registry.h"
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -552,6 +553,44 @@ esp_err_t esphome_api_handle_ping_response(esphome_client_t *client)
 }
 
 /**
+ * @brief Context for sub-device encoding callback
+ */
+typedef struct {
+    esphome_buffer_t *buf;
+} device_info_ctx_t;
+
+/**
+ * @brief Callback to encode each Zigbee device as a DeviceInfo sub-message
+ *
+ * Encodes a DeviceInfo sub-message (field 20) for each Zigbee device in the registry.
+ * DeviceInfo proto: device_id (field 1, uint32), name (field 2, string).
+ */
+static bool encode_sub_device_cb(device_t *dev, void *ctx)
+{
+    device_info_ctx_t *di_ctx = (device_info_ctx_t *)ctx;
+    if (dev->protocol != DEV_PROTOCOL_ZIGBEE) {
+        return true; /* Skip non-Zigbee devices */
+    }
+
+    /* Build DeviceInfo sub-message in temp buffer */
+    uint8_t sub_msg[128];
+    esphome_buffer_t sub_buf;
+    esphome_buffer_init(&sub_buf, sub_msg, sizeof(sub_msg));
+
+    uint32_t device_id = (uint32_t)(dev->id & 0xFFFFFFFF);
+    esphome_encode_uint32(&sub_buf, 1, device_id);  /* DeviceInfo.device_id */
+    esphome_encode_string(&sub_buf, 2,
+                          dev->friendly_name[0] ? dev->friendly_name : "Unknown");  /* DeviceInfo.name */
+
+    if (!esphome_buffer_overflow(&sub_buf)) {
+        /* Encode as length-delimited field 20 in parent message */
+        esphome_encode_bytes(di_ctx->buf, 20, sub_msg, sub_buf.position);
+    }
+
+    return true; /* Continue iteration */
+}
+
+/**
  * @brief Handle DeviceInfoRequest message
  */
 static esp_err_t handle_device_info_request(esphome_client_t *client, const esphome_message_t *msg)
@@ -562,9 +601,10 @@ static esp_err_t handle_device_info_request(esphome_client_t *client, const esph
 
     esp_err_t ret = ESP_OK;
 
-    /* Allocate buffers on heap to reduce stack usage */
-    uint8_t *payload = mem_alloc(ESPHOME_BUFFER_MEDIUM, MEM_CAP_PSRAM);
-    uint8_t *output = mem_alloc(ESPHOME_BUFFER_LARGE, MEM_CAP_PSRAM);
+    /* Allocate buffers on heap to reduce stack usage.
+     * Use LARGE payload for sub-device encoding, XLARGE output for framing. */
+    uint8_t *payload = mem_alloc(ESPHOME_BUFFER_LARGE, MEM_CAP_PSRAM);
+    uint8_t *output = mem_alloc(ESPHOME_BUFFER_XLARGE, MEM_CAP_PSRAM);
     if (payload == NULL || output == NULL) {
         ESP_LOGE(TAG, "Failed to allocate device info buffers");
         mem_ng_free(payload);
@@ -573,7 +613,7 @@ static esp_err_t handle_device_info_request(esphome_client_t *client, const esph
     }
 
     esphome_buffer_t buf;
-    esphome_buffer_init(&buf, payload, ESPHOME_BUFFER_MEDIUM);
+    esphome_buffer_init(&buf, payload, ESPHOME_BUFFER_LARGE);
 
     /* Field 1: uses_password */
     esphome_encode_bool(&buf, 1, state->config.password[0] != '\0');
@@ -590,8 +630,9 @@ static esp_err_t handle_device_info_request(esphome_client_t *client, const esph
     }
     esphome_encode_string(&buf, 3, mac);
 
-    /* Field 4: esphome_version - must look like a real ESPHome version for HA compatibility */
-    esphome_encode_string(&buf, 4, "2024.12.0");
+    /* Field 4: esphome_version - must look like a real ESPHome version for HA compatibility.
+     * 2025.7.0+ required for sub-device features in ESPHome protocol. */
+    esphome_encode_string(&buf, 4, "2025.7.0");
 
     /* Field 5: compilation_time */
     esphome_encode_string(&buf, 5, ESPHOME_COMPILATION_TIME);
@@ -642,11 +683,17 @@ static esp_err_t handle_device_info_request(esphome_client_t *client, const esph
         esphome_encode_string(&buf, 18, ble_mac);
     }
 
+    /* Field 20: repeated DeviceInfo (Zigbee sub-devices) */
+    {
+        device_info_ctx_t di_ctx = { .buf = &buf };
+        device_registry_iterate_zigbee(encode_sub_device_cb, &di_ctx);
+    }
+
     /* Build and send message */
     size_t output_len;
 
     ret = esphome_build_message(ESPHOME_MSG_DEVICE_INFO_RESPONSE, payload, buf.position,
-                                output, ESPHOME_BUFFER_LARGE, &output_len);
+                                output, ESPHOME_BUFFER_XLARGE, &output_len);
     if (ret == ESP_OK) {
         ret = esphome_api_send_message(client, output, output_len);
     }

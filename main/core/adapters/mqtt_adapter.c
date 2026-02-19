@@ -278,6 +278,11 @@ static void handle_device_state_changed(event_type_t type, void *data, size_t da
     (void)type;
     (void)ctx;
 
+#ifdef CONFIG_ESPHOME_PRIMARY_INTEGRATION
+    /* State updates handled by ESPHome adapter, skip MQTT */
+    return;
+#endif
+
     /* Validate event data - must match evt_device_state_t structure */
     /* Note: ESPHome uses a different structure for state events, ignore those */
     if (!data || data_size != sizeof(evt_device_state_t)) {

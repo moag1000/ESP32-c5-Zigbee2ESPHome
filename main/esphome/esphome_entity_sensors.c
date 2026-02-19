@@ -739,6 +739,11 @@ esp_err_t esphome_encode_sensor_list_entry(const esphome_sensor_config_t *config
         esphome_encode_uint32(&buf, 13, (uint32_t)config->entity_category);
     }
 
+    /* Field 14: device_id (sub-device grouping) */
+    if (config->device_id != 0) {
+        esphome_encode_uint32(&buf, 14, config->device_id);
+    }
+
     if (esphome_buffer_overflow(&buf)) {
         return ESPHOME_ERR_BUFFER_OVERFLOW;
     }
@@ -829,6 +834,11 @@ esp_err_t esphome_encode_binary_sensor_list_entry(const esphome_binary_sensor_co
         esphome_encode_bool(&buf, 8, config->disabled_by_default);
     }
 
+    /* Field 10: device_id (sub-device grouping) */
+    if (config->device_id != 0) {
+        esphome_encode_uint32(&buf, 10, config->device_id);
+    }
+
     if (esphome_buffer_overflow(&buf)) {
         return ESPHOME_ERR_BUFFER_OVERFLOW;
     }
@@ -910,6 +920,11 @@ esp_err_t esphome_encode_text_sensor_list_entry(const esphome_text_sensor_config
     /* Field 6: disabled_by_default (bool) */
     if (config->disabled_by_default) {
         esphome_encode_bool(&buf, 6, config->disabled_by_default);
+    }
+
+    /* Field 9: device_id (sub-device grouping) */
+    if (config->device_id != 0) {
+        esphome_encode_uint32(&buf, 9, config->device_id);
     }
 
     if (esphome_buffer_overflow(&buf)) {

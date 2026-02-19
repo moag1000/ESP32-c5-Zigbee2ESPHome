@@ -1102,6 +1102,11 @@ esp_err_t esphome_encode_button_list_entry(const esphome_button_config_t *config
         esphome_encode_uint32(&buf, 7, (uint32_t)config->device_class);
     }
 
+    /* Field 9: device_id (sub-device grouping) */
+    if (config->device_id != 0) {
+        esphome_encode_uint32(&buf, 9, config->device_id);
+    }
+
     if (esphome_buffer_overflow(&buf)) {
         return ESPHOME_ERR_BUFFER_OVERFLOW;
     }
@@ -1161,6 +1166,11 @@ esp_err_t esphome_encode_lock_list_entry(const esphome_lock_config_t *config,
     /* Field 9: requires_code (bool) */
     if (config->requires_code) {
         esphome_encode_bool(&buf, 9, config->requires_code);
+    }
+
+    /* Field 12: device_id (sub-device grouping) */
+    if (config->device_id != 0) {
+        esphome_encode_uint32(&buf, 12, config->device_id);
     }
 
     if (esphome_buffer_overflow(&buf)) {
@@ -1249,6 +1259,11 @@ esp_err_t esphome_encode_text_list_entry(const esphome_text_config_t *config,
     /* Field 10: mode (enum) */
     esphome_encode_uint32(&buf, 10, (uint32_t)config->mode);
 
+    /* Field 12: device_id (sub-device grouping) */
+    if (config->device_id != 0) {
+        esphome_encode_uint32(&buf, 12, config->device_id);
+    }
+
     if (esphome_buffer_overflow(&buf)) {
         return ESPHOME_ERR_BUFFER_OVERFLOW;
     }
@@ -1329,6 +1344,11 @@ esp_err_t esphome_encode_media_player_list_entry(const esphome_media_player_conf
     /* Field 7: supports_pause (bool) */
     if (config->supports_pause) {
         esphome_encode_bool(&buf, 7, config->supports_pause);
+    }
+
+    /* Field 10: device_id (sub-device grouping) */
+    if (config->device_id != 0) {
+        esphome_encode_uint32(&buf, 10, config->device_id);
     }
 
     if (esphome_buffer_overflow(&buf)) {
@@ -1422,6 +1442,11 @@ esp_err_t esphome_encode_alarm_list_entry(const esphome_alarm_config_t *config,
     /* Field 9: requires_code_to_arm (bool) */
     if (config->requires_code_to_arm) {
         esphome_encode_bool(&buf, 9, config->requires_code_to_arm);
+    }
+
+    /* Field 11: device_id (sub-device grouping) */
+    if (config->device_id != 0) {
+        esphome_encode_uint32(&buf, 11, config->device_id);
     }
 
     if (esphome_buffer_overflow(&buf)) {
