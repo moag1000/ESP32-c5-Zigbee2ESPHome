@@ -1,0 +1,60 @@
+# ESP-IDF Build Artifacts
+build/
+sdkconfig
+sdkconfig.old
+
+# Managed Components (downloaded by ESP-IDF)
+managed_components/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+
+# IDE and Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.cproject
+.settings/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Linux
+*~
+.fuse_hidden*
+.Trash-*
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+
+# Compilation artifacts
+*.o
+*.obj
+*.elf
+*.bin
+*.map
+
+# Credentials and secrets (never commit!)
+secrets.h
+credentials.h
+*.pem
+*.key
+
+# Local configuration overrides
+sdkconfig.local
+local_config.h
+.cache/

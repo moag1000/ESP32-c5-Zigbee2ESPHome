@@ -1,0 +1,1031 @@
+menu "ESP32-C5 Zigbee2MQTT Gateway Configuration"
+
+    menu "WiFi Configuration"
+        config WIFI_SSID
+            string "WiFi SSID"
+            default "myssid"
+            help
+                SSID (network name) for the gateway to connect to.
+
+        config WIFI_PASSWORD
+            string "WiFi Password"
+            default "mypassword"
+            help
+                WiFi password (WPA or WPA2) for the gateway to connect to.
+
+        config WIFI_MAXIMUM_RETRY
+            int "Maximum WiFi Retry"
+            default 5
+            help
+                Maximum number of retries for WiFi connection before giving up.
+
+        config WIFI_SCAN_METHOD
+            int "WiFi Scan Method"
+            default 0
+            help
+                WiFi scan method: 0=FAST, 1=ALL_CHANNEL.
+
+        config WIFI_PREFER_5GHZ
+            bool "Prefer 5GHz Band"
+            default y
+            help
+                When enabled, prefer 5GHz WiFi networks over 2.4GHz networks
+                to minimize interference with Zigbee (which operates on 2.4GHz).
+                This uses RSSI adjustment to give 5GHz APs priority when both
+                bands have similar signal strength.
+
+                Requires a dual-band WiFi router with the same SSID on both bands.
+
+        config WIFI_5GHZ_RSSI_ADJUSTMENT
+            int "5GHz RSSI Adjustment (dB)"
+            depends on WIFI_PREFER_5GHZ
+            default 10
+            range 0 30
+            help
+                RSSI adjustment value in dB for 5GHz preference.
+                A 5GHz AP will be preferred if its RSSI is within this value
+                compared to a 2.4GHz AP with the same SSID.
+
+                Example: With adjustment=10, a 5GHz AP at -60dBm will be
+                preferred over a 2.4GHz AP at -50dBm (10dB stronger).
+
+                Higher values = stronger 5GHz preference.
+                Default: 10 (moderate preference for 5GHz)
+
+        config WIFI_AUTO_BAND_SWITCH
+            bool "Enable automatic band switching"
+            default y
+            help
+                Automatically switch between 2.4GHz and 5GHz bands based on signal quality.
+
+                When enabled, the WiFi manager monitors RSSI every 10 seconds. If the signal
+                drops below -75 dBm for 3 consecutive readings (30 seconds of poor signal),
+                it will automatically switch to the alternate band.
+
+                A 5-minute cooldown period prevents rapid band switching.
+
+                This helps maintain reliable connectivity when one band has poor coverage
+                while the other is stronger.
+
+        config WIFI_5GHZ_ONLY
+            bool "Force 5GHz-only mode"
+            depends on WIFI_PREFER_5GHZ
+            default n
+            help
+                Force WiFi to connect only on 5GHz band, ignoring 2.4GHz networks.
+
+                This completely eliminates 2.4GHz WiFi interference with Zigbee and
+                Bluetooth, providing the most stable tri-radio operation.
+
+                IMPORTANT: Only enable if your router has strong 5GHz coverage.
+                The device will NOT connect if 5GHz is unavailable.
+
+                When disabled but WIFI_PREFER_5GHZ is enabled, the device will
+                prefer 5GHz but fall back to 2.4GHz if needed.
+
+        config WIFI_DISABLE_PMF
+            bool "Disable Protected Management Frames (PMF)"
+            default y
+            help
+                Disable Protected Management Frames (802.11w) to prevent SA Query
+                timeout issues with tri-radio coexistence.
+
+                PMF/WPA3 requires fast response to SA Query frames (~100-200ms).
+                On ESP32-C5 with Zigbee/BLE active, the WiFi radio may not get
+                enough time to respond, causing SA Query timeout (reason 209).
+
+                SECURITY NOTE: Disabling PMF makes the connection vulnerable to
+                deauthentication attacks. Only disable if you experience WiFi
+                disconnections with reason code 209.
+
+                Recommended: Enable (y) for tri-radio stability
+                             Disable (n) if you need PMF security
+
+        menu "Captive Portal"
+            config WIFI_CAPTIVE_PORTAL_ENABLE
+                bool "Enable WiFi captive portal"
+                default y
+                help
+                    Start a captive portal (open AP + web page) when WiFi
+                    connection fails at boot. Allows configuring WiFi
+                    credentials via a phone or laptop browser.
+
+                    The portal stops BLE and ESPHome to free memory,
+                    starts an open AP "ESP32-C5-Setup-XXXX", and serves
+                    a configuration page at 192.168.4.1.
+
+            config WIFI_CAPTIVE_PORTAL_TIMEOUT_SEC
+                int "Captive portal timeout (seconds)"
+                depends on WIFI_CAPTIVE_PORTAL_ENABLE
+                default 300
+                range 60 3600
+                help
+                    Maximum time the captive portal stays active before
+                    the device reboots. Default: 300 (5 minutes).
+
+        endmenu
+
+        # Note: mDNS hostname is now derived from CONFIG_ESPHOME_DEVICE_NAME.
+        # This option is deprecated but kept for backward compatibility.
+        config GATEWAY_MDNS_HOSTNAME
+            string "mDNS Hostname (deprecated - use ESPHome Device Name)"
+            default "zigbee-gateway"
+            help
+                DEPRECATED: The mDNS hostname is now automatically derived from
+                CONFIG_ESPHOME_DEVICE_NAME in the ESPHome Native API Configuration menu.
+
+                This option is only used as a fallback if ESPHOME_DEVICE_NAME is not set.
+
+                Hostname for mDNS discovery (without .local suffix).
+                The gateway will be discoverable as <hostname>.local on the network.
+
+                Example: With hostname "zigbee-gateway", the device is reachable
+                at zigbee-gateway.local
+
+                Default: zigbee-gateway
+    endmenu
+
+    menu "MQTT Configuration"
+        config MQTT_BROKER_URL
+            string "MQTT Broker URL"
+            default "mqtt://mqtt.example.com"
+            help
+                URL of the MQTT broker. Can be mqtt://, mqtts://, ws://, or wss://.
+
+        config MQTT_BROKER_PORT
+            int "MQTT Broker Port"
+            default 1883
+            help
+                Port of the MQTT broker. Default: 1883 (MQTT), 8883 (MQTTS).
+
+        config MQTT_USERNAME
+            string "MQTT Username"
+            default ""
+            help
+                Username for MQTT broker authentication. Leave empty if not required.
+
+        config MQTT_PASSWORD
+            string "MQTT Password"
+            default ""
+            help
+                Password for MQTT broker authentication. Leave empty if not required.
+
+        config MQTT_CLIENT_ID
+            string "MQTT Client ID"
+            default "esp32c5_zigbee_gateway"
+            help
+                Client ID for MQTT connection. Must be unique per broker.
+
+        config MQTT_BASE_TOPIC
+            string "MQTT Base Topic"
+            default "zigbee2mqtt"
+            help
+                Base topic for all MQTT messages (e.g., zigbee2mqtt/).
+
+        config MQTT_KEEPALIVE
+            int "MQTT Keep Alive (seconds)"
+            default 60
+            help
+                MQTT keep alive interval in seconds.
+                Lower values detect dead connections faster.
+                Broker disconnects at 1.5x this value without ping.
+
+        config MQTT_QOS
+            int "MQTT QoS Level"
+            default 1
+            range 0 2
+            help
+                MQTT Quality of Service level: 0=At most once, 1=At least once, 2=Exactly once.
+    endmenu
+
+    menu "Zigbee Configuration"
+        choice ZIGBEE_DEVICE_TYPE
+            prompt "Zigbee Device Type"
+            default ZIGBEE_DEVICE_TYPE_COORDINATOR
+            help
+                Select the Zigbee device type for this gateway.
+                - Coordinator: Forms and manages its own Zigbee network
+                - Router: Joins an existing Zigbee network as a mesh extender
+
+            config ZIGBEE_DEVICE_TYPE_COORDINATOR
+                bool "Coordinator (forms network)"
+                help
+                    The device will act as a Zigbee Coordinator, forming
+                    its own Zigbee network. Use this for primary gateways.
+
+            config ZIGBEE_DEVICE_TYPE_ROUTER
+                bool "Router (joins existing network)"
+                help
+                    The device will act as a Zigbee Router, joining an
+                    existing Zigbee network. Use this to extend mesh coverage
+                    or bridge to MQTT from a secondary location.
+        endchoice
+
+        config ZIGBEE_PAN_ID
+            hex "Zigbee PAN ID"
+            default 0x1A62
+            help
+                Zigbee Personal Area Network ID. Use 0xFFFF for auto-selection.
+
+        config ZIGBEE_CHANNEL
+            int "Zigbee Channel"
+            default 11
+            range 11 26
+            help
+                Zigbee radio channel (11-26). Avoid WiFi interference.
+
+        config ZIGBEE_MAX_CHILDREN
+            int "Maximum Zigbee Children"
+            default 20
+            range 1 100
+            help
+                Maximum number of Zigbee devices that can join the network.
+
+        config ZIGBEE_PERMIT_JOIN_DURATION
+            int "Permit Join Duration (seconds)"
+            default 180
+            range 0 254
+            help
+                Duration for which the network allows new devices to join. 0=disabled, 255=forever.
+
+        config ZIGBEE_NETWORK_KEY_ENABLED
+            bool "Use Custom Network Key"
+            default n
+            help
+                Enable custom Zigbee network encryption key. If disabled, a random key is generated.
+
+        config ZIGBEE_NETWORK_KEY
+            string "Zigbee Network Key (16 bytes hex)"
+            depends on ZIGBEE_NETWORK_KEY_ENABLED
+            default "00112233445566778899AABBCCDDEEFF"
+            help
+                Custom 128-bit Zigbee network encryption key in hex format.
+
+        menu "Router Mode Configuration"
+            depends on ZIGBEE_DEVICE_TYPE_ROUTER
+
+            config ZIGBEE_ROUTER_AUTO_JOIN
+                bool "Auto-join available network"
+                default y
+                help
+                    Automatically join the first available Zigbee network
+                    that permits joining. If disabled, joining must be
+                    triggered manually via MQTT command.
+
+            config ZIGBEE_ROUTER_PREFERRED_PARENT
+                hex "Preferred Parent Address"
+                default 0xFFFF
+                help
+                    Preferred parent short address when joining network.
+                    Use 0xFFFF for automatic parent selection.
+                    Set to 0x0000 to prefer joining directly to coordinator.
+
+            config ZIGBEE_ROUTER_SCAN_DURATION
+                int "Network Scan Duration (ms)"
+                default 3000
+                range 1000 10000
+                help
+                    Duration in milliseconds for scanning each channel
+                    when searching for available networks.
+
+            config ZIGBEE_ROUTER_REJOIN_INTERVAL
+                int "Rejoin Attempt Interval (ms)"
+                default 5000
+                range 1000 60000
+                help
+                    Interval in milliseconds between rejoin attempts
+                    when connection to the network is lost.
+
+            config ZIGBEE_ROUTER_MAX_REJOIN_ATTEMPTS
+                int "Maximum Rejoin Attempts"
+                default 0
+                range 0 255
+                help
+                    Maximum number of rejoin attempts before giving up.
+                    Set to 0 for infinite attempts.
+
+            config ZIGBEE_ROUTER_FRIENDLY_NAME
+                string "Router Friendly Name"
+                default "ESP32-C5 Router"
+                help
+                    Friendly name for this router device, used in MQTT
+                    status messages and Home Assistant discovery.
+
+            config ZIGBEE_ROUTER_PUBLISH_INTERVAL
+                int "Status Publish Interval (seconds)"
+                default 60
+                range 10 300
+                help
+                    Interval for publishing router status to MQTT topics.
+                    Includes state, parent info, and neighbor table.
+
+        endmenu
+
+        menu "Device Availability Checking"
+            config ZB_AVAILABILITY_CHECK_ENABLED
+                bool "Enable active availability checking"
+                default y
+                help
+                    Enable active availability checking for router (mains-powered) devices.
+                    Router devices are periodically pinged via ZCL Basic cluster read.
+                    Battery devices are tracked passively via last_seen timeout.
+
+                    When enabled, the gateway sends periodic ZCL Read Attribute requests
+                    to router devices to verify they are still responding.
+
+            config ZB_AVAILABILITY_ROUTER_INTERVAL
+                int "Router check interval (seconds)"
+                depends on ZB_AVAILABILITY_CHECK_ENABLED
+                default 300
+                range 60 3600
+                help
+                    Interval in seconds between active availability checks for
+                    router (mains-powered) devices.
+
+                    Lower values detect offline devices faster but increase
+                    Zigbee network traffic.
+
+                    Default: 300 seconds (5 minutes)
+                    Range: 60-3600 seconds
+
+            config ZB_AVAILABILITY_ROUTER_TIMEOUT
+                int "Router offline timeout (seconds)"
+                depends on ZB_AVAILABILITY_CHECK_ENABLED
+                default 900
+                range 60 3600
+                help
+                    Time in seconds after the last successful ping before a
+                    router device is marked as offline.
+
+                    Should be at least 2-3x the check interval to allow for
+                    occasional missed responses.
+
+                    Default: 900 seconds (15 minutes)
+                    Range: 60-3600 seconds
+
+            config ZB_AVAILABILITY_BATTERY_TIMEOUT
+                int "Battery device timeout (seconds)"
+                default 86400
+                range 3600 604800
+                help
+                    Time in seconds after the last received message before a
+                    battery-powered (end device) is marked as offline.
+
+                    Battery devices are not actively pinged (to preserve battery).
+                    They are tracked passively based on their last activity.
+
+                    Should be set based on the expected reporting interval
+                    of your battery devices.
+
+                    Default: 86400 seconds (24 hours)
+                    Range: 3600-604800 seconds (1 hour to 7 days)
+
+            config ZB_AVAILABILITY_MAX_FAILURES
+                int "Maximum ping failures before offline"
+                depends on ZB_AVAILABILITY_CHECK_ENABLED
+                default 3
+                range 1 10
+                help
+                    Number of consecutive failed ping attempts before marking
+                    a router device as offline.
+
+                    Higher values are more tolerant of temporary network issues
+                    but delay offline detection.
+
+                    Default: 3
+                    Range: 1-10
+
+        endmenu
+    endmenu
+
+    menu "Gateway Configuration"
+        config MAX_ZIGBEE_DEVICES
+            int "Maximum Zigbee Devices"
+            default 50
+            range 1 200
+            help
+                Maximum number of Zigbee devices the gateway can manage.
+
+        config DEVICE_DISCOVERY_INTERVAL
+            int "Device Discovery Interval (seconds)"
+            default 60
+            range 10 3600
+            help
+                Interval for periodic device discovery and health checks.
+
+        config MQTT_PUBLISH_INTERVAL
+            int "MQTT Publish Interval (milliseconds)"
+            default 1000
+            range 100 10000
+            help
+                Minimum interval between MQTT publish operations to avoid flooding.
+
+        config ENABLE_HOMEASSISTANT_DISCOVERY
+            bool "Enable Home Assistant Discovery"
+            default y
+            help
+                Enable automatic device discovery for Home Assistant via MQTT.
+
+        config HOMEASSISTANT_DISCOVERY_PREFIX
+            string "Home Assistant Discovery Prefix"
+            depends on ENABLE_HOMEASSISTANT_DISCOVERY
+            default "homeassistant"
+            help
+                MQTT topic prefix for Home Assistant discovery messages.
+
+        config BRIDGE_AUTO_PUBLISH_DEVICE_LIST
+            bool "Auto Publish Device List"
+            default y
+            help
+                Automatically publish device list when devices join/leave.
+
+        config BRIDGE_PUBLISH_INTERVAL
+            int "Bridge Info Publish Interval (seconds)"
+            default 300
+            range 60 3600
+            help
+                Interval for publishing bridge info and statistics.
+
+        config ENABLE_BRIDGE_LOGGING_TO_MQTT
+            bool "Enable Bridge Logging to MQTT"
+            default n
+            help
+                Redirect ESP logs to MQTT bridge/logging topic. Warning: increases MQTT traffic.
+    endmenu
+
+    menu "Debug and Logging"
+        config ENABLE_VERBOSE_LOGGING
+            bool "Enable Verbose Logging"
+            default n
+            help
+                Enable verbose debug logging for all modules. Warning: increases code size.
+
+        config LOG_MEMORY_STATISTICS
+            bool "Log Memory Statistics"
+            default y
+            help
+                Periodically log heap memory statistics for debugging.
+
+        config MEMORY_LOG_INTERVAL
+            int "Memory Log Interval (seconds)"
+            depends on LOG_MEMORY_STATISTICS
+            default 30
+            range 10 300
+            help
+                Interval for logging memory statistics.
+
+        config ENABLE_TASK_STATISTICS
+            bool "Enable Task Statistics"
+            default n
+            help
+                Enable FreeRTOS task statistics logging. Warning: slight performance impact.
+    endmenu
+
+    menu "Bluetooth Configuration"
+        config BT_SCANNER_ENABLED
+            bool "Enable BLE Scanner"
+            default y
+            help
+                Enable Bluetooth Low Energy passive scanner for detecting
+                BLE devices and their advertisements.
+
+        config BT_SCAN_INTERVAL
+            int "BLE Scan Interval (milliseconds)"
+            depends on BT_SCANNER_ENABLED
+            default 1000
+            range 100 10000
+            help
+                Interval between BLE scan cycles in milliseconds.
+                Lower values increase detection speed but use more power.
+                Range: 100-10000ms, default: 1000ms.
+
+        config BT_MAX_TRACKED_DEVICES
+            int "Maximum Tracked BLE Devices"
+            depends on BT_SCANNER_ENABLED
+            default 500
+            range 10 2000
+            help
+                Maximum number of BLE devices to track simultaneously.
+                Each device uses ~164 bytes (scanner + registry) in PSRAM.
+                At 2000 devices: ~328KB total, well within 8MB PSRAM.
+                Default: 500.
+
+        config BT_DEVICE_STALE_TIMEOUT
+            int "Device Stale Timeout (seconds)"
+            depends on BT_SCANNER_ENABLED
+            default 300
+            range 60 3600
+            help
+                Time in seconds after which a device is considered stale
+                and removed from tracking. Default: 300 (5 minutes).
+
+        config BT_ZIGBEE_COEXIST
+            bool "Enable Zigbee Coexistence Mode"
+            depends on BT_SCANNER_ENABLED
+            default y
+            help
+                Enable coexistence mode to reduce BLE scanning during
+                Zigbee network activity. Recommended when using both
+                Zigbee and BLE simultaneously.
+
+        config BT_AUTO_START_SCANNER
+            bool "Auto-start BLE Scanner"
+            depends on BT_SCANNER_ENABLED
+            default y
+            help
+                Automatically start BLE scanning when the BLE manager
+                is initialized. If disabled, scanning must be started
+                manually via ble_scanner_start().
+
+        config BT_ACTIVE_SCAN_ENABLED
+            bool "Enable Active Scanning"
+            depends on BT_SCANNER_ENABLED
+            default n
+            help
+                Enable active scanning mode. Active scanning sends scan request
+                packets to BLE devices to obtain scan response data, providing
+                more complete device information (e.g., device name, TX power).
+
+                WARNING: Active scanning increases radio usage and may cause
+                more interference with Zigbee. Only enable if needed.
+
+        menu "BLE 5.0 Extended Features"
+            depends on BT_SCANNER_ENABLED
+
+            config BT_EXTENDED_ADV_ENABLED
+                bool "Enable BLE 5.0 Extended Advertising"
+                default y
+                help
+                    Enable BLE 5.0 Extended Advertising support.
+                    This allows receiving larger advertisement payloads (up to 255 bytes)
+                    and using advanced PHY options. Falls back to legacy if not supported.
+
+            config BT_2M_PHY_ENABLED
+                bool "Enable 2M PHY"
+                depends on BT_EXTENDED_ADV_ENABLED
+                default y
+                help
+                    Enable BLE 5.0 2M PHY for higher throughput scanning.
+                    Provides 2x the data rate of 1M PHY but requires BLE 5.0 devices.
+
+            config BT_CODED_PHY_ENABLED
+                bool "Enable Coded PHY (Long Range)"
+                depends on BT_EXTENDED_ADV_ENABLED
+                default n
+                help
+                    Enable BLE 5.0 Coded PHY for long range scanning.
+                    Provides 2-4x the range of 1M PHY but at lower data rate.
+                    Useful for outdoor or large building deployments.
+                    Note: Uses more power and may impact Zigbee coexistence.
+
+        endmenu
+
+        menu "BLE Security and Bonding"
+            depends on BT_SCANNER_ENABLED
+
+            config BLE_SECURITY_ENABLED
+                bool "Enable BLE Security Module"
+                default y
+                help
+                    Enable BLE security features including pairing, bonding,
+                    and encryption. Required for secure BLE connections.
+
+            config BLE_MAX_BONDS
+                int "Maximum Bonded Devices"
+                depends on BLE_SECURITY_ENABLED
+                default 15
+                range 5 20
+                help
+                    Maximum number of bonded BLE devices that can be stored
+                    in NVS. Each bond uses approximately 100 bytes of NVS.
+                    Range: 5-20, default: 15.
+
+            choice BLE_DEFAULT_PAIRING_MODE
+                prompt "Default Pairing Mode"
+                depends on BLE_SECURITY_ENABLED
+                default BLE_PAIRING_JUST_WORKS
+                help
+                    Select the default pairing mode for new connections.
+
+                config BLE_PAIRING_JUST_WORKS
+                    bool "Just Works (No PIN)"
+                    help
+                        Simple pairing without user interaction.
+                        Provides encryption but no MITM protection.
+
+                config BLE_PAIRING_PASSKEY
+                    bool "Passkey Entry (6-digit PIN)"
+                    help
+                        Pairing with 6-digit PIN for MITM protection.
+                        Requires user to enter or verify PIN.
+
+                config BLE_PAIRING_NUMERIC_COMPARISON
+                    bool "Numeric Comparison (BLE 4.2+)"
+                    help
+                        Display 6-digit number on both devices for comparison.
+                        Provides MITM protection with user confirmation.
+            endchoice
+
+            config BLE_STATIC_PASSKEY
+                int "Static Passkey (0 for random)"
+                depends on BLE_SECURITY_ENABLED && BLE_PAIRING_PASSKEY
+                default 0
+                range 0 999999
+                help
+                    Static 6-digit passkey to use for pairing.
+                    Set to 0 to generate random passkey each time.
+                    Range: 0-999999.
+
+            config BLE_REQUIRE_BONDING
+                bool "Require Bonding"
+                depends on BLE_SECURITY_ENABLED
+                default y
+                help
+                    Require bonding (key storage) for pairing.
+                    If disabled, only pairing is performed without storing keys.
+
+            config BLE_REQUIRE_MITM
+                bool "Require MITM Protection"
+                depends on BLE_SECURITY_ENABLED
+                default n
+                help
+                    Require Man-in-the-Middle protection for pairing.
+                    Forces use of Passkey or Numeric Comparison modes.
+
+            config BLE_REQUIRE_SECURE_CONNECTIONS
+                bool "Require LE Secure Connections (LESC)"
+                depends on BLE_SECURITY_ENABLED
+                default n
+                help
+                    Require BLE 4.2+ LE Secure Connections for pairing.
+                    Provides stronger encryption using ECDH key exchange.
+                    May not be compatible with older BLE devices.
+
+            config BLE_AUTO_ACCEPT_PAIRING
+                bool "Auto-accept Pairing Requests"
+                depends on BLE_SECURITY_ENABLED
+                default y
+                help
+                    Automatically accept incoming pairing requests.
+                    If disabled, pairing requests require application approval.
+
+        endmenu
+    endmenu
+
+    menu "LED Controller Configuration"
+        config GW_LED_ENABLED
+            bool "Enable Status LED"
+            default y
+            help
+                Enable the onboard WS2812/NeoPixel RGB LED for status indication.
+                The LED shows system state (booting, WiFi, errors) and can be
+                controlled via ESPHome/MQTT.
+
+        config GW_LED_GPIO
+            int "LED GPIO Pin"
+            depends on GW_LED_ENABLED
+            default 8
+            range 0 48
+            help
+                GPIO pin connected to the WS2812/NeoPixel data line.
+                Common pins: GPIO8 (ESP32-C5 DevKit), GPIO27 (custom boards).
+
+        choice GW_LED_BACKEND
+            prompt "LED Driver Backend"
+            depends on GW_LED_ENABLED
+            default GW_LED_BACKEND_RMT
+            help
+                Select the LED strip driver backend.
+
+            config GW_LED_BACKEND_RMT
+                bool "RMT (Remote Control)"
+                help
+                    Use RMT peripheral for LED timing. Recommended for most cases.
+                    Lower CPU usage, hardware-timed signal generation.
+
+            config GW_LED_BACKEND_SPI
+                bool "SPI"
+                help
+                    Use SPI peripheral for LED timing. Alternative if RMT
+                    channels are exhausted or for very long LED strips.
+        endchoice
+
+        config GW_LED_SPI_HOST
+            int "SPI Host Number"
+            depends on GW_LED_ENABLED && GW_LED_BACKEND_SPI
+            default 1
+            range 0 2
+            help
+                SPI host number (0=SPI1, 1=SPI2, 2=SPI3).
+                SPI2 (HSPI) is commonly used.
+
+        config GW_LED_BRIGHTNESS
+            int "Default Brightness (0-255)"
+            depends on GW_LED_ENABLED
+            default 32
+            range 1 255
+            help
+                Default LED brightness level. Lower values save power and
+                reduce glare. Can be changed at runtime.
+
+        config GW_LED_STATUS_EFFECTS
+            bool "Enable Status Effects"
+            depends on GW_LED_ENABLED
+            default y
+            help
+                Enable automatic LED status effects:
+                - Boot: Breathing blue
+                - WiFi connecting: Blinking orange
+                - WiFi connected: Brief green flash
+                - Normal: Solid green (dim)
+                - Pairing: Breathing cyan
+                - Error: Fast blinking red
+                - OTA: Breathing purple
+
+    endmenu
+
+    menu "OTA Update Configuration"
+        config OTA_FIRMWARE_URL
+            string "OTA Firmware Update URL"
+            default ""
+            help
+                URL for OTA firmware updates. Leave empty to disable OTA.
+
+        config OTA_CHECK_INTERVAL
+            int "OTA Check Interval (hours)"
+            default 24
+            range 1 168
+            help
+                Interval for checking for firmware updates.
+
+        config OTA_SKIP_VERSION_CHECK
+            bool "Skip OTA Version Check"
+            default n
+            help
+                Skip version check and force update. Use with caution.
+    endmenu
+
+    menu "ESPHome Native API Configuration"
+        config ESPHOME_API_ENABLE
+            bool "Enable ESPHome Native API"
+            default y
+            help
+                Enable ESPHome Native API server for Home Assistant integration.
+                This provides direct device communication without MQTT.
+
+        config ESPHOME_API_PORT
+            int "ESPHome API Port"
+            depends on ESPHOME_API_ENABLE
+            default 6053
+            range 1024 65535
+            help
+                TCP port for ESPHome Native API server.
+                Default is 6053 (standard ESPHome port).
+
+        config ESPHOME_API_PASSWORD
+            string "ESPHome API Password"
+            depends on ESPHOME_API_ENABLE
+            default ""
+            help
+                Password for ESPHome API authentication.
+                Leave empty to disable password authentication.
+
+        config ESPHOME_API_MAX_CLIENTS
+            int "Maximum API Clients"
+            depends on ESPHOME_API_ENABLE
+            default 2
+            range 1 4
+            help
+                Maximum number of simultaneous client connections.
+                Keep low (1-2) for memory-constrained devices.
+
+        config ESPHOME_MDNS_ENABLE
+            bool "Enable mDNS Announcement"
+            depends on ESPHOME_API_ENABLE
+            default y
+            help
+                Enable mDNS service announcement for automatic discovery
+                by Home Assistant and other ESPHome clients.
+
+        config ESPHOME_DEVICE_NAME
+            string "ESPHome Device Name"
+            depends on ESPHOME_API_ENABLE
+            default "esp32c5_gateway"
+            help
+                Device name used for mDNS hostname and identification.
+                Should be lowercase with no spaces.
+
+        config ESPHOME_FRIENDLY_NAME
+            string "ESPHome Friendly Name"
+            depends on ESPHOME_API_ENABLE
+            default "ESP32-C5 Zigbee Gateway"
+            help
+                Human-readable device name shown in Home Assistant.
+
+        config ESPHOME_MAX_SENSORS
+            int "Maximum Sensor Entities"
+            depends on ESPHOME_API_ENABLE
+            default 32
+            range 8 64
+            help
+                Maximum number of sensor entities that can be registered.
+
+        config ESPHOME_MAX_BINARY_SENSORS
+            int "Maximum Binary Sensor Entities"
+            depends on ESPHOME_API_ENABLE
+            default 32
+            range 8 64
+            help
+                Maximum number of binary sensor entities that can be registered.
+
+        config ESPHOME_MAX_SWITCHES
+            int "Maximum Switch Entities"
+            depends on ESPHOME_API_ENABLE
+            default 16
+            range 4 32
+            help
+                Maximum number of switch entities that can be registered.
+
+        menu "Noise Encryption"
+            depends on ESPHOME_API_ENABLE
+
+            config ESPHOME_NOISE_ENCRYPTION
+                bool "Enable Noise Protocol Encryption"
+                default y
+                help
+                    Enable encrypted communication using Noise Protocol.
+                    Protocol: Noise_NNpsk0_25519_ChaChaPoly_SHA256
+
+                    This provides authenticated encryption for all ESPHome API
+                    communication. Required for Home Assistant 2023.6+.
+
+                    When enabled:
+                    - All API traffic is encrypted with ChaCha20-Poly1305
+                    - X25519 key exchange for forward secrecy
+                    - Pre-shared key (PSK) for device authentication
+
+            config ESPHOME_NOISE_PSK
+                string "Noise Encryption Key (Base64)"
+                depends on ESPHOME_NOISE_ENCRYPTION
+                default ""
+                help
+                    Base64-encoded 32-byte pre-shared key for Noise encryption.
+                    This key must match the key configured in Home Assistant.
+
+                    To generate a key:
+                    - Use: openssl rand -base64 32
+                    - Or: python3 -c "import secrets, base64; print(base64.b64encode(secrets.token_bytes(32)).decode())"
+
+                    Example: "abc123def456..." (44 characters)
+
+                    Leave empty to auto-generate a key on first boot.
+                    The generated key will be stored in NVS and printed to the console.
+
+            config ESPHOME_ALLOW_PLAINTEXT
+                bool "Allow Plaintext Connections (Legacy)"
+                depends on ESPHOME_NOISE_ENCRYPTION
+                default n
+                help
+                    Allow unencrypted connections alongside encrypted ones.
+
+                    WARNING: This reduces security and should only be enabled
+                    for debugging or legacy client compatibility.
+
+                    When enabled, clients that don't send the Noise Hello (0x01)
+                    will be allowed to connect without encryption.
+
+            config ESPHOME_NOISE_REQUIRE_PSK
+                bool "Require PSK Authentication"
+                depends on ESPHOME_NOISE_ENCRYPTION
+                default y
+                help
+                    Require a non-empty pre-shared key for authentication.
+
+                    When enabled, connections with an empty or zero PSK will
+                    be rejected. This ensures only authorized clients can connect.
+
+                    Disable only for testing purposes.
+
+        endmenu
+    endmenu
+
+    menu "Multi-PAN Configuration (EXPERIMENTAL)"
+        config ZIGBEE_MULTI_PAN_ENABLED
+            bool "Enable Multi-PAN Support"
+            default n
+            help
+                EXPERIMENTAL: Enable Multiple Zigbee Network (Multi-PAN) support.
+                This allows managing two separate Zigbee networks on a single
+                802.15.4 radio using time-division multiplexing.
+
+                WARNING: This is an experimental feature and NOT recommended
+                for production use!
+
+                Limitations:
+                - Higher latency during secondary network active periods
+                - Not all Zigbee operations supported during network switch
+                - Single radio shared via time-slicing
+
+        config ZIGBEE_PRIMARY_CHANNEL
+            int "Primary Network Channel"
+            depends on ZIGBEE_MULTI_PAN_ENABLED
+            default 11
+            range 11 26
+            help
+                Zigbee channel for the primary network (11-26).
+                The primary network receives the majority of radio time
+                based on the configured time ratio.
+                Choose a channel with minimal WiFi interference.
+
+        config ZIGBEE_SECONDARY_CHANNEL
+            int "Secondary Network Channel"
+            depends on ZIGBEE_MULTI_PAN_ENABLED
+            default 15
+            range 11 26
+            help
+                Zigbee channel for the secondary network (11-26).
+                Should be different from the primary channel.
+                The secondary network is useful for testing or
+                device isolation purposes.
+
+        config ZIGBEE_TIME_RATIO
+            int "Primary Network Time Ratio (%)"
+            depends on ZIGBEE_MULTI_PAN_ENABLED
+            default 80
+            range 50 95
+            help
+                Percentage of time allocated to the primary network.
+                The remaining time is allocated to the secondary network.
+
+                Example: 80% means 80% primary, 20% secondary.
+
+                Higher values favor primary network responsiveness
+                but reduce secondary network availability.
+
+                Range: 50-95%
+                Default: 80%
+
+        config ZIGBEE_MULTI_PAN_SWITCH_INTERVAL
+            int "Network Switch Interval (ms)"
+            depends on ZIGBEE_MULTI_PAN_ENABLED
+            default 1000
+            range 100 10000
+            help
+                Base interval for time-division multiplexing in milliseconds.
+                The actual time on each network is calculated based on
+                this interval and the time ratio.
+
+                Example with 1000ms interval and 80% ratio:
+                - Primary network: 800ms active
+                - Secondary network: 200ms active
+
+                Lower values provide faster switching but increase overhead.
+                Minimum: 100ms
+                Default: 1000ms
+
+        config ZIGBEE_MULTI_PAN_GRACEFUL_SWITCH
+            bool "Enable Graceful Network Switching"
+            depends on ZIGBEE_MULTI_PAN_ENABLED
+            default y
+            help
+                Wait for pending Zigbee transactions to complete before
+                switching networks. This improves reliability but may
+                delay network switches.
+
+                If disabled, switches happen immediately which may
+                interrupt ongoing transactions.
+
+        config ZIGBEE_MULTI_PAN_SWITCH_TIMEOUT
+            int "Graceful Switch Timeout (ms)"
+            depends on ZIGBEE_MULTI_PAN_ENABLED && ZIGBEE_MULTI_PAN_GRACEFUL_SWITCH
+            default 500
+            range 100 2000
+            help
+                Maximum time to wait for pending transactions before
+                forcing a network switch.
+
+                Default: 500ms
+    endmenu
+
+    menu "State Persistence"
+        config STATE_PERSISTENCE_ENABLE
+            bool "Enable device state persistence"
+            default y
+            help
+                Persist device state to LittleFS so that Home Assistant
+                shows last-known values after a gateway reboot instead
+                of "unavailable". State is saved periodically and on
+                clean shutdown.
+
+        config STATE_PERSISTENCE_INTERVAL_SEC
+            int "Save interval (seconds)"
+            depends on STATE_PERSISTENCE_ENABLE
+            default 300
+            range 60 3600
+            help
+                How often to write the state file to flash when dirty.
+                Lower values give better crash recovery but increase
+                flash wear. Default: 300 (5 minutes).
+    endmenu
+
+endmenu

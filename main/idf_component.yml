@@ -1,0 +1,35 @@
+## IDF Component Manager Manifest File
+dependencies:
+  ## ESP-IDF version constraint
+  idf:
+    version: ">=5.0,<7.0"
+
+  ## ESP Zigbee SDK
+  espressif/esp-zigbee-lib:
+    version: "^1.6.8"
+
+  espressif/esp-zboss-lib:
+    version: "^1.6.4"
+
+  ## LED Strip Driver
+  ## v2.x: uses led_pixel_format API (ESP-IDF v5.x)
+  ## v3.x: uses color_component_format API (ESP-IDF v6.0+)
+  ## led_controller.c handles both APIs via conditional compilation
+  espressif/led_strip:
+    version: ">=2.0,<4.0"
+
+  ## mDNS for ESPHome discovery
+  espressif/mdns:
+    version: "^1.0"
+
+  ## LittleFS filesystem (replaces deprecated SPIFFS)
+  joltwallet/littlefs:
+    version: "^1.14"
+
+  ## MQTT client (moved from ESP-IDF core in v6.0)
+  espressif/mqtt:
+    version: "^1.0"
+
+  ## cJSON library (moved from ESP-IDF core in v6.0)
+  espressif/cjson:
+    version: "^1.0"
