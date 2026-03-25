@@ -43,14 +43,18 @@ set(COMPONENT_SRCS
     "zigbee/converter/zb_converter_registry.c"
     "zigbee/converter/zb_converter_std.c"
     "zigbee/converter/converters/conv_generic.c"
-    "zigbee/converter/converters/conv_ikea.c"
-    "zigbee/converter/converters/conv_xiaomi.c"
-    "zigbee/converter/converters/conv_philips.c"
-    "zigbee/converter/converters/conv_sonoff.c"
-    "zigbee/converter/converters/conv_lidl.c"
     "zigbee/converter/converters/conv_tuya_bridge.c"
+    "zigbee/converter/converters/conv_tuya_fingerbot.c"
     "zigbee/converter/zb_converter_fn_registry.c"
     "zigbee/converter/zb_converter_loader.c"
+    "zigbee/converter/zb_quirk_engine.c"
+    "zigbee/converter/zb_custom_quirk.c"
+    "zigbee/converter/std/zb_converter_std_hvac.c"
+    "zigbee/converter/std/zb_converter_std_security.c"
+    "zigbee/converter/std/zb_converter_std_lighting.c"
+    "zigbee/converter/std/zb_converter_std_electrical.c"
+    "zigbee/converter/std/zb_converter_std_tuya.c"
+    "zigbee/converter/std/zb_converter_std_vendor.c"
     "wifi/wifi_manager.c"
     "wifi/wifi_config.c"
     "wifi/wifi_captive_portal.c"
@@ -97,6 +101,10 @@ set(COMPONENT_SRCS
     "core/adapters/mqtt_adapter.c"
     "core/adapters/ble_adapter.c"
     "core/adapters/esphome_adapter.c"
+    "core/adapters/esphome_adapter_tuya.c"
+    "core/adapters/esphome_adapter_exposes.c"
+    "core/adapters/esphome_adapter_gateway.c"
+    "core/adapters/esphome_adapter_diagnostics.c"
     "core/adapters/adapter_registry.c"
     "core/device/device_persistence.c"
     "core/foundation_init.c"
@@ -141,6 +149,7 @@ set(COMPONENT_ADD_INCLUDEDIRS
     "bluetooth/devices"
     "esphome"
     "led"
+    "mmwave"
 )
 
 # Bluetooth sources - only include when BT is enabled
@@ -202,6 +211,11 @@ set(REQUIRED_COMPONENTS
 list(APPEND COMPONENT_SRCS "bluetooth/ble_stubs.c")
 if(CONFIG_BT_ENABLED)
     list(APPEND COMPONENT_SRCS ${BT_SRCS})
+endif()
+
+# mmWave presence sensor (UART-connected S3KM1110)
+if(CONFIG_MMWAVE_SENSOR_ENABLE)
+    list(APPEND COMPONENT_SRCS "mmwave/mmwave_sensor.c")
 endif()
 
 idf_component_register(

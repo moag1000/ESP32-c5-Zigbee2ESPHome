@@ -22,6 +22,7 @@
 #include "core/events/event_data.h"
 #include "core/lifecycle_manager.h"
 #include "core/memory/memory_manager_ng.h"
+#include "zb_availability.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -30,6 +31,7 @@
 #include "freertos/timers.h"
 #include "esp_heap_caps.h"
 #include <string.h>
+#include <strings.h>
 #include <stdlib.h>
 
 #if CONFIG_BT_SCANNER_ENABLED
@@ -340,6 +342,41 @@ esp_err_t zb_interview_deinit(void)
 }
 
 /**
+ * @brief Infer manufacturer from model prefix for known device families.
+ *
+ * Sleepy devices often report their model (via Basic cluster attr 0x0005)
+ * but never their manufacturer (attr 0x0004).  The converter loader needs
+ * a manufacturer to find the right JSON file.
+ *
+ * @param model  Device model string
+ * @return Inferred manufacturer string, or NULL if unknown
+ */
+static const char *infer_manufacturer_from_model(const char *model)
+{
+    if (model == NULL || model[0] == '\0') {
+        return NULL;
+    }
+
+    /* Xiaomi/Aqara/LUMI: all models start with "lumi." */
+    if (strncmp(model, "lumi.", 5) == 0) {
+        return "LUMI";
+    }
+
+    /* IKEA: models start with "TRADFRI" or "SYMFONISK" etc. */
+    if (strncmp(model, "TRADFRI", 7) == 0 ||
+        strncmp(model, "SYMFONISK", 9) == 0) {
+        return "IKEA of Sweden";
+    }
+
+    /* Sonoff: models start with "SNZB-" */
+    if (strncmp(model, "SNZB-", 5) == 0) {
+        return "SONOFF";
+    }
+
+    return NULL;
+}
+
+/**
  * @brief Check if a device model is a known sleepy device that should skip ZDO interview
  *
  * Sleepy end devices (battery-powered) go to sleep quickly after joining.
@@ -388,6 +425,16 @@ esp_err_t zb_interview_start(uint64_t ieee_addr, uint16_t short_addr)
      * devices that sleep immediately after joining. */
     device_t *device = device_registry_get_by_short_addr(short_addr);
     if (device != NULL && device->model[0] != '\0' && is_known_sleepy_device(device->model)) {
+        /* Infer manufacturer from model prefix if missing */
+        if (device->manufacturer[0] == '\0') {
+            const char *inferred = infer_manufacturer_from_model(device->model);
+            if (inferred != NULL) {
+                strncpy(device->manufacturer, inferred, sizeof(device->manufacturer) - 1);
+                device->manufacturer[sizeof(device->manufacturer) - 1] = '\0';
+                ESP_LOGI(TAG, "Inferred manufacturer '%s' from model '%s'",
+                         inferred, device->model);
+            }
+        }
         /* Find converter for this device */
         const zb_converter_def_t *conv = zb_converter_find(device->manufacturer, device->model);
         if (conv != NULL) {
@@ -800,7 +847,28 @@ esp_err_t zb_interview_handle_simple_desc_resp(uint16_t short_addr,
         return ESP_ERR_NOT_FOUND;
     }
 
+    /* Guard against stale responses from a previous interview attempt.
+     * When the interview timeout fires a full retry, ctx->status is reset
+     * to ACTIVE_ENDPOINTS and ctx->result.endpoints is freed.  A delayed
+     * simple descriptor response from the old attempt would crash when
+     * accessing the now-NULL endpoints array. */
+    if (ctx->status != ZB_INTERVIEW_STATUS_SIMPLE_DESC) {
+        ESP_LOGW(TAG, "Stale simple desc response for 0x%04X (status=%d, expected SIMPLE_DESC)",
+                 short_addr, ctx->status);
+        xSemaphoreGive(s_mutex);
+        return ESP_ERR_INVALID_STATE;
+    }
+
     uint8_t ep_idx = ctx->current_endpoint_idx;
+
+    /* Bounds check — prevent out-of-range access if state is inconsistent */
+    if (ep_idx >= ctx->result.endpoint_count || ctx->result.endpoints == NULL) {
+        ESP_LOGW(TAG, "Invalid endpoint index %d (count=%d, endpoints=%p) for 0x%04X",
+                 ep_idx, ctx->result.endpoint_count,
+                 (void *)ctx->result.endpoints, short_addr);
+        xSemaphoreGive(s_mutex);
+        return ESP_ERR_INVALID_STATE;
+    }
 
     if (status != ESP_ZB_ZDP_STATUS_SUCCESS) {
         ESP_LOGW(TAG, "Simple descriptor request failed for 0x%04X EP %d: status=%d",
@@ -1355,6 +1423,72 @@ static void interview_complete(zb_interview_context_t *ctx, zb_interview_status_
     int64_t end_time = esp_timer_get_time();
     ctx->result.duration_ms = (uint32_t)((end_time - ctx->start_time) / 1000);
 
+    /* Converter-based salvage: if the ZDO interview failed/timed out but we
+     * already have the model (from unsolicited Basic cluster attribute reports),
+     * use the converter's cluster definitions instead of giving up entirely.
+     * Sleepy battery devices (e.g. Aqara sensors) report their model immediately
+     * after joining but go to sleep before ZDO simple descriptor requests arrive. */
+    if (status != ZB_INTERVIEW_STATUS_COMPLETE) {
+        device_t *salvage_dev = device_registry_get_by_short_addr(ctx->short_addr);
+        if (salvage_dev != NULL && salvage_dev->model[0] != '\0') {
+            /* Use actual manufacturer if available, otherwise infer from model prefix.
+             * Sleepy devices often report model but never manufacturer. */
+            const char *mfr = salvage_dev->manufacturer;
+            if (mfr[0] == '\0') {
+                mfr = infer_manufacturer_from_model(salvage_dev->model);
+                if (mfr != NULL) {
+                    strncpy(salvage_dev->manufacturer, mfr, sizeof(salvage_dev->manufacturer) - 1);
+                    salvage_dev->manufacturer[sizeof(salvage_dev->manufacturer) - 1] = '\0';
+                    ESP_LOGI(TAG, "Inferred manufacturer '%s' from model '%s'",
+                             mfr, salvage_dev->model);
+                }
+            }
+            const zb_converter_def_t *conv = zb_converter_find(
+                salvage_dev->manufacturer, salvage_dev->model);
+            if (conv != NULL) {
+                ESP_LOGI(TAG, "Salvaging failed interview for 0x%04X using converter: %s",
+                         ctx->short_addr, salvage_dev->model);
+
+                /* Extract clusters from converter definitions */
+                for (uint8_t i = 0; i < conv->from_zigbee_count; i++) {
+                    device_zigbee_add_cluster(salvage_dev, conv->from_zigbee[i].cluster_id);
+                }
+                for (uint8_t i = 0; i < conv->to_zigbee_count; i++) {
+                    device_zigbee_add_cluster(salvage_dev, conv->to_zigbee[i].cluster_id);
+                }
+
+                /* Determine device type from clusters */
+                device_determine_zigbee_type(salvage_dev);
+
+                /* Bind converter */
+                zb_converter_bind(ctx->short_addr, conv);
+                salvage_dev->proto.zigbee.converter = conv;
+                if (conv->init != NULL) {
+                    conv->init(ctx->short_addr);
+                }
+
+                /* Merge converter-derived capabilities */
+                uint32_t conv_caps = zb_converter_get_capabilities(conv);
+                if (conv_caps != 0) {
+                    salvage_dev->capabilities |= conv_caps;
+                }
+
+                /* Set primary endpoint from discovered endpoints if available */
+                if (ctx->endpoint_count > 0 && salvage_dev->proto.zigbee.endpoint == 0) {
+                    salvage_dev->proto.zigbee.endpoint = ctx->endpoints[0];
+                }
+
+                ESP_LOGI(TAG, "Converter salvage successful: %s -> %s (caps=0x%08lx)",
+                         salvage_dev->model,
+                         conv->description ? conv->description : conv->model,
+                         (unsigned long)salvage_dev->capabilities);
+
+                /* Upgrade status to COMPLETE */
+                status = ZB_INTERVIEW_STATUS_COMPLETE;
+            }
+        }
+    }
+
     /* Set final status */
     ctx->status = status;
     ctx->result.status = status;
@@ -1450,6 +1584,12 @@ static void interview_complete(zb_interview_context_t *ctx, zb_interview_status_
          * the Basic cluster read fails (common with Tuya devices). */
         if (ng_dev != NULL && ng_dev->capabilities == 0) {
             uint32_t cluster_caps = 0;
+            /* Xiaomi/LUMI devices repurpose DoorLock cluster 0x0101 for sensor data
+             * (e.g. lumi.vibration.aq1 uses it for vibration action/strength/angle).
+             * Skip 0x0101→LOCK mapping for LUMI manufacturer to avoid wrong entities. */
+            bool is_lumi = (ng_dev->manufacturer[0] != '\0' &&
+                            (strcasecmp(ng_dev->manufacturer, "LUMI") == 0 ||
+                             strcasecmp(ng_dev->manufacturer, "Xiaomi") == 0));
             for (uint8_t ep_idx = 0; ep_idx < ctx->result.endpoint_count; ep_idx++) {
                 zb_endpoint_info_t *ep = &ctx->result.endpoints[ep_idx];
                 if (ep->server_clusters != NULL) {
@@ -1461,7 +1601,9 @@ static void interview_complete(zb_interview_context_t *ctx, zb_interview_status_
                             case 0x0402: cluster_caps |= DEV_CAP_TEMPERATURE; break;
                             case 0x0405: cluster_caps |= DEV_CAP_HUMIDITY; break;
                             case 0x0406: cluster_caps |= DEV_CAP_MOTION; break;
-                            case 0x0101: cluster_caps |= DEV_CAP_LOCK; break;
+                            case 0x0101:
+                                if (!is_lumi) cluster_caps |= DEV_CAP_LOCK;
+                                break;
                             case 0x0102: cluster_caps |= DEV_CAP_COVER; break;
                             case 0x0202: cluster_caps |= DEV_CAP_FAN; break;
                             case 0x0201: cluster_caps |= DEV_CAP_CLIMATE; break;
@@ -1474,16 +1616,34 @@ static void interview_complete(zb_interview_context_t *ctx, zb_interview_status_
             }
             if (cluster_caps != 0) {
                 ng_dev->capabilities |= cluster_caps;
-                ESP_LOGI(TAG, "Cluster-based caps for 0x%04X: 0x%08lx",
-                         ctx->short_addr, (unsigned long)cluster_caps);
+                ESP_LOGI(TAG, "Cluster-based caps for 0x%04X: 0x%08lx%s",
+                         ctx->short_addr, (unsigned long)cluster_caps,
+                         is_lumi ? " (LUMI: 0x0101 skipped)" : "");
             }
         }
 
         /* Publish state and save — regardless of device type determination.
          * HA discovery and battery state are handled by EVT_DEVICE_INTERVIEWED
-         * subscribers (ha_discovery_ng.c and device_state_publisher.c). */
+         * subscribers (ha_discovery_ng.c, esphome_adapter.c, device_state_publisher.c). */
         if (ng_dev != NULL) {
             ng_dev->interviewed = true;
+
+            /* Generate readable friendly_name from model if the current name
+             * is still the auto-generated IEEE hex default from device_init().
+             * Pattern: "Model 0xSHORT" or "Device 0xSHORT" if no model known. */
+            char ieee_default[24];
+            device_id_to_str(ng_dev->id, ieee_default, sizeof(ieee_default));
+            if (strcmp(ng_dev->friendly_name, ieee_default) == 0) {
+                if (ng_dev->model[0] != '\0') {
+                    snprintf(ng_dev->friendly_name, sizeof(ng_dev->friendly_name),
+                             "%.23s 0x%04X", ng_dev->model, ctx->short_addr);
+                } else {
+                    snprintf(ng_dev->friendly_name, sizeof(ng_dev->friendly_name),
+                             "Device 0x%04X", ctx->short_addr);
+                }
+                ESP_LOGI(TAG, "Device 0x%04X friendly_name: '%s'",
+                         ctx->short_addr, ng_dev->friendly_name);
+            }
 
             /* Publish initial device state via event bus */
             evt_device_state_t state_evt = {
@@ -1495,6 +1655,16 @@ static void interview_complete(zb_interview_context_t *ctx, zb_interview_status_
                 .json_state = NULL,
             };
             event_publish(EVT_DEVICE_STATE_CHANGED, &state_evt, sizeof(state_evt));
+
+            /* Publish EVT_DEVICE_INTERVIEWED so subscribers (esphome_adapter,
+             * ha_discovery_ng) can register entities with known capabilities */
+            evt_device_interviewed_t interviewed_evt = {
+                .ieee_addr = ng_dev->id,
+                .short_addr = ctx->short_addr,
+                .success = true,
+                .endpoint_count = ctx->endpoint_count,
+            };
+            event_publish(EVT_DEVICE_INTERVIEWED, &interviewed_evt, sizeof(interviewed_evt));
 
             /* Save NG device to NVS with updated capabilities, model,
              * manufacturer, endpoint, and friendly_name.
@@ -1511,6 +1681,13 @@ static void interview_complete(zb_interview_context_t *ctx, zb_interview_status_
     } else {
         /* TEMPORARILY DISABLED - testing Aqara join timing issue */
         // bridge_event_device_interview(ctx->ieee_addr, BRIDGE_INTERVIEW_FAILED);
+
+        /* Mark device offline after interview failure.  Sleepy devices
+         * (e.g. Aqara vibration sensor) go back to sleep and the coordinator
+         * will spam indirect_transaction_expiry + Device unavailable for
+         * every undelivered message.  Setting offline suppresses further
+         * active traffic from the availability tracker. */
+        zb_availability_mark_offline(ctx->short_addr);
     }
 
     /* Invoke completion callback BEFORE caching (callback sees valid data) */
@@ -1562,6 +1739,22 @@ static void timeout_callback(TimerHandle_t timer)
     }
 
     xSemaphoreTake(s_mutex, GW_TIMEOUT_LONG_TICKS);
+
+    /* Skip retries for known sleepy devices — they won't respond to ZDO
+     * requests no matter how many times we retry.  The converter salvage
+     * in interview_complete() will find the converter via LittleFS.
+     * IMPORTANT: Do NOT call zb_converter_find() here!  It does LittleFS
+     * file I/O which holds s_mutex too long and crashes the FreeRTOS
+     * priority inheritance on the single-core ESP32-C5. */
+    device_t *timeout_dev = device_registry_get_by_short_addr(ctx->short_addr);
+    if (timeout_dev != NULL && timeout_dev->model[0] != '\0' &&
+        is_known_sleepy_device(timeout_dev->model)) {
+        ESP_LOGI(TAG, "Interview timeout for 0x%04X — sleepy device %s, skipping retries",
+                 ctx->short_addr, timeout_dev->model);
+        interview_complete(ctx, ZB_INTERVIEW_STATUS_TIMEOUT);
+        xSemaphoreGive(s_mutex);
+        return;
+    }
 
     /* Check if we can retry the entire interview */
     if (ctx->interview_retry_count > 0) {

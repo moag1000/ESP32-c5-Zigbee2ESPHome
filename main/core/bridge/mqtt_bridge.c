@@ -120,6 +120,31 @@ esp_err_t mqtt_bridge_init(void)
     return ESP_OK;
 }
 
+void mqtt_bridge_deinit(void)
+{
+    if (!s_bridge_initialized) {
+        return;
+    }
+
+    /* Stop if running */
+    if (s_bridge_enabled) {
+        mqtt_bridge_stop();
+    }
+
+    /* Deinit sub-modules to unsubscribe event handlers */
+    bridge_events_deinit();
+    device_state_publisher_deinit();
+    mqtt_event_handler_deinit();
+
+    if (s_bridge_mutex != NULL) {
+        vSemaphoreDelete(s_bridge_mutex);
+        s_bridge_mutex = NULL;
+    }
+
+    s_bridge_initialized = false;
+    ESP_LOGI(TAG, "MQTT bridge deinitialized");
+}
+
 esp_err_t mqtt_bridge_start(void)
 {
     if (!s_bridge_initialized) {

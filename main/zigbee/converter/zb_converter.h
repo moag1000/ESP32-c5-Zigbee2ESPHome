@@ -57,6 +57,14 @@ esp_err_t zb_converter_bind(uint16_t short_addr, const zb_converter_def_t *def);
 esp_err_t zb_converter_unbind(uint16_t short_addr);
 
 /**
+ * @brief Unbind all converter bindings
+ *
+ * Clears the entire binding table. Used during network reset/factory reset
+ * and new network formation to prevent stale bindings.
+ */
+void zb_converter_unbind_all(void);
+
+/**
  * @brief Get the converter bound to a device
  * @param short_addr Device short address
  * @return Pointer to converter definition, or NULL if none bound
@@ -75,11 +83,37 @@ const zb_converter_def_t *zb_converter_get(uint16_t short_addr);
  * @param attr_id Attribute ID
  * @param raw Raw attribute data
  * @param len Length of raw data
+ * @param zcl_attr_type ZCL attribute data type (0x10=bool, 0x20=uint8, etc.)
  * @return ESP_OK if handled, ESP_ERR_NOT_FOUND if no converter
  */
 esp_err_t zb_converter_handle_report(uint16_t short_addr, uint8_t endpoint,
                                       uint16_t cluster_id, uint16_t attr_id,
-                                      const void *raw, size_t len);
+                                      const void *raw, size_t len,
+                                      uint8_t zcl_attr_type);
+
+/**
+ * @brief Dispatch context for converter functions
+ *
+ * Set before calling fz/tz converters so generic converters can access
+ * metadata (converter definition, ZCL data type) without signature changes.
+ */
+typedef struct {
+    const zb_converter_def_t *conv;     /**< Active converter definition */
+    uint8_t zcl_attr_type;              /**< ZCL attribute data type */
+    uint16_t cluster_id;                /**< Matched cluster ID */
+    uint16_t attr_id;                   /**< Matched attribute ID */
+} zb_dispatch_ctx_t;
+
+/**
+ * @brief Set the dispatch context (call before fz/tz dispatch)
+ */
+void zb_converter_set_dispatch_ctx(const zb_dispatch_ctx_t *ctx);
+
+/**
+ * @brief Get the dispatch context (call from fz/tz converter functions)
+ * @return Current dispatch context, or NULL if not set
+ */
+const zb_dispatch_ctx_t *zb_converter_get_dispatch_ctx(void);
 
 /**
  * @brief Handle an MQTT command via converter

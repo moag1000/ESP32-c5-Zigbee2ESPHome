@@ -392,10 +392,10 @@ typedef enum {
     ESPHOME_MSG_SELECT_STATE                = 53,  /**< Select state update */
     ESPHOME_MSG_SELECT_COMMAND              = 54,  /**< Select command */
 
-    /* Lock entity (55-57) - reserved */
-    ESPHOME_MSG_LIST_ENTITIES_LOCK          = 55,  /**< Lock entity info */
-    ESPHOME_MSG_LOCK_STATE                  = 56,  /**< Lock state update */
-    ESPHOME_MSG_LOCK_COMMAND                = 57,  /**< Lock command */
+    /* Lock entity (58-60 per api.proto; 55-57 are Siren) */
+    ESPHOME_MSG_LIST_ENTITIES_LOCK          = 58,  /**< Lock entity info */
+    ESPHOME_MSG_LOCK_STATE                  = 59,  /**< Lock state update */
+    ESPHOME_MSG_LOCK_COMMAND                = 60,  /**< Lock command */
 
     /* Button entity (61-62) */
     ESPHOME_MSG_LIST_ENTITIES_BUTTON        = 61,  /**< Button entity info */
@@ -406,7 +406,7 @@ typedef enum {
     ESPHOME_MSG_MEDIA_PLAYER_STATE          = 64,  /**< Media player state update */
     ESPHOME_MSG_MEDIA_PLAYER_COMMAND        = 65,  /**< Media player command */
 
-    /* Bluetooth proxy (66-93, 126-127) - ESPHome API spec */
+    /* Bluetooth proxy (66-93, 126-127) - ESPHome API spec per api.proto */
     ESPHOME_MSG_SUBSCRIBE_BLE_ADVERTISEMENTS   = 66,  /**< Subscribe to BLE advertisements */
     ESPHOME_MSG_BLE_ADVERTISEMENT_RESPONSE     = 67,  /**< BLE advertisement response */
     ESPHOME_MSG_BLE_DEVICE_REQUEST             = 68,  /**< BLE device connect/disconnect/pair */
@@ -417,24 +417,30 @@ typedef enum {
     ESPHOME_MSG_BLE_GATT_READ_REQUEST          = 73,  /**< BLE GATT read request */
     ESPHOME_MSG_BLE_GATT_READ_RESPONSE         = 74,  /**< BLE GATT read response */
     ESPHOME_MSG_BLE_GATT_WRITE_REQUEST         = 75,  /**< BLE GATT write request */
-    ESPHOME_MSG_BLE_GATT_WRITE_RESPONSE        = 76,  /**< BLE GATT write response */
+    ESPHOME_MSG_BLE_GATT_READ_DESCRIPTOR_REQ   = 76,  /**< BLE GATT read descriptor request */
+    ESPHOME_MSG_BLE_GATT_WRITE_DESCRIPTOR_REQ  = 77,  /**< BLE GATT write descriptor request */
     ESPHOME_MSG_BLE_GATT_NOTIFY_REQUEST        = 78,  /**< BLE GATT notify subscribe request */
     ESPHOME_MSG_BLE_GATT_NOTIFY_DATA_RESP      = 79,  /**< BLE GATT notify data response */
     ESPHOME_MSG_SUBSCRIBE_BLE_CONNECTIONS_FREE = 80,   /**< Subscribe to BLE connections free */
     ESPHOME_MSG_BLE_CONNECTIONS_FREE_RESP      = 81,   /**< BLE connections free response */
+    ESPHOME_MSG_BLE_GATT_ERROR_RESPONSE        = 82,   /**< BLE GATT error response */
+    ESPHOME_MSG_BLE_GATT_WRITE_RESPONSE        = 83,   /**< BLE GATT write response */
+    ESPHOME_MSG_BLE_GATT_NOTIFY_RESPONSE       = 84,   /**< BLE GATT notify response */
     ESPHOME_MSG_BLE_DEVICE_PAIRING_RESPONSE    = 85,   /**< BLE device pairing response */
+    ESPHOME_MSG_BLE_DEVICE_UNPAIRING_RESPONSE  = 86,   /**< BLE device unpairing response */
     ESPHOME_MSG_UNSUBSCRIBE_BLE_ADVERTISEMENTS = 87,   /**< Unsubscribe BLE advertisements */
+    ESPHOME_MSG_BLE_DEVICE_CLEAR_CACHE_RESP    = 88,   /**< BLE device clear cache response */
     ESPHOME_MSG_BLE_RAW_ADVERTISEMENTS_RESP    = 93,   /**< BLE raw advertisements response */
 
-    /* Alarm control panel entity (113-115) */
-    ESPHOME_MSG_LIST_ENTITIES_ALARM_PANEL      = 113,  /**< Alarm panel entity info */
-    ESPHOME_MSG_ALARM_PANEL_STATE              = 114,  /**< Alarm panel state update */
-    ESPHOME_MSG_ALARM_PANEL_COMMAND            = 115,  /**< Alarm panel command */
+    /* Alarm control panel entity (94-96 per api.proto) */
+    ESPHOME_MSG_LIST_ENTITIES_ALARM_PANEL      = 94,   /**< Alarm panel entity info */
+    ESPHOME_MSG_ALARM_PANEL_STATE              = 95,   /**< Alarm panel state update */
+    ESPHOME_MSG_ALARM_PANEL_COMMAND            = 96,   /**< Alarm panel command */
 
-    /* Text entity (121-123) */
-    ESPHOME_MSG_LIST_ENTITIES_TEXT              = 121,  /**< Text entity info */
-    ESPHOME_MSG_TEXT_STATE                      = 122,  /**< Text state update */
-    ESPHOME_MSG_TEXT_COMMAND                    = 123,  /**< Text command */
+    /* Text entity (97-99 per api.proto) */
+    ESPHOME_MSG_LIST_ENTITIES_TEXT              = 97,   /**< Text entity info */
+    ESPHOME_MSG_TEXT_STATE                      = 98,   /**< Text state update */
+    ESPHOME_MSG_TEXT_COMMAND                    = 99,   /**< Text command */
 
     /* BLE Scanner state (126-127) */
     ESPHOME_MSG_BLE_SCANNER_STATE_RESPONSE     = 126,  /**< BLE scanner state response */
@@ -795,6 +801,11 @@ typedef enum {
     ESPHOME_SENSOR_CLASS_ILLUMINANCE,
     ESPHOME_SENSOR_CLASS_SIGNAL_STRENGTH,
     ESPHOME_SENSOR_CLASS_TIMESTAMP,
+    ESPHOME_SENSOR_CLASS_CARBON_DIOXIDE,
+    ESPHOME_SENSOR_CLASS_VOLATILE_ORGANIC_COMPOUNDS,
+    ESPHOME_SENSOR_CLASS_PM25,
+    ESPHOME_SENSOR_CLASS_MOISTURE,
+    ESPHOME_SENSOR_CLASS_DISTANCE,
 } esphome_sensor_device_class_t;
 
 /**
@@ -825,6 +836,8 @@ typedef enum {
     ESPHOME_BINARY_CLASS_SOUND,
     ESPHOME_BINARY_CLASS_VIBRATION,
     ESPHOME_BINARY_CLASS_WINDOW,
+    ESPHOME_BINARY_CLASS_TAMPER,
+    ESPHOME_BINARY_CLASS_BATTERY_LOW,
 } esphome_binary_device_class_t;
 
 /* ============================================================================

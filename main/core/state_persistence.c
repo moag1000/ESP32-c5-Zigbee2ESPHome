@@ -25,6 +25,7 @@
 #include "freertos/timers.h"
 #include "freertos/semphr.h"
 #include "core/gateway_timeouts.h"
+#include "utils/freertos_helpers.h"
 #include <string.h>
 #include <stdio.h>
 #include <sys/stat.h>
@@ -54,7 +55,7 @@ static volatile bool s_dirty = false;
 static TimerHandle_t s_save_timer = NULL;
 
 /** @brief Dedicated save task handle (avoids heavy I/O in timer daemon) */
-static TaskHandle_t s_save_task = NULL;
+static psram_task_handle_t s_save_psram_task = {0};
 
 /** @brief Completion semaphore for save task shutdown */
 static SemaphoreHandle_t s_save_done = NULL;
@@ -123,18 +124,20 @@ esp_err_t state_persistence_init(void)
     }
 
     /* Create dedicated save task to avoid heavy I/O in timer daemon.
+     * Stack in PSRAM to save ~6KB internal RAM.
      * Guard against duplicate task creation (e.g. if init called twice
      * after a partial failure). */
-    if (s_save_task != NULL) {
+    if (s_save_psram_task.task_handle != NULL) {
         ESP_LOGW(TAG, "Save task already exists, skipping creation");
     } else {
-        BaseType_t task_ret = xTaskCreate(save_task_fn,
-                                           "state_save",
-                                           6144,  /* Increased for debug builds */
-                                           NULL,
-                                           2,  /* Below publisher_task (4) */
-                                           &s_save_task);
-        if (task_ret != pdPASS) {
+        memset(&s_save_psram_task, 0, sizeof(s_save_psram_task));
+        esp_err_t task_ret = psram_task_create(save_task_fn,
+                                                "state_save",
+                                                6144,  /* Increased for debug builds */
+                                                NULL,
+                                                2,  /* Below publisher_task (4) */
+                                                &s_save_psram_task);
+        if (task_ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to create save task");
             vSemaphoreDelete(s_save_mutex);
             s_save_mutex = NULL;
@@ -153,8 +156,7 @@ esp_err_t state_persistence_init(void)
                                  save_timer_callback);
     if (s_save_timer == NULL) {
         ESP_LOGE(TAG, "Failed to create save timer");
-        vTaskDelete(s_save_task);
-        s_save_task = NULL;
+        psram_task_delete(&s_save_psram_task);
         vSemaphoreDelete(s_save_mutex);
         s_save_mutex = NULL;
         vSemaphoreDelete(s_save_done);
@@ -168,8 +170,7 @@ esp_err_t state_persistence_init(void)
         ESP_LOGE(TAG, "Failed to start save timer");
         xTimerDelete(s_save_timer, GW_TIMEOUT_MEDIUM_TICKS);
         s_save_timer = NULL;
-        vTaskDelete(s_save_task);
-        s_save_task = NULL;
+        psram_task_delete(&s_save_psram_task);
         vSemaphoreDelete(s_save_mutex);
         s_save_mutex = NULL;
         vSemaphoreDelete(s_save_done);
@@ -213,17 +214,17 @@ void state_persistence_deinit(void)
 
     /* Request the save task to exit after its next save cycle.
      * Setting s_dirty ensures any pending state is flushed. */
-    if (s_save_task != NULL) {
+    if (s_save_psram_task.task_handle != NULL) {
         s_task_exit_requested = true;
         s_dirty = true;
-        xTaskNotifyGive(s_save_task);
+        xTaskNotifyGive(s_save_psram_task.task_handle);
         /* Wait for save task to complete and self-delete (max 5 seconds) */
         if (s_save_done != NULL) {
             BaseType_t taken = xSemaphoreTake(s_save_done, pdMS_TO_TICKS(5000));
             if (taken != pdTRUE) {
                 ESP_LOGW(TAG, "Timed out waiting for save task — retrying");
                 /* Send another notification in case the task missed the first */
-                xTaskNotifyGive(s_save_task);
+                xTaskNotifyGive(s_save_psram_task.task_handle);
                 taken = xSemaphoreTake(s_save_done, pdMS_TO_TICKS(2000));
                 if (taken != pdTRUE) {
                     ESP_LOGE(TAG, "Save task did not exit in time, abandoning");
@@ -233,7 +234,8 @@ void state_persistence_deinit(void)
                 }
             }
         }
-        s_save_task = NULL;
+        /* Free PSRAM stack/TCB (task already self-deleted via mark_deleted) */
+        psram_task_delete(&s_save_psram_task);
         s_task_exit_requested = false;
     }
 
@@ -483,6 +485,34 @@ esp_err_t state_persistence_load_and_publish(void)
         /* Remove the internal _friendly_name field before publishing */
         cJSON_DeleteItemFromObject(item, "_friendly_name");
 
+        /* Merge cached state back into device registry so ESPHome adapter
+         * (and other consumers of device_registry_get_state()) can access
+         * it immediately after boot without waiting for a Zigbee report. */
+        {
+            cJSON *state_copy = cJSON_Duplicate(item, true);
+            if (state_copy != NULL) {
+                esp_err_t merge_ret = device_registry_merge_state(dev->id, state_copy);
+                cJSON_Delete(state_copy);
+                if (merge_ret == ESP_OK) {
+                    ESP_LOGD(TAG, "Restored cached state into registry for %s", friendly_name);
+
+                    /* Notify ESPHome adapter (and other subscribers) so entity
+                     * states are updated even if HA already connected and synced
+                     * before this load ran.  json_state=NULL tells the adapter
+                     * to read the state from the registry. */
+                    evt_device_state_t state_evt = {
+                        .ieee_addr = dev->id,
+                        .short_addr = dev->proto.zigbee.short_addr,
+                        .endpoint = dev->proto.zigbee.endpoint,
+                        .cluster_id = 0,
+                        .attr_id = 0,
+                        .json_state = NULL,
+                    };
+                    event_publish(EVT_DEVICE_STATE_CHANGED, &state_evt, sizeof(state_evt));
+                }
+            }
+        }
+
         /* Serialize the state object */
         char *state_str = cJSON_PrintUnformatted(item);
         if (state_str == NULL) {
@@ -715,7 +745,8 @@ static void save_task_fn(void *arg)
     if (s_save_done != NULL) {
         xSemaphoreGive(s_save_done);
     }
-    /* Task deletes itself; handle is cleared by deinit */
+    /* Mark self-deleted so psram_task_delete() only frees PSRAM memory */
+    psram_task_mark_deleted(&s_save_psram_task);
     vTaskDelete(NULL);
 }
 
@@ -728,8 +759,8 @@ static void save_task_fn(void *arg)
 static void save_timer_callback(TimerHandle_t timer)
 {
     (void)timer;
-    if (s_dirty && s_save_task != NULL) {
-        xTaskNotifyGive(s_save_task);
+    if (s_dirty && s_save_psram_task.task_handle != NULL) {
+        xTaskNotifyGive(s_save_psram_task.task_handle);
     }
 }
 

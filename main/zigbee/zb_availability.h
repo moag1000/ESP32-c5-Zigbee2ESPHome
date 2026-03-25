@@ -385,6 +385,17 @@ esp_err_t zb_availability_handle_read_response(uint16_t short_addr, uint8_t stat
  */
 esp_err_t zb_availability_handle_timeout(uint16_t short_addr);
 
+/**
+ * @brief Force a device to offline state
+ *
+ * Used after interview failure to prevent the coordinator from
+ * continuously trying to reach a sleeping device.
+ *
+ * @param[in] short_addr Device short address
+ * @return ESP_OK on success
+ */
+esp_err_t zb_availability_mark_offline(uint16_t short_addr);
+
 /* ============================================================================
  * Utility Functions
  * ============================================================================ */

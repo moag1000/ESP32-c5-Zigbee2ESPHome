@@ -48,6 +48,9 @@ extern "C" {
 /** @brief Entity key offset to avoid conflicts with other ESPHome entities */
 #define ESPHOME_ADAPTER_KEY_OFFSET                  0x10000000
 
+/** @brief Entity key offset for Tuya driver auto-registered entities */
+#define ESPHOME_ADAPTER_TUYA_KEY_OFFSET             0x30000000
+
 /* ============================================================================
  * Initialization / Lifecycle
  * ============================================================================ */

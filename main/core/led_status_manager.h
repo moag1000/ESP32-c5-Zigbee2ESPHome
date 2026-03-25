@@ -74,6 +74,13 @@ typedef enum {
 esp_err_t led_status_manager_init(void);
 
 /**
+ * @brief Deinitialize the LED status manager
+ *
+ * Unsubscribes event bus handlers and cleans up resources.
+ */
+void led_status_manager_deinit(void);
+
+/**
  * @brief Set or clear a system condition flag
  *
  * Updates the internal condition bitmap and re-evaluates the LED status.

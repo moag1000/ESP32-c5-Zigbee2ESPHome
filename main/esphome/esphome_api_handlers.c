@@ -18,6 +18,7 @@
 #include "core/events/event_bus.h"
 #include "core/events/event_data.h"
 #include "core/device/device_registry.h"
+#include "zigbee/converter/zb_converter.h"
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -119,6 +120,30 @@ bool esphome_api_list_entities_callback(esphome_entity_type_t type, esphome_enti
         case ESPHOME_ENTITY_CLIMATE:
             ret = esphome_encode_climate_list_entry(
                 (const esphome_climate_config_t *)config,
+                buffer, ESPHOME_BUFFER_LARGE, &buffer_len);
+            break;
+
+        case ESPHOME_ENTITY_LOCK:
+            ret = esphome_encode_lock_list_entry(
+                (const esphome_lock_config_t *)config,
+                buffer, ESPHOME_BUFFER_LARGE, &buffer_len);
+            break;
+
+        case ESPHOME_ENTITY_TEXT:
+            ret = esphome_encode_text_list_entry(
+                (const esphome_text_config_t *)config,
+                buffer, ESPHOME_BUFFER_LARGE, &buffer_len);
+            break;
+
+        case ESPHOME_ENTITY_MEDIA_PLAYER:
+            ret = esphome_encode_media_player_list_entry(
+                (const esphome_media_player_config_t *)config,
+                buffer, ESPHOME_BUFFER_LARGE, &buffer_len);
+            break;
+
+        case ESPHOME_ENTITY_ALARM_PANEL:
+            ret = esphome_encode_alarm_list_entry(
+                (const esphome_alarm_config_t *)config,
                 buffer, ESPHOME_BUFFER_LARGE, &buffer_len);
             break;
 
@@ -265,6 +290,52 @@ bool esphome_api_broadcast_states_callback(esphome_entity_type_t type, esphome_e
             esphome_climate_state_t state;
             if (esphome_entity_get_climate(key, &state) == ESP_OK) {
                 ret = esphome_encode_climate_state(&state, buffer, ESPHOME_BUFFER_MEDIUM, &buffer_len);
+                if (ret == ESP_OK) {
+                    esphome_api_send_message(ctx->client, buffer, buffer_len);
+                }
+            }
+            break;
+        }
+
+        case ESPHOME_ENTITY_LOCK: {
+            esphome_lock_entity_state_t state;
+            if (esphome_entity_get_lock(key, &state) == ESP_OK) {
+                ret = esphome_encode_lock_state(&state, buffer, ESPHOME_BUFFER_MEDIUM, &buffer_len);
+                if (ret == ESP_OK) {
+                    esphome_api_send_message(ctx->client, buffer, buffer_len);
+                }
+            }
+            break;
+        }
+
+        case ESPHOME_ENTITY_TEXT: {
+            esphome_text_entity_state_t state;
+            if (esphome_entity_get_text(key, &state) == ESP_OK) {
+                ret = esphome_encode_text_state(&state, buffer, ESPHOME_BUFFER_MEDIUM, &buffer_len);
+                if (ret == ESP_OK) {
+                    esphome_api_send_message(ctx->client, buffer, buffer_len);
+                }
+            }
+            break;
+        }
+
+        case ESPHOME_ENTITY_MEDIA_PLAYER: {
+            esphome_media_player_entity_state_t state;
+            if (esphome_entity_get_media_player(key, &state) == ESP_OK) {
+                ret = esphome_encode_media_player_state(&state, buffer, ESPHOME_BUFFER_MEDIUM,
+                                                         &buffer_len);
+                if (ret == ESP_OK) {
+                    esphome_api_send_message(ctx->client, buffer, buffer_len);
+                }
+            }
+            break;
+        }
+
+        case ESPHOME_ENTITY_ALARM_PANEL: {
+            esphome_alarm_entity_state_t state;
+            if (esphome_entity_get_alarm(key, &state) == ESP_OK) {
+                ret = esphome_encode_alarm_state(&state, buffer, ESPHOME_BUFFER_MEDIUM,
+                                                        &buffer_len);
                 if (ret == ESP_OK) {
                     esphome_api_send_message(ctx->client, buffer, buffer_len);
                 }
@@ -563,7 +634,16 @@ typedef struct {
  * @brief Callback to encode each Zigbee device as a DeviceInfo sub-message
  *
  * Encodes a DeviceInfo sub-message (field 20) for each Zigbee device in the registry.
- * DeviceInfo proto: device_id (field 1, uint32), name (field 2, string).
+ * DeviceInfo proto (api.proto, ESPHome 2025.7.0+):
+ *   message DeviceInfo {
+ *     uint32 device_id = 1;
+ *     string name = 2;
+ *     uint32 area_id = 3;
+ *     string manufacturer = 4;
+ *     string model = 5;
+ *     string hw_version = 6;
+ *     string sw_version = 7;
+ *   }
  */
 static bool encode_sub_device_cb(device_t *dev, void *ctx)
 {
@@ -572,18 +652,63 @@ static bool encode_sub_device_cb(device_t *dev, void *ctx)
         return true; /* Skip non-Zigbee devices */
     }
 
-    /* Build DeviceInfo sub-message in temp buffer */
-    uint8_t sub_msg[128];
+    uint8_t sub_msg[256];
     esphome_buffer_t sub_buf;
     esphome_buffer_init(&sub_buf, sub_msg, sizeof(sub_msg));
 
+    /* Field 1: device_id (uint32) — lower 32 bits of IEEE address */
     uint32_t device_id = (uint32_t)(dev->id & 0xFFFFFFFF);
-    esphome_encode_uint32(&sub_buf, 1, device_id);  /* DeviceInfo.device_id */
-    esphome_encode_string(&sub_buf, 2,
-                          dev->friendly_name[0] ? dev->friendly_name : "Unknown");  /* DeviceInfo.name */
+    esphome_encode_uint32(&sub_buf, 1, device_id);
+
+    /* Field 2: name (string) — human-readable display name for HA.
+     * Prefer converter vendor+description (e.g. "Adaprox Fingerbot Plus"),
+     * fall back to model+short_addr, then IEEE hex. */
+    char display_name[64];
+    const zb_converter_def_t *cdef = (const zb_converter_def_t *)dev->proto.zigbee.converter;
+    if (cdef && cdef->description && cdef->description[0]) {
+        if (cdef->vendor && cdef->vendor[0]) {
+            snprintf(display_name, sizeof(display_name), "%s %s", cdef->vendor, cdef->description);
+        } else {
+            snprintf(display_name, sizeof(display_name), "%s", cdef->description);
+        }
+    } else if (dev->model[0]) {
+        snprintf(display_name, sizeof(display_name), "%s 0x%04X",
+                 dev->model, dev->proto.zigbee.short_addr);
+    } else {
+        snprintf(display_name, sizeof(display_name), "0x%016llx", (unsigned long long)dev->id);
+    }
+    esphome_encode_string(&sub_buf, 2, display_name);
+
+    /* Field 4: manufacturer (string) — shown as "von <manufacturer>" in HA.
+     * Prefer converter vendor (human-readable), fall back to Zigbee manufacturer string. */
+    const char *mfr = NULL;
+    if (cdef && cdef->vendor && cdef->vendor[0]) {
+        mfr = cdef->vendor;
+    } else if (dev->manufacturer[0]) {
+        mfr = dev->manufacturer;
+    }
+    if (mfr) {
+        esphome_encode_string(&sub_buf, 4, mfr);
+    }
+
+    /* Field 5: model (string) — shown as model info in HA.
+     * Prefer converter description, fall back to Zigbee model identifier. */
+    const char *mdl = NULL;
+    if (cdef && cdef->description && cdef->description[0]) {
+        mdl = cdef->description;
+    } else if (dev->model[0]) {
+        mdl = dev->model;
+    }
+    if (mdl) {
+        esphome_encode_string(&sub_buf, 5, mdl);
+    }
+
+    /* Field 6: hw_version — Zigbee model identifier (e.g. "TS0001") */
+    if (dev->model[0]) {
+        esphome_encode_string(&sub_buf, 6, dev->model);
+    }
 
     if (!esphome_buffer_overflow(&sub_buf)) {
-        /* Encode as length-delimited field 20 in parent message */
         esphome_encode_bytes(di_ctx->buf, 20, sub_msg, sub_buf.position);
     }
 

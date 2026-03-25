@@ -10,6 +10,7 @@
  */
 
 #include "zb_converter_std.h"
+#include "zb_converter.h"
 #include "zigbee/zb_zcl_helpers.h"
 #include "zigbee/zb_device_handler_types.h"
 #include "zigbee/zb_cluster_closures.h"
@@ -18,6 +19,7 @@
 #include "core/device/unified_device.h"
 #include "esp_log.h"
 #include "esp_zigbee_core.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "core/gateway_timeouts.h"
 #include <string.h>
@@ -25,6 +27,99 @@
 #include <inttypes.h>
 
 static const char *TAG = "CONV_STD";
+
+/* ============================================================================
+ * Pending Write Command for Sleepy Devices
+ *
+ * Battery devices poll for pending indirect frames only briefly when awake.
+ * The MAC indirect transaction persistence time is set to 60s (see
+ * zb_callbacks.c), but we also re-queue the command periodically in case it
+ * expires before the device polls.  Additionally, we retry immediately when
+ * a report arrives from the target device (fast path).
+ * ============================================================================ */
+static struct {
+    uint16_t short_addr;
+    uint8_t  endpoint;
+    uint16_t cluster;
+    uint16_t attr_id;
+    uint8_t  type;
+    uint8_t  value_u8;
+    uint16_t manuf_code;
+    uint8_t  retries;    /* remaining attempts */
+} s_pending_write;
+
+static esp_timer_handle_t s_pending_write_timer;
+
+/* Queue (or re-queue) the pending write command to the Zigbee indirect buffer */
+static void pending_write_send(void)
+{
+    esp_zb_zcl_write_attr_cmd_t cmd_req = {
+        .zcl_basic_cmd = {
+            .dst_addr_u = { .addr_short = s_pending_write.short_addr },
+            .dst_endpoint = s_pending_write.endpoint,
+            .src_endpoint = 1,
+        },
+        .address_mode = ESP_ZB_APS_ADDR_MODE_16_ENDP_PRESENT,
+        .clusterID = s_pending_write.cluster,
+        .manuf_specific = (s_pending_write.manuf_code != 0) ? 1 : 0,
+        .manuf_code = s_pending_write.manuf_code,
+    };
+
+    esp_zb_zcl_attribute_t attr = {
+        .id = s_pending_write.attr_id,
+        .data = {
+            .type = s_pending_write.type,
+            .size = sizeof(uint8_t),
+            .value = (void *)&s_pending_write.value_u8,
+        },
+    };
+    cmd_req.attr_number = 1;
+    cmd_req.attr_field = &attr;
+
+    esp_zb_lock_acquire(GW_TIMEOUT_VERY_LONG_TICKS);
+    esp_zb_zcl_write_attr_cmd_req(&cmd_req);
+    esp_zb_lock_release();
+}
+
+/* Timer callback — fires every 55s to re-queue the command in case it expired */
+static void pending_write_timer_cb(void *arg)
+{
+    (void)arg;
+    if (s_pending_write.retries == 0) {
+        esp_timer_stop(s_pending_write_timer);
+        return;
+    }
+    s_pending_write.retries--;
+    ESP_LOGI(TAG, "Re-queuing pending write for 0x%04X (attr=0x%04X, val=%d, retries=%d)",
+             s_pending_write.short_addr, s_pending_write.attr_id,
+             s_pending_write.value_u8, s_pending_write.retries);
+    pending_write_send();
+    if (s_pending_write.retries == 0) {
+        ESP_LOGW(TAG, "Pending write for 0x%04X: no retries left", s_pending_write.short_addr);
+        esp_timer_stop(s_pending_write_timer);
+    }
+}
+
+static void pending_write_start_timer(void)
+{
+    if (!s_pending_write_timer) {
+        esp_timer_create_args_t cfg = {
+            .callback = pending_write_timer_cb,
+            .name = "pend_wr",
+        };
+        esp_timer_create(&cfg, &s_pending_write_timer);
+    }
+    esp_timer_stop(s_pending_write_timer);
+    esp_timer_start_periodic(s_pending_write_timer, 55 * 1000000ULL);  /* 55s */
+}
+
+static void pending_write_stop_timer(void)
+{
+    if (s_pending_write_timer) {
+        esp_timer_stop(s_pending_write_timer);
+    }
+    s_pending_write.retries = 0;
+}
 
 /* ============================================================================
  * Device Registry Helper Functions
@@ -256,9 +351,9 @@ esp_err_t fz_vibration_action(const void *raw, size_t len, cJSON *json, const ch
         default: action = "unknown";   break;
     }
     cJSON_AddStringToObject(json, key, action);
-    /* Use string "true"/"false" for HA compatibility (Jinja template expects string) */
+    /* Boolean vibration state for ESPHome binary sensor */
     bool detected = (status_type >= 1 && status_type <= 3);
-    cJSON_AddStringToObject(json, "vibration", detected ? "true" : "false");
+    cJSON_AddBoolToObject(json, "vibration", detected);
     return ESP_OK;
 }
 
@@ -689,6 +784,275 @@ esp_err_t fz_xiaomi_voltage(const void *raw, size_t len, cJSON *json, const char
 }
 
 /* ============================================================================
+ * Generic Attribute Converter (Catch-All)
+ *
+ * Auto-converts ZCL attribute reports to JSON based on ZCL data type.
+ * Uses dispatch context for data type info (set by zb_converter_registry).
+ * ============================================================================ */
+
+/**
+ * @brief Check if cluster uses /100 scaling (temperature, humidity)
+ */
+static bool cluster_uses_div100(uint16_t cluster_id)
+{
+    return cluster_id == 0x0402  /* Temperature Measurement */
+        || cluster_id == 0x0405  /* Relative Humidity */
+        || cluster_id == 0x0201; /* Thermostat (local_temperature) */
+}
+
+/**
+ * @brief Check if cluster uses /10 scaling (pressure)
+ */
+static bool cluster_uses_div10(uint16_t cluster_id)
+{
+    return cluster_id == 0x0403; /* Pressure Measurement */
+}
+
+esp_err_t fz_generic_attr(const void *raw, size_t len, cJSON *json, const char *key)
+{
+    if (raw == NULL || json == NULL || key == NULL || len < 1) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const zb_dispatch_ctx_t *ctx = zb_converter_get_dispatch_ctx();
+    uint8_t type = ctx ? ctx->zcl_attr_type : 0;
+    uint16_t cluster = ctx ? ctx->cluster_id : 0;
+
+    /* If no type in context, try to infer from data length */
+    if (type == 0) {
+        switch (len) {
+            case 1: type = 0x20; break; /* assume uint8 */
+            case 2: type = 0x21; break; /* assume uint16 */
+            case 4: type = 0x23; break; /* assume uint32 */
+            default: type = 0x20; break;
+        }
+        ESP_LOGD(TAG, "fz_generic_attr: no type in context, inferred 0x%02X from len=%zu", type, len);
+    }
+
+    switch (type) {
+        case 0x08: /* Data8 — opaque 8-bit */
+        case 0x20: { /* uint8 */
+            uint8_t val = *(const uint8_t *)raw;
+            if (cluster == 0x0001 && ctx && ctx->attr_id == 0x0021) {
+                /* Battery percentage remaining: /2 */
+                cJSON_AddNumberToObject(json, key, (double)val / 2.0);
+            } else {
+                cJSON_AddNumberToObject(json, key, val);
+            }
+            return ESP_OK;
+        }
+        case 0x10: { /* boolean */
+            bool val = *(const uint8_t *)raw != 0;
+            cJSON_AddBoolToObject(json, key, val);
+            return ESP_OK;
+        }
+        case 0x18: /* Bitmap8 */
+        case 0x30: { /* Enum8 */
+            uint8_t val = *(const uint8_t *)raw;
+            cJSON_AddNumberToObject(json, key, val);
+            return ESP_OK;
+        }
+        case 0x21: { /* uint16 */
+            if (len < 2) return ESP_ERR_INVALID_SIZE;
+            uint16_t val;
+            memcpy(&val, raw, sizeof(val));
+            if (cluster_uses_div100(cluster)) {
+                cJSON_AddNumberToObject(json, key, (double)val / 100.0);
+            } else if (cluster_uses_div10(cluster)) {
+                cJSON_AddNumberToObject(json, key, (double)val / 10.0);
+            } else if (cluster == 0x0400) {
+                /* Illuminance: log10 formula */
+                double lux = (val > 0) ? pow(10.0, ((double)(val - 1)) / 10000.0) : 0.0;
+                cJSON_AddNumberToObject(json, key, lux);
+            } else {
+                cJSON_AddNumberToObject(json, key, val);
+            }
+            return ESP_OK;
+        }
+        case 0x19: /* Bitmap16 */
+        case 0x31: { /* Enum16 */
+            if (len < 2) return ESP_ERR_INVALID_SIZE;
+            uint16_t val;
+            memcpy(&val, raw, sizeof(val));
+            cJSON_AddNumberToObject(json, key, val);
+            return ESP_OK;
+        }
+        case 0x22: { /* uint24 */
+            if (len < 3) return ESP_ERR_INVALID_SIZE;
+            uint32_t val = 0;
+            memcpy(&val, raw, 3);
+            cJSON_AddNumberToObject(json, key, val);
+            return ESP_OK;
+        }
+        case 0x23: { /* uint32 */
+            if (len < 4) return ESP_ERR_INVALID_SIZE;
+            uint32_t val;
+            memcpy(&val, raw, sizeof(val));
+            cJSON_AddNumberToObject(json, key, (double)val);
+            return ESP_OK;
+        }
+        case 0x24: { /* uint40 */
+            if (len < 5) return ESP_ERR_INVALID_SIZE;
+            const uint8_t *data = (const uint8_t *)raw;
+            uint64_t val = 0;
+            for (int i = 4; i >= 0; i--) {
+                val = (val << 8) | data[i];
+            }
+            cJSON_AddNumberToObject(json, key, (double)val);
+            return ESP_OK;
+        }
+        case 0x25: { /* uint48 */
+            if (len < 6) return ESP_ERR_INVALID_SIZE;
+            const uint8_t *data = (const uint8_t *)raw;
+            uint64_t val = 0;
+            for (int i = 5; i >= 0; i--) {
+                val = (val << 8) | data[i];
+            }
+            cJSON_AddNumberToObject(json, key, (double)val);
+            return ESP_OK;
+        }
+        case 0x28: { /* int8 */
+            int8_t val = *(const int8_t *)raw;
+            cJSON_AddNumberToObject(json, key, val);
+            return ESP_OK;
+        }
+        case 0x29: { /* int16 */
+            if (len < 2) return ESP_ERR_INVALID_SIZE;
+            int16_t val;
+            memcpy(&val, raw, sizeof(val));
+            if (cluster_uses_div100(cluster)) {
+                cJSON_AddNumberToObject(json, key, (double)val / 100.0);
+            } else if (cluster_uses_div10(cluster)) {
+                cJSON_AddNumberToObject(json, key, (double)val / 10.0);
+            } else {
+                cJSON_AddNumberToObject(json, key, val);
+            }
+            return ESP_OK;
+        }
+        case 0x2a: { /* int24 */
+            if (len < 3) return ESP_ERR_INVALID_SIZE;
+            int32_t val = 0;
+            memcpy(&val, raw, 3);
+            /* Sign-extend from 24 bits */
+            if (val & 0x800000) val |= 0xFF000000;
+            cJSON_AddNumberToObject(json, key, val);
+            return ESP_OK;
+        }
+        case 0x2b: { /* int32 */
+            if (len < 4) return ESP_ERR_INVALID_SIZE;
+            int32_t val;
+            memcpy(&val, raw, sizeof(val));
+            if (cluster_uses_div100(cluster)) {
+                cJSON_AddNumberToObject(json, key, (double)val / 100.0);
+            } else if (cluster_uses_div10(cluster)) {
+                cJSON_AddNumberToObject(json, key, (double)val / 10.0);
+            } else {
+                cJSON_AddNumberToObject(json, key, val);
+            }
+            return ESP_OK;
+        }
+        case 0x39: { /* float (single precision IEEE 754) */
+            if (len < 4) return ESP_ERR_INVALID_SIZE;
+            float val;
+            memcpy(&val, raw, sizeof(val));
+            cJSON_AddNumberToObject(json, key, (double)val);
+            return ESP_OK;
+        }
+        case 0x42: { /* Octet string / Character string */
+            if (len < 1) return ESP_ERR_INVALID_SIZE;
+            /* First byte is string length */
+            uint8_t str_len = *(const uint8_t *)raw;
+            if (str_len == 0 || len < (size_t)(1 + str_len)) {
+                cJSON_AddStringToObject(json, key, "");
+                return ESP_OK;
+            }
+            /* Copy string with null terminator */
+            char buf[256];
+            size_t copy_len = (str_len < sizeof(buf) - 1) ? str_len : sizeof(buf) - 1;
+            memcpy(buf, (const uint8_t *)raw + 1, copy_len);
+            buf[copy_len] = '\0';
+            cJSON_AddStringToObject(json, key, buf);
+            return ESP_OK;
+        }
+        default:
+            ESP_LOGW(TAG, "fz_generic_attr: unsupported ZCL type 0x%02X for key '%s'", type, key);
+            /* Store raw as hex string for debugging */
+            cJSON_AddNumberToObject(json, key, 0);
+            return ESP_OK;
+    }
+}
+
+/* ============================================================================
+ * Remaining fz_* Converters (measurement & input clusters)
+ * ============================================================================ */
+
+/** @brief PM2.5 concentration (cluster 0x042A, attr 0x0000) -> ug/m3 */
+esp_err_t fz_pm25(const void *raw, size_t len, cJSON *json, const char *key)
+{
+    if (raw == NULL || json == NULL || key == NULL || len < 2) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint16_t raw_val;
+    memcpy(&raw_val, raw, sizeof(raw_val));
+    cJSON_AddNumberToObject(json, key, (double)raw_val);
+    ESP_LOGD(TAG, "PM2.5: %" PRIu16 " ug/m3", raw_val);
+    return ESP_OK;
+}
+
+/** @brief Soil moisture (cluster 0x0408, attr 0x0000) -> percent (raw/100) */
+esp_err_t fz_soil_moisture(const void *raw, size_t len, cJSON *json, const char *key)
+{
+    if (raw == NULL || json == NULL || key == NULL || len < 2) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint16_t raw_val;
+    memcpy(&raw_val, raw, sizeof(raw_val));
+    double pct = (double)raw_val / 100.0;
+    cJSON_AddNumberToObject(json, key, pct);
+    ESP_LOGD(TAG, "Soil moisture: raw=%" PRIu16 " -> %.2f%%", raw_val, pct);
+    return ESP_OK;
+}
+
+/** @brief Device temperature (cluster 0x0002, attr 0x0000) -> degrees C */
+esp_err_t fz_device_temperature(const void *raw, size_t len, cJSON *json, const char *key)
+{
+    if (raw == NULL || json == NULL || key == NULL || len < 2) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    int16_t raw_val;
+    memcpy(&raw_val, raw, sizeof(raw_val));
+    cJSON_AddNumberToObject(json, key, (double)raw_val);
+    ESP_LOGD(TAG, "Device temp: %d C", raw_val);
+    return ESP_OK;
+}
+
+/** @brief Multistate input (cluster 0x0012, attr 0x0055) -> number */
+esp_err_t fz_multistate_input(const void *raw, size_t len, cJSON *json, const char *key)
+{
+    if (raw == NULL || json == NULL || key == NULL || len < 2) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    uint16_t raw_val;
+    memcpy(&raw_val, raw, sizeof(raw_val));
+    cJSON_AddNumberToObject(json, key, (double)raw_val);
+    ESP_LOGD(TAG, "Multistate input: %" PRIu16, raw_val);
+    return ESP_OK;
+}
+
+/** @brief Analog input (cluster 0x000C, attr 0x0055) -> float */
+esp_err_t fz_analog_input(const void *raw, size_t len, cJSON *json, const char *key)
+{
+    if (raw == NULL || json == NULL || key == NULL || len < 4) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    float raw_val;
+    memcpy(&raw_val, raw, sizeof(raw_val));
+    cJSON_AddNumberToObject(json, key, (double)raw_val);
+    ESP_LOGD(TAG, "Analog input: %.3f", (double)raw_val);
+    return ESP_OK;
+}
+
+/* ============================================================================
  * toZigbee (tz_*) Converters
  * ============================================================================ */
 
@@ -1045,10 +1409,38 @@ esp_err_t tz_xiaomi_sensitivity(uint16_t short_addr, uint8_t endpoint, const cJS
     uint8_t tsn = esp_zb_zcl_write_attr_cmd_req(&cmd_req);
     esp_zb_lock_release();
 
-    ESP_LOGI(TAG, "Sensitivity command queued (TSN=%d) — device must be awake to receive",
+    ESP_LOGI(TAG, "Sensitivity command queued (TSN=%d) — MAC persistence=60s, re-queue every 55s",
              tsn);
 
+    /* Save as pending command and start periodic re-queue timer.
+     * The MAC indirect persistence is 60s, so we re-queue every 55s.
+     * 5 retries = ~5 minutes of continuous coverage. */
+    s_pending_write.short_addr = short_addr;
+    s_pending_write.endpoint = endpoint;
+    s_pending_write.cluster = ESP_ZB_ZCL_CLUSTER_ID_BASIC;
+    s_pending_write.attr_id = 0xFF0D;
+    s_pending_write.type = ESP_ZB_ZCL_ATTR_TYPE_U8;
+    s_pending_write.value_u8 = sensitivity_value;
+    s_pending_write.manuf_code = 0x115F;
+    s_pending_write.retries = 5;
+    pending_write_start_timer();
+
     return ESP_OK;
+}
+
+void zb_converter_std_retry_pending(uint16_t short_addr)
+{
+    if (s_pending_write.retries == 0 || s_pending_write.short_addr != short_addr) {
+        return;
+    }
+
+    ESP_LOGI(TAG, "Device 0x%04X awake — immediate retry of pending write (attr=0x%04X, val=%d)",
+             short_addr, s_pending_write.attr_id, s_pending_write.value_u8);
+
+    /* Re-queue immediately — device just woke up, so it should poll soon.
+     * Also stop the periodic timer since we're doing a targeted send now. */
+    pending_write_send();
+    pending_write_stop_timer();
 }
 
 esp_err_t tz_color_hs(uint16_t short_addr, uint8_t endpoint, const cJSON *value)
@@ -1252,5 +1644,145 @@ esp_err_t tz_power_on_behavior(uint16_t short_addr, uint8_t endpoint, const cJSO
     uint8_t tsn = esp_zb_zcl_write_attr_cmd_req(&cmd_req);
     esp_zb_lock_release();
     ESP_LOGD(TAG, "Power-on behavior command queued (TSN=%d)", tsn);
+    return ESP_OK;
+}
+
+/* ============================================================================
+ * Generic Attribute Write (Catch-All toZigbee)
+ *
+ * Cross-references from_zigbee entries in the converter definition to find
+ * the attr_id matching the command's json_key, then writes via ZCL.
+ * ============================================================================ */
+
+esp_err_t tz_generic_write_attr(uint16_t short_addr, uint8_t endpoint, const cJSON *value)
+{
+    if (value == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const zb_dispatch_ctx_t *ctx = zb_converter_get_dispatch_ctx();
+    if (ctx == NULL || ctx->conv == NULL) {
+        ESP_LOGW(TAG, "tz_generic_write_attr: no dispatch context");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    uint16_t cluster_id = ctx->cluster_id;
+
+    /* Cross-reference from_zigbee to find attr_id for this cluster.
+     * The dispatch context has the cluster_id from the matched tz entry.
+     * We search fz entries for the same cluster to get the attr_id. */
+    uint16_t attr_id = 0xFFFF;
+    const zb_converter_def_t *conv = ctx->conv;
+    for (uint8_t i = 0; i < conv->from_zigbee_count; i++) {
+        if (conv->from_zigbee[i].cluster_id == cluster_id) {
+            attr_id = conv->from_zigbee[i].attr_id;
+            break;
+        }
+    }
+
+    if (attr_id == 0xFFFF) {
+        ESP_LOGW(TAG, "tz_generic_write_attr: no fz entry for cluster 0x%04X", cluster_id);
+        /* Try attr_id 0x0000 as default (most common main attribute) */
+        attr_id = 0x0000;
+    }
+
+    /* Prepare write buffer — infer type from JSON value */
+    uint8_t zcl_type;
+    uint8_t write_buf[8];
+    uint16_t write_size;
+
+    if (cJSON_IsBool(value)) {
+        zcl_type = ESP_ZB_ZCL_ATTR_TYPE_BOOL;
+        write_buf[0] = cJSON_IsTrue(value) ? 1 : 0;
+        write_size = 1;
+    } else if (cJSON_IsNumber(value)) {
+        double num = cJSON_GetNumberValue(value);
+        /* Decide between integer and float based on cluster scaling */
+        if (cluster_uses_div100(cluster_id)) {
+            /* Re-scale: HA value * 100 = ZCL int16 */
+            int16_t raw = (int16_t)(num * 100.0);
+            zcl_type = ESP_ZB_ZCL_ATTR_TYPE_S16;
+            memcpy(write_buf, &raw, sizeof(raw));
+            write_size = 2;
+        } else if (cluster_uses_div10(cluster_id)) {
+            int16_t raw = (int16_t)(num * 10.0);
+            zcl_type = ESP_ZB_ZCL_ATTR_TYPE_S16;
+            memcpy(write_buf, &raw, sizeof(raw));
+            write_size = 2;
+        } else if (num == (int)num && num >= 0 && num <= 255) {
+            /* Small integer — uint8 */
+            zcl_type = ESP_ZB_ZCL_ATTR_TYPE_U8;
+            write_buf[0] = (uint8_t)num;
+            write_size = 1;
+        } else if (num == (int)num && num >= 0 && num <= 65535) {
+            /* Medium integer — uint16 */
+            zcl_type = ESP_ZB_ZCL_ATTR_TYPE_U16;
+            uint16_t raw = (uint16_t)num;
+            memcpy(write_buf, &raw, sizeof(raw));
+            write_size = 2;
+        } else if (num == (int)num && num >= -32768 && num <= 32767) {
+            /* Signed integer — int16 */
+            zcl_type = ESP_ZB_ZCL_ATTR_TYPE_S16;
+            int16_t raw = (int16_t)num;
+            memcpy(write_buf, &raw, sizeof(raw));
+            write_size = 2;
+        } else {
+            /* Float */
+            zcl_type = ESP_ZB_ZCL_ATTR_TYPE_SINGLE;
+            float raw = (float)num;
+            memcpy(write_buf, &raw, sizeof(raw));
+            write_size = 4;
+        }
+    } else if (cJSON_IsString(value)) {
+        /* String — try ON/OFF first for boolean clusters */
+        const char *str = cJSON_GetStringValue(value);
+        if (str == NULL) return ESP_ERR_INVALID_ARG;
+
+        if (strcasecmp(str, "ON") == 0 || strcasecmp(str, "true") == 0) {
+            zcl_type = ESP_ZB_ZCL_ATTR_TYPE_BOOL;
+            write_buf[0] = 1;
+            write_size = 1;
+        } else if (strcasecmp(str, "OFF") == 0 || strcasecmp(str, "false") == 0) {
+            zcl_type = ESP_ZB_ZCL_ATTR_TYPE_BOOL;
+            write_buf[0] = 0;
+            write_size = 1;
+        } else {
+            ESP_LOGW(TAG, "tz_generic_write_attr: unsupported string value '%s'", str);
+            return ESP_ERR_NOT_SUPPORTED;
+        }
+    } else {
+        ESP_LOGW(TAG, "tz_generic_write_attr: unsupported JSON type");
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
+    ESP_LOGI(TAG, "tz_generic_write_attr: 0x%04X ep=%d cluster=0x%04X attr=0x%04X type=0x%02X",
+             short_addr, endpoint, cluster_id, attr_id, zcl_type);
+
+    esp_zb_zcl_write_attr_cmd_t cmd_req = {
+        .zcl_basic_cmd = {
+            .dst_addr_u = { .addr_short = short_addr },
+            .dst_endpoint = endpoint,
+            .src_endpoint = 1,
+        },
+        .address_mode = ESP_ZB_APS_ADDR_MODE_16_ENDP_PRESENT,
+        .clusterID = cluster_id,
+    };
+
+    esp_zb_zcl_attribute_t attr = {
+        .id = attr_id,
+        .data = {
+            .type = zcl_type,
+            .size = write_size,
+            .value = write_buf,
+        },
+    };
+    cmd_req.attr_number = 1;
+    cmd_req.attr_field = &attr;
+
+    esp_zb_lock_acquire(GW_TIMEOUT_VERY_LONG_TICKS);
+    uint8_t tsn = esp_zb_zcl_write_attr_cmd_req(&cmd_req);
+    esp_zb_lock_release();
+
+    ESP_LOGD(TAG, "Generic write attr queued (TSN=%d)", tsn);
     return ESP_OK;
 }

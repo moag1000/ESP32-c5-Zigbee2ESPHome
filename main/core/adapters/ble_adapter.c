@@ -66,7 +66,7 @@ static void publish_device_found(device_id_t id, const uint8_t mac[6],
                                   const char *name, int8_t rssi);
 static void publish_device_left(device_id_t id, const uint8_t mac[6]);
 static void publish_device_lost(device_id_t id, const uint8_t mac[6]);
-static void publish_state_changed(device_id_t id, const ble_adapter_parsed_data_t *data);
+/* publish_state_changed removed — merged into update_device_state() */
 static uint32_t get_timestamp_ms(void);
 static void check_stale_devices(void);
 
@@ -306,12 +306,9 @@ static void process_device_update(const uint8_t mac[6], const char *name,
         publish_device_found(id, mac, name, rssi);
     }
 
-    /* Update state and publish state change if we have data */
+    /* Update state and publish state change event if we have data */
     if (data != NULL) {
-        esp_err_t ret = update_device_state(id, rssi, data);
-        if (ret == ESP_OK) {
-            publish_state_changed(id, data);
-        }
+        update_device_state(id, rssi, data);
     }
 }
 
@@ -351,7 +348,10 @@ static esp_err_t add_device_to_registry(device_id_t id, const uint8_t mac[6],
 }
 
 /**
- * @brief Update device state in the registry
+ * @brief Update device state via device_registry_merge_state() and publish event
+ *
+ * Uses the NG pattern: build JSON -> merge into registry -> publish event.
+ * This ensures ESPHome adapter and MQTT adapter both receive the state change.
  */
 static esp_err_t update_device_state(device_id_t id, int8_t rssi,
                                       const ble_adapter_parsed_data_t *data)
@@ -360,64 +360,53 @@ static esp_err_t update_device_state(device_id_t id, int8_t rssi,
         return ESP_ERR_INVALID_ARG;
     }
 
-    /* Get or create state JSON */
-    cJSON *state = device_registry_get_state(id);
-    if (state == NULL) {
-        state = cJSON_CreateObject();
-        if (state == NULL) {
-            return ESP_ERR_NO_MEM;
-        }
-        esp_err_t ret = device_registry_set_state(id, state);
-        if (ret != ESP_OK) {
-            cJSON_Delete(state);
-            return ret;
-        }
-        /* After set_state, ownership is transferred - get fresh pointer */
-        state = device_registry_get_state(id);
-        if (state == NULL) {
-            return ESP_FAIL;
-        }
+    /* Build state JSON with all fields */
+    cJSON *json = cJSON_CreateObject();
+    if (json == NULL) {
+        return ESP_ERR_NO_MEM;
     }
 
-    /* Update state values */
     if (data->has_temperature) {
-        cJSON_DeleteItemFromObject(state, "temperature");
-        cJSON_AddNumberToObject(state, "temperature", data->temperature);
+        cJSON_AddNumberToObject(json, "temperature", data->temperature);
     }
-
     if (data->has_humidity) {
-        cJSON_DeleteItemFromObject(state, "humidity");
-        cJSON_AddNumberToObject(state, "humidity", data->humidity);
+        cJSON_AddNumberToObject(json, "humidity", data->humidity);
     }
-
     if (data->has_pressure) {
-        cJSON_DeleteItemFromObject(state, "pressure");
-        cJSON_AddNumberToObject(state, "pressure", data->pressure);
+        cJSON_AddNumberToObject(json, "pressure", data->pressure);
     }
-
     if (data->has_battery) {
-        cJSON_DeleteItemFromObject(state, "battery");
-        cJSON_AddNumberToObject(state, "battery", data->battery);
+        cJSON_AddNumberToObject(json, "battery", data->battery);
     }
-
     if (data->has_motion) {
-        cJSON_DeleteItemFromObject(state, "motion");
-        cJSON_AddBoolToObject(state, "motion", data->motion);
+        cJSON_AddBoolToObject(json, "motion", data->motion);
     }
 
-    /* Always update RSSI and linkquality */
-    cJSON_DeleteItemFromObject(state, "rssi");
-    cJSON_AddNumberToObject(state, "rssi", rssi);
-
-    /* Add linkquality (normalized from RSSI, 0-255 scale) */
-    int lqi = (rssi + 100) * 255 / 100;  /* Rough mapping: -100dBm = 0, 0dBm = 255 */
+    /* Always include RSSI and linkquality */
+    cJSON_AddNumberToObject(json, "rssi", rssi);
+    int lqi = (rssi + 100) * 255 / 100;
     if (lqi < 0) lqi = 0;
     if (lqi > 255) lqi = 255;
-    cJSON_DeleteItemFromObject(state, "linkquality");
-    cJSON_AddNumberToObject(state, "linkquality", lqi);
+    cJSON_AddNumberToObject(json, "linkquality", lqi);
+
+    /* Merge into device registry (NG pattern) */
+    device_registry_merge_state(id, json);
+    cJSON_Delete(json);
+
+    /* Publish state change event */
+    evt_device_state_t evt = {0};
+    evt.ieee_addr = id;
+    evt.json_state = NULL;  /* Handler reads from device_registry_get_state() */
+
+    esp_err_t ret = event_publish(EVT_DEVICE_STATE_CHANGED, &evt, sizeof(evt));
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to publish DEVICE_STATE_CHANGED: %s", esp_err_to_name(ret));
+    } else {
+        ESP_LOGD(TAG, "Published DEVICE_STATE_CHANGED for device 0x%" PRIx64, id);
+    }
 
     s_stats.state_updates++;
-    return ESP_OK;
+    return ret;
 }
 
 /* ============================================================================
@@ -518,59 +507,6 @@ static void publish_device_lost(device_id_t id, const uint8_t mac[6])
         char mac_str[18];
         ble_mac_to_str(mac, mac_str);
         ESP_LOGI(TAG, "Published BLE_DEVICE_LOST: %s", mac_str);
-    }
-}
-
-/**
- * @brief Publish EVT_DEVICE_STATE_CHANGED event
- */
-static void publish_state_changed(device_id_t id, const ble_adapter_parsed_data_t *data)
-{
-    if (data == NULL) {
-        return;
-    }
-
-    /* Build JSON state string */
-    cJSON *json = cJSON_CreateObject();
-    if (json == NULL) {
-        return;
-    }
-
-    if (data->has_temperature) {
-        cJSON_AddNumberToObject(json, "temperature", data->temperature);
-    }
-    if (data->has_humidity) {
-        cJSON_AddNumberToObject(json, "humidity", data->humidity);
-    }
-    if (data->has_pressure) {
-        cJSON_AddNumberToObject(json, "pressure", data->pressure);
-    }
-    if (data->has_battery) {
-        cJSON_AddNumberToObject(json, "battery", data->battery);
-    }
-    if (data->has_motion) {
-        cJSON_AddBoolToObject(json, "motion", data->motion);
-    }
-
-    /* Merge into device registry (handler reads from device_registry_get_state()) */
-    device_registry_merge_state(id, json);
-    cJSON_Delete(json);
-
-    /* Convert device_id_t to ieee_addr format for evt_device_state_t */
-    evt_device_state_t evt = {0};
-    evt.ieee_addr = id;
-    evt.short_addr = 0;  /* Not applicable for BLE */
-    evt.endpoint = 0;
-    evt.cluster_id = 0;
-    evt.attr_id = 0;
-    evt.json_state = NULL;
-
-    esp_err_t ret = event_publish(EVT_DEVICE_STATE_CHANGED, &evt, sizeof(evt));
-
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to publish DEVICE_STATE_CHANGED: %s", esp_err_to_name(ret));
-    } else {
-        ESP_LOGD(TAG, "Published DEVICE_STATE_CHANGED for device 0x%" PRIx64, id);
     }
 }
 

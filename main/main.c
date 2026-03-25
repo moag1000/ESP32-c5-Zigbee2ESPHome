@@ -50,10 +50,15 @@
 #include "zigbee/tuya/tuya_driver_registry.h"
 #include "zigbee/tuya/tuya_fingerbot.h"
 #include "core/device/device_registry.h"
+#include "core/device/unified_device.h"
 
 /* Converter database */
 #include "zigbee/converter/zb_converter.h"
 #include "zigbee/converter/zb_converter_loader.h"
+#include "zigbee/converter/zb_custom_quirk.h"
+
+/* Generic converter fallback (capability-based) */
+extern const zb_converter_def_t *conv_generic_for_capabilities(uint32_t caps);
 
 /* LittleFS + State Persistence */
 #include "core/littlefs_mount.h"
@@ -81,6 +86,7 @@
 #include "core/memory/module_manager.h"
 #include "core/memory/graceful_degradation.h"
 #include "core/memory/memory_manager_ng.h"
+#include "core/memory/string_intern.h"
 #include "core/monitoring/perf_metrics.h"
 
 /* LED Status includes */
@@ -477,6 +483,13 @@ void app_main(void)
         zb_converter_register_all();
         ESP_LOGI(TAG_MAIN, "Converter registry initialized");
 
+        /* Initialize string interning (PSRAM pool for converter strings) */
+        esp_err_t intern_ret = string_intern_init(512, 16384);
+        if (intern_ret != ESP_OK) {
+            ESP_LOGW(TAG_MAIN, "String intern init failed: %s (converter loader will use raw strings)",
+                     esp_err_to_name(intern_ret));
+        }
+
         /* Initialize runtime converter loader (LittleFS DB) */
         esp_err_t loader_ret = zb_converter_loader_init();
         if (loader_ret == ESP_OK) {
@@ -487,32 +500,83 @@ void app_main(void)
             ESP_LOGW(TAG_MAIN, "Converter loader unavailable (no DB on LittleFS)");
         }
 
+        /* Initialize custom community quirks (highest priority converters) */
+        esp_err_t quirk_ret = zb_custom_quirk_init();
+        if (quirk_ret == ESP_OK && zb_custom_quirk_count() > 0) {
+            ESP_LOGI(TAG_MAIN, "Custom quirks loaded: %zu", zb_custom_quirk_count());
+        }
+
         /* Re-bind converters for devices loaded from NVS.
          * device_persistence_load_all() ran before converters were registered,
-         * so NG devices have NULL converter pointers. */
+         * so NG devices have NULL converter pointers.
+         *
+         * Fallback chain:
+         * 1. Exact manufacturer+model match (zb_converter_find)
+         * 2. Generic capability-based converter (conv_generic_for_capabilities)
+         * 3. No converter — device gets entities from caps only (register_from_caps) */
         size_t dev_count = device_registry_count();
-        size_t bound = 0;
+        size_t bound = 0, generic_bound = 0, no_conv = 0;
         for (size_t i = 0; i < dev_count; i++) {
             device_t *dev = device_registry_get_by_index(i);
-            if (dev != NULL && dev->protocol == DEV_PROTOCOL_ZIGBEE &&
-                dev->model[0] != '\0' && dev->proto.zigbee.converter == NULL) {
-                const zb_converter_def_t *conv = zb_converter_find(
-                    dev->manufacturer, dev->model);
-                if (conv != NULL) {
-                    dev->proto.zigbee.converter = conv;
-                    zb_converter_bind(dev->proto.zigbee.short_addr, conv);
-                    dev->capabilities |= zb_converter_get_capabilities(conv);
-                    bound++;
+            if (dev == NULL || !dev->in_use ||
+                dev->protocol != DEV_PROTOCOL_ZIGBEE ||
+                dev->proto.zigbee.converter != NULL) {
+                continue;
+            }
+
+            const zb_converter_def_t *conv = NULL;
+
+            /* Priority 1: Exact manufacturer+model match */
+            if (dev->model[0] != '\0') {
+                conv = zb_converter_find(dev->manufacturer, dev->model);
+            }
+
+            /* Priority 2: Generic capability-based fallback */
+            if (conv == NULL && dev->capabilities != 0) {
+                conv = conv_generic_for_capabilities(dev->capabilities);
+                if (conv) {
+                    generic_bound++;
+                    ESP_LOGI(TAG_MAIN, "Generic converter for 0x%04X: "
+                             "model='%s' caps=0x%08lX -> %s",
+                             dev->proto.zigbee.short_addr,
+                             dev->model[0] ? dev->model : "(empty)",
+                             (unsigned long)dev->capabilities,
+                             conv->description ? conv->description : "generic");
+                }
+            }
+
+            if (conv != NULL) {
+                dev->proto.zigbee.converter = conv;
+                zb_converter_bind(dev->proto.zigbee.short_addr, conv);
+                dev->capabilities |= zb_converter_get_capabilities(conv);
+
+                /* Update friendly_name if still auto-generated IEEE hex */
+                char ieee_default[24];
+                device_id_to_str(dev->id, ieee_default, sizeof(ieee_default));
+                if (strcmp(dev->friendly_name, ieee_default) == 0) {
+                    snprintf(dev->friendly_name, sizeof(dev->friendly_name),
+                             "%.23s 0x%04X", dev->model, dev->proto.zigbee.short_addr);
+                }
+
+                bound++;
+                if (generic_bound == 0 || conv != conv_generic_for_capabilities(dev->capabilities)) {
                     ESP_LOGI(TAG_MAIN, "Bound converter for '%s': %s (caps=0x%08lx)",
                              dev->model,
                              conv->description ? conv->description : conv->model,
                              (unsigned long)dev->capabilities);
                 }
+            } else {
+                no_conv++;
+                ESP_LOGW(TAG_MAIN, "No converter for 0x%04X: "
+                         "mfr='%s' model='%s' caps=0x%08lX",
+                         dev->proto.zigbee.short_addr,
+                         dev->manufacturer[0] ? dev->manufacturer : "(empty)",
+                         dev->model[0] ? dev->model : "(empty)",
+                         (unsigned long)dev->capabilities);
             }
         }
-        if (bound > 0) {
-            ESP_LOGI(TAG_MAIN, "Re-bound converters for %zu device(s)", bound);
-        }
+        ESP_LOGI(TAG_MAIN, "Converter re-bind: %zu exact, %zu generic, %zu unmatched (of %zu devices)",
+                 bound - generic_bound, generic_bound, no_conv, dev_count);
     } else {
         ESP_LOGW(TAG_MAIN, "Converter registry init failed: %s (non-fatal)",
                  esp_err_to_name(ret));
@@ -1084,6 +1148,19 @@ skip_mqtt:
         }
     }
 #endif /* CONFIG_ESPHOME_API_ENABLE */
+
+    /* Initialize mmWave presence sensor if enabled */
+#if CONFIG_MMWAVE_SENSOR_ENABLE
+    {
+        extern esp_err_t mmwave_sensor_init(void);
+        ret = mmwave_sensor_init();
+        if (ret == ESP_OK) {
+            ESP_LOGI(TAG_MAIN, "mmWave presence sensor initialized");
+        } else {
+            ESP_LOGW(TAG_MAIN, "mmWave sensor init failed: %s", esp_err_to_name(ret));
+        }
+    }
+#endif
 
     /* Enter NORMAL operational phase - all services running */
     lifecycle_enter_phase(LIFECYCLE_PHASE_NORMAL);

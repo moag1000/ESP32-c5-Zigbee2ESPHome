@@ -621,8 +621,8 @@ void led_set_status(led_status_t status)
             led_set_effect(LED_EFFECT_BLINK_FAST, LED_STATUS_ERROR_BLINK_FAST_MS);
             break;
         case LED_STATUS_OTA:
-            s_red = 128; s_green = 0; s_blue = 255;  /* Purple */
-            led_set_effect(LED_EFFECT_BREATHING, LED_STATUS_ZIGBEE_BREATHING_MS);
+            s_red = 255; s_green = 0; s_blue = 0;  /* Red pulsing */
+            led_set_effect(LED_EFFECT_BREATHING, LED_STATUS_OTA_BLINK_MS);
             break;
         default:
             s_red = 0; s_green = 0; s_blue = 255;  /* Blue default */

@@ -52,6 +52,7 @@ typedef struct {
     esphome_entity_key_t key;   /**< Entity key */
     float state;                /**< Current sensor value */
     bool missing_state;         /**< True if state is unknown/unavailable */
+    uint32_t device_id;         /**< Sub-device ID for state response (proto field 4) */
 } esphome_sensor_state_t;
 
 /* ============================================================================
@@ -69,6 +70,7 @@ typedef struct {
     esphome_binary_device_class_t device_class;         /**< Device class */
     bool is_status_binary_sensor;                       /**< Is status sensor */
     bool disabled_by_default;                           /**< Disabled by default */
+    uint8_t entity_category;                            /**< Entity category (0=NONE, 1=CONFIG, 2=DIAGNOSTIC) */
     uint32_t device_id;                                 /**< Sub-device ID (0=gateway, >0=sub-device) */
 } esphome_binary_sensor_config_t;
 
@@ -79,6 +81,7 @@ typedef struct {
     esphome_entity_key_t key;   /**< Entity key */
     bool state;                 /**< Current state (on/off) */
     bool missing_state;         /**< True if state is unknown/unavailable */
+    uint32_t device_id;         /**< Sub-device ID for state response (proto field 4) */
 } esphome_binary_sensor_state_t;
 
 /* ============================================================================
@@ -114,6 +117,7 @@ typedef struct {
 typedef struct {
     esphome_entity_key_t key;   /**< Entity key */
     bool state;                 /**< Current state (on/off) */
+    uint32_t device_id;         /**< Sub-device ID for state response (proto field 3) */
 } esphome_switch_state_t;
 
 /* ============================================================================
@@ -129,6 +133,7 @@ typedef struct {
     char unique_id[ESPHOME_MAX_UNIQUE_ID_LEN];          /**< Unique ID for HA */
     char icon[ESPHOME_MAX_ICON_LEN];                    /**< MDI icon */
     bool disabled_by_default;                           /**< Disabled by default */
+    uint8_t entity_category;                            /**< Entity category (0=NONE, 1=CONFIG, 2=DIAGNOSTIC) */
     uint32_t device_id;                                 /**< Sub-device ID (0=gateway, >0=sub-device) */
 } esphome_text_sensor_config_t;
 
@@ -139,6 +144,7 @@ typedef struct {
     esphome_entity_key_t key;                   /**< Entity key */
     char state[ESPHOME_MAX_STRING_LEN];         /**< Current string state */
     bool missing_state;                         /**< True if state is unknown/unavailable */
+    uint32_t device_id;                         /**< Sub-device ID for state response (proto field 4) */
 } esphome_text_sensor_state_t;
 
 /* ============================================================================
@@ -179,6 +185,7 @@ typedef struct {
     esphome_entity_key_t key;   /**< Entity key */
     float state;                /**< Current numeric value */
     bool missing_state;         /**< True if state is unknown/unavailable */
+    uint32_t device_id;         /**< Sub-device ID for state response (proto field 4) */
 } esphome_number_state_t;
 
 /* ============================================================================
@@ -204,6 +211,7 @@ typedef struct {
     esphome_button_device_class_t device_class;         /**< Device class */
     esphome_button_press_cb_t press_callback;           /**< Press callback */
     bool disabled_by_default;                           /**< Disabled by default */
+    uint8_t entity_category;                            /**< Entity category (0=NONE, 1=CONFIG, 2=DIAGNOSTIC) */
     uint32_t device_id;                                 /**< Sub-device ID (0=gateway, >0=sub-device) */
 } esphome_button_config_t;
 
@@ -242,6 +250,7 @@ typedef struct {
     esphome_entity_key_t key;   /**< Entity key */
     char state[32];             /**< Currently selected option */
     bool missing_state;         /**< True if state is unknown/unavailable */
+    uint32_t device_id;         /**< Sub-device ID for state response (proto field 4) */
 } esphome_select_state_t;
 
 /* ============================================================================
@@ -316,6 +325,7 @@ typedef struct {
     float blue;                         /**< Blue component (0.0-1.0) */
     float white;                        /**< White brightness (0.0-1.0) */
     char effect[32];                    /**< Current effect name */
+    uint32_t device_id;                 /**< Sub-device ID for state response (proto field 14) */
 } esphome_light_state_t;
 
 /* ============================================================================
@@ -368,6 +378,7 @@ typedef struct {
     float position;                         /**< Current position (0.0-1.0) */
     float tilt;                             /**< Current tilt (0.0-1.0) */
     esphome_cover_operation_t current_operation;    /**< Current operation state */
+    uint32_t device_id;                 /**< Sub-device ID for state response (proto field 6) */
 } esphome_cover_state_t;
 
 /* ============================================================================
@@ -424,6 +435,7 @@ typedef struct {
     bool oscillating;                       /**< Oscillation state */
     int32_t speed_level;                    /**< Current speed level */
     esphome_fan_direction_t direction;      /**< Current direction */
+    uint32_t device_id;                     /**< Sub-device ID for state response (proto field 8) */
 } esphome_fan_state_t;
 
 /* ============================================================================
@@ -497,6 +509,7 @@ typedef struct {
     esphome_climate_fan_mode_t fan_mode;    /**< Current fan mode */
     esphome_climate_swing_mode_t swing_mode;    /**< Current swing mode */
     esphome_climate_preset_t preset;        /**< Current preset */
+    uint32_t device_id;                     /**< Sub-device ID for state response (proto field 16) */
 } esphome_climate_state_t;
 
 /* ============================================================================
@@ -535,6 +548,7 @@ typedef struct {
 typedef struct {
     esphome_entity_key_t key;               /**< Entity key */
     esphome_lock_state_t state;             /**< Current lock state */
+    uint32_t device_id;                     /**< Sub-device ID for state response (proto field 3) */
 } esphome_lock_entity_state_t;
 
 /* ============================================================================
@@ -585,6 +599,7 @@ typedef struct {
     esphome_media_player_state_t state;         /**< Current state */
     float volume;                               /**< Current volume (0.0-1.0) */
     bool muted;                                 /**< Muted state */
+    uint32_t device_id;                         /**< Sub-device ID for state response (proto field 5) */
 } esphome_media_player_entity_state_t;
 
 /* ============================================================================
@@ -625,6 +640,7 @@ typedef struct {
 typedef struct {
     esphome_entity_key_t key;               /**< Entity key */
     esphome_alarm_state_t state;            /**< Current alarm state */
+    uint32_t device_id;                     /**< Sub-device ID for state response (proto field 3) */
 } esphome_alarm_entity_state_t;
 
 /* ============================================================================
@@ -664,6 +680,7 @@ typedef struct {
     esphome_entity_key_t key;                   /**< Entity key */
     char state[ESPHOME_MAX_STRING_LEN];         /**< Current text value */
     bool missing_state;                         /**< True if state is unknown/unavailable */
+    uint32_t device_id;                         /**< Sub-device ID for state response (proto field 4) */
 } esphome_text_entity_state_t;
 
 /* ============================================================================

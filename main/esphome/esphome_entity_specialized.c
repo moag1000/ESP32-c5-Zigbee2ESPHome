@@ -207,6 +207,7 @@ esp_err_t esphome_entity_register_lock(const esphome_lock_config_t *config)
     size_t idx = s_entities.lock_count;
     memcpy(&s_entities.locks[idx].config, config, sizeof(esphome_lock_config_t));
     s_entities.locks[idx].state.key = config->key;
+    s_entities.locks[idx].state.device_id = config->device_id;
     s_entities.locks[idx].state.state = ESPHOME_LOCK_STATE_LOCKED;
     s_entities.locks[idx].registered = true;
     s_entities.lock_count++;
@@ -411,6 +412,7 @@ esp_err_t esphome_entity_register_media_player(const esphome_media_player_config
     size_t idx = s_entities.media_player_count;
     memcpy(&s_entities.media_players[idx].config, config, sizeof(esphome_media_player_config_t));
     s_entities.media_players[idx].state.key = config->key;
+    s_entities.media_players[idx].state.device_id = config->device_id;
     s_entities.media_players[idx].state.state = ESPHOME_MEDIA_PLAYER_STATE_IDLE;
     s_entities.media_players[idx].state.volume = 1.0f;
     s_entities.media_players[idx].state.muted = false;
@@ -642,6 +644,7 @@ esp_err_t esphome_entity_register_alarm(const esphome_alarm_config_t *config)
     size_t idx = s_entities.alarm_count;
     memcpy(&s_entities.alarms[idx].config, config, sizeof(esphome_alarm_config_t));
     s_entities.alarms[idx].state.key = config->key;
+    s_entities.alarms[idx].state.device_id = config->device_id;
     s_entities.alarms[idx].state.state = ESPHOME_ALARM_STATE_DISARMED;
     s_entities.alarms[idx].registered = true;
     s_entities.alarm_count++;
@@ -861,6 +864,7 @@ esp_err_t esphome_entity_register_text(const esphome_text_config_t *config)
     size_t idx = s_entities.text_count;
     memcpy(&s_entities.texts[idx].config, config, sizeof(esphome_text_config_t));
     s_entities.texts[idx].state.key = config->key;
+    s_entities.texts[idx].state.device_id = config->device_id;
     s_entities.texts[idx].state.state[0] = '\0';
     s_entities.texts[idx].state.missing_state = true;
     s_entities.texts[idx].registered = true;
@@ -1097,9 +1101,23 @@ esp_err_t esphome_encode_button_list_entry(const esphome_button_config_t *config
         esphome_encode_bool(&buf, 6, config->disabled_by_default);
     }
 
-    /* Field 7: device_class (enum as uint32) */
+    /* Field 7: entity_category (0=NONE, 1=CONFIG, 2=DIAGNOSTIC) */
+    if (config->entity_category != 0) {
+        esphome_encode_uint32(&buf, 7, (uint32_t)config->entity_category);
+    }
+
+    /* Field 8: device_class (string) */
     if (config->device_class != ESPHOME_BUTTON_CLASS_NONE) {
-        esphome_encode_uint32(&buf, 7, (uint32_t)config->device_class);
+        const char *dc_str = "";
+        switch (config->device_class) {
+            case ESPHOME_BUTTON_CLASS_RESTART: dc_str = "restart"; break;
+            case ESPHOME_BUTTON_CLASS_UPDATE:  dc_str = "update"; break;
+            case ESPHOME_BUTTON_CLASS_IDENTIFY: dc_str = "identify"; break;
+            default: break;
+        }
+        if (dc_str[0] != '\0') {
+            esphome_encode_string(&buf, 8, dc_str);
+        }
     }
 
     /* Field 9: device_id (sub-device grouping) */
@@ -1153,19 +1171,19 @@ esp_err_t esphome_encode_lock_list_entry(const esphome_lock_config_t *config,
         esphome_encode_bool(&buf, 6, config->disabled_by_default);
     }
 
-    /* Field 7: assumed_state (bool) */
+    /* Field 8: assumed_state (bool) */
     if (config->assumed_state) {
-        esphome_encode_bool(&buf, 7, config->assumed_state);
+        esphome_encode_bool(&buf, 8, config->assumed_state);
     }
 
-    /* Field 8: supports_open (bool) */
+    /* Field 9: supports_open (bool) */
     if (config->supports_open) {
-        esphome_encode_bool(&buf, 8, config->supports_open);
+        esphome_encode_bool(&buf, 9, config->supports_open);
     }
 
-    /* Field 9: requires_code (bool) */
+    /* Field 10: requires_code (bool) */
     if (config->requires_code) {
-        esphome_encode_bool(&buf, 9, config->requires_code);
+        esphome_encode_bool(&buf, 10, config->requires_code);
     }
 
     /* Field 12: device_id (sub-device grouping) */
@@ -1198,6 +1216,11 @@ esp_err_t esphome_encode_lock_state(const esphome_lock_entity_state_t *state,
 
     /* Field 2: state (enum) */
     esphome_encode_uint32(&buf, 2, (uint32_t)state->state);
+
+    /* Field 3: device_id (uint32) - required for sub-device entity availability */
+    if (state->device_id != 0) {
+        esphome_encode_uint32(&buf, 3, state->device_id);
+    }
 
     if (esphome_buffer_overflow(&buf)) {
         return ESPHOME_ERR_BUFFER_OVERFLOW;
@@ -1245,19 +1268,19 @@ esp_err_t esphome_encode_text_list_entry(const esphome_text_config_t *config,
         esphome_encode_bool(&buf, 6, config->disabled_by_default);
     }
 
-    /* Field 7: min_length (uint32) */
-    esphome_encode_uint32(&buf, 7, config->min_length);
+    /* Field 8: min_length (uint32) */
+    esphome_encode_uint32(&buf, 8, config->min_length);
 
-    /* Field 8: max_length (uint32) */
-    esphome_encode_uint32(&buf, 8, config->max_length);
+    /* Field 9: max_length (uint32) */
+    esphome_encode_uint32(&buf, 9, config->max_length);
 
-    /* Field 9: pattern (string) */
+    /* Field 10: pattern (string) */
     if (config->pattern[0] != '\0') {
-        esphome_encode_string(&buf, 9, config->pattern);
+        esphome_encode_string(&buf, 10, config->pattern);
     }
 
-    /* Field 10: mode (enum) */
-    esphome_encode_uint32(&buf, 10, (uint32_t)config->mode);
+    /* Field 11: mode (enum) */
+    esphome_encode_uint32(&buf, 11, (uint32_t)config->mode);
 
     /* Field 12: device_id (sub-device grouping) */
     if (config->device_id != 0) {
@@ -1293,6 +1316,11 @@ esp_err_t esphome_encode_text_state(const esphome_text_entity_state_t *state,
     /* Field 3: missing_state (bool) */
     if (state->missing_state) {
         esphome_encode_bool(&buf, 3, state->missing_state);
+    }
+
+    /* Field 4: device_id (uint32) - required for sub-device entity availability */
+    if (state->device_id != 0) {
+        esphome_encode_uint32(&buf, 4, state->device_id);
     }
 
     if (esphome_buffer_overflow(&buf)) {
@@ -1341,9 +1369,9 @@ esp_err_t esphome_encode_media_player_list_entry(const esphome_media_player_conf
         esphome_encode_bool(&buf, 6, config->disabled_by_default);
     }
 
-    /* Field 7: supports_pause (bool) */
+    /* Field 8: supports_pause (bool) */
     if (config->supports_pause) {
-        esphome_encode_bool(&buf, 7, config->supports_pause);
+        esphome_encode_bool(&buf, 8, config->supports_pause);
     }
 
     /* Field 10: device_id (sub-device grouping) */
@@ -1383,6 +1411,11 @@ esp_err_t esphome_encode_media_player_state(const esphome_media_player_entity_st
     /* Field 4: muted (bool) */
     if (state->muted) {
         esphome_encode_bool(&buf, 4, state->muted);
+    }
+
+    /* Field 5: device_id (uint32) - required for sub-device entity availability */
+    if (state->device_id != 0) {
+        esphome_encode_uint32(&buf, 5, state->device_id);
     }
 
     if (esphome_buffer_overflow(&buf)) {
@@ -1431,17 +1464,17 @@ esp_err_t esphome_encode_alarm_list_entry(const esphome_alarm_config_t *config,
         esphome_encode_bool(&buf, 6, config->disabled_by_default);
     }
 
-    /* Field 7: supported_features (bitmask) */
-    esphome_encode_uint32(&buf, 7, config->supported_features);
+    /* Field 8: supported_features (bitmask) */
+    esphome_encode_uint32(&buf, 8, config->supported_features);
 
-    /* Field 8: requires_code (bool) */
+    /* Field 9: requires_code (bool) */
     if (config->requires_code) {
-        esphome_encode_bool(&buf, 8, config->requires_code);
+        esphome_encode_bool(&buf, 9, config->requires_code);
     }
 
-    /* Field 9: requires_code_to_arm (bool) */
+    /* Field 10: requires_code_to_arm (bool) */
     if (config->requires_code_to_arm) {
-        esphome_encode_bool(&buf, 9, config->requires_code_to_arm);
+        esphome_encode_bool(&buf, 10, config->requires_code_to_arm);
     }
 
     /* Field 11: device_id (sub-device grouping) */
@@ -1474,6 +1507,11 @@ esp_err_t esphome_encode_alarm_state(const esphome_alarm_entity_state_t *state,
 
     /* Field 2: state (enum) */
     esphome_encode_uint32(&buf, 2, (uint32_t)state->state);
+
+    /* Field 3: device_id (uint32) - required for sub-device entity availability */
+    if (state->device_id != 0) {
+        esphome_encode_uint32(&buf, 3, state->device_id);
+    }
 
     if (esphome_buffer_overflow(&buf)) {
         return ESPHOME_ERR_BUFFER_OVERFLOW;

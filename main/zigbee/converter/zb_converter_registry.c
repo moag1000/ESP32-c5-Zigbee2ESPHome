@@ -25,6 +25,7 @@
 #include <string.h>
 #include <inttypes.h>
 #include "zb_converter_loader.h"
+#include "zb_custom_quirk.h"
 
 static const char *TAG = "CONV_REG";
 
@@ -33,11 +34,7 @@ static const char *TAG = "CONV_REG";
  * ============================================================================ */
 
 extern void conv_generic_register(void);
-extern void conv_ikea_register(void);
-extern void conv_xiaomi_register(void);
-extern void conv_philips_register(void);
-extern void conv_sonoff_register(void);
-extern void conv_lidl_register(void);
+extern void conv_tuya_fingerbot_register(void);
 extern void conv_tuya_bridge_register(void);
 
 /* Generic capability-based converter lookup */
@@ -67,6 +64,26 @@ static SemaphoreHandle_t s_mutex = NULL;
 /** @brief Initialization flag */
 static bool s_initialized = false;
 
+/** @brief Dispatch context for fz/tz generic converters */
+static zb_dispatch_ctx_t s_dispatch_ctx;
+
+/** @brief Mutex protecting s_dispatch_ctx from concurrent report/command dispatch */
+static SemaphoreHandle_t s_dispatch_mutex = NULL;
+
+void zb_converter_set_dispatch_ctx(const zb_dispatch_ctx_t *ctx)
+{
+    if (ctx != NULL) {
+        s_dispatch_ctx = *ctx;
+    } else {
+        memset(&s_dispatch_ctx, 0, sizeof(s_dispatch_ctx));
+    }
+}
+
+const zb_dispatch_ctx_t *zb_converter_get_dispatch_ctx(void)
+{
+    return &s_dispatch_ctx;
+}
+
 /* ============================================================================
  * Public API
  * ============================================================================ */
@@ -81,6 +98,14 @@ esp_err_t zb_converter_registry_init(void)
     s_mutex = xSemaphoreCreateMutex();
     if (s_mutex == NULL) {
         ESP_LOGE(TAG, "Failed to create converter registry mutex");
+        return ESP_ERR_NO_MEM;
+    }
+
+    s_dispatch_mutex = xSemaphoreCreateMutex();
+    if (s_dispatch_mutex == NULL) {
+        ESP_LOGE(TAG, "Failed to create dispatch mutex");
+        vSemaphoreDelete(s_mutex);
+        s_mutex = NULL;
         return ESP_ERR_NO_MEM;
     }
 
@@ -109,11 +134,7 @@ esp_err_t zb_converter_register_all(void)
 
     /* Register converter modules */
     conv_generic_register();
-    conv_ikea_register();
-    conv_xiaomi_register();
-    conv_philips_register();
-    conv_sonoff_register();
-    conv_lidl_register();
+    conv_tuya_fingerbot_register();    /* BEFORE generic bridge — exact match wins */
     conv_tuya_bridge_register();
 
     ESP_LOGI(TAG, "Registered %zu converter definitions", s_definition_count);
@@ -160,9 +181,17 @@ const zb_converter_def_t *zb_converter_find(const char *manufacturer, const char
         return NULL;
     }
 
+    /* Priority 0: Custom community quirks (highest priority) */
+    const zb_converter_def_t *custom = zb_custom_quirk_find(manufacturer, model);
+    if (custom != NULL) {
+        ESP_LOGI(TAG, "Found custom quirk: %s %s",
+                 manufacturer ? manufacturer : "*", model);
+        return custom;
+    }
+
     xSemaphoreTake(s_mutex, GW_TIMEOUT_LONG_TICKS);
 
-    /* First pass: try exact match on both manufacturer and model */
+    /* Priority 1: try exact match on both manufacturer and model */
     if (manufacturer != NULL && manufacturer[0] != '\0') {
         for (size_t i = 0; i < s_definition_count; i++) {
             const zb_converter_def_t *def = s_definitions[i];
@@ -178,7 +207,13 @@ const zb_converter_def_t *zb_converter_find(const char *manufacturer, const char
         }
     }
 
-    /* Second pass: try match by model only (for sleepy devices that don't report manufacturer) */
+    /* Priority 1b: try match by model only.
+     * Only used when input manufacturer is NULL/empty (sleepy device that didn't
+     * report manufacturer), OR when the definition has no manufacturer (wildcard).
+     * NEVER match when both input and definition have manufacturer strings that differ —
+     * this prevents e.g. Fingerbot (_TZ3210_dse8ogfy/TS0001) from matching the wrong
+     * TS0001 definition registered by a different Tuya manufacturer. */
+    bool input_has_mfr = (manufacturer != NULL && manufacturer[0] != '\0');
     for (size_t i = 0; i < s_definition_count; i++) {
         const zb_converter_def_t *def = s_definitions[i];
         if (def == NULL || def->model == NULL) {
@@ -186,6 +221,12 @@ const zb_converter_def_t *zb_converter_find(const char *manufacturer, const char
         }
 
         if (strcmp(def->model, model) == 0) {
+            /* If both sides have a manufacturer string, they must match */
+            bool def_has_mfr = (def->manufacturer != NULL && def->manufacturer[0] != '\0');
+            if (input_has_mfr && def_has_mfr &&
+                strcmp(def->manufacturer, manufacturer) != 0) {
+                continue;  /* Skip: manufacturer mismatch */
+            }
             xSemaphoreGive(s_mutex);
             return def;
         }
@@ -193,7 +234,7 @@ const zb_converter_def_t *zb_converter_find(const char *manufacturer, const char
 
     xSemaphoreGive(s_mutex);
 
-    /* Third pass: try runtime converter loader (LittleFS DB) */
+    /* Priority 2: try runtime converter loader (LittleFS DB) */
     if (zb_converter_loader_is_available()) {
         const zb_converter_def_t *loaded = zb_converter_loader_find(manufacturer, model);
         if (loaded != NULL) {
@@ -277,6 +318,22 @@ esp_err_t zb_converter_unbind(uint16_t short_addr)
     return ESP_ERR_NOT_FOUND;
 }
 
+void zb_converter_unbind_all(void)
+{
+    if (!s_initialized || s_mutex == NULL) {
+        return;
+    }
+
+    xSemaphoreTake(s_mutex, GW_TIMEOUT_LONG_TICKS);
+    size_t old_count = s_binding_count;
+    s_binding_count = 0;
+    xSemaphoreGive(s_mutex);
+
+    if (old_count > 0) {
+        ESP_LOGI(TAG, "Cleared all %zu converter bindings", old_count);
+    }
+}
+
 const zb_converter_def_t *zb_converter_get(uint16_t short_addr)
 {
     if (!s_initialized || s_mutex == NULL) {
@@ -297,40 +354,67 @@ const zb_converter_def_t *zb_converter_get(uint16_t short_addr)
     return NULL;
 }
 
+/**
+ * @brief Auto-rebind converter for a device after reboot
+ *
+ * After reboot, the binding table is empty but devices may be persisted
+ * in NVS with manufacturer/model. This helper looks up the converter
+ * from the DB and binds it, or falls back to the generic converter.
+ *
+ * @param short_addr Device short address
+ * @param context    Caller context string for logging ("report" or "command")
+ * @return Converter def, or NULL if no converter could be found
+ */
+static const zb_converter_def_t *auto_rebind_converter(uint16_t short_addr,
+                                                         const char *context)
+{
+    device_t *dev = device_registry_get_by_short_addr(short_addr);
+    if (dev == NULL) {
+        return NULL;
+    }
+
+    const zb_converter_def_t *def = NULL;
+
+    if (dev->model[0] != '\0') {
+        const zb_converter_def_t *conv = zb_converter_find(
+            dev->manufacturer, dev->model);
+        if (conv != NULL) {
+            zb_converter_bind(short_addr, conv);
+            dev->proto.zigbee.converter = (void *)conv;
+            uint32_t caps = zb_converter_get_capabilities(conv);
+            if (caps != 0) {
+                dev->capabilities |= caps;
+            }
+            ESP_LOGI(TAG, "Auto-rebound converter for %s 0x%04X: %s",
+                     context, short_addr,
+                     conv->description ? conv->description : conv->model);
+            def = conv;
+        }
+    }
+
+    /* If still no converter, try generic fallback by capabilities */
+    if (def == NULL && dev->capabilities != 0) {
+        const zb_converter_def_t *generic =
+            conv_generic_for_capabilities(dev->capabilities);
+        if (generic != NULL) {
+            zb_converter_bind(short_addr, generic);
+            ESP_LOGI(TAG, "Bound generic converter for %s 0x%04X: %s",
+                     context, short_addr, generic->description);
+            def = generic;
+        }
+    }
+
+    return def;
+}
+
 esp_err_t zb_converter_handle_report(uint16_t short_addr, uint8_t endpoint,
                                       uint16_t cluster_id, uint16_t attr_id,
-                                      const void *raw, size_t len)
+                                      const void *raw, size_t len,
+                                      uint8_t zcl_attr_type)
 {
     const zb_converter_def_t *def = zb_converter_get(short_addr);
     if (def == NULL) {
-        /* Auto-rebind: after reboot, binding table is empty but device may
-         * be persisted in NVS with manufacturer/model. Look up and bind. */
-        device_t *rebind_dev = device_registry_get_by_short_addr(short_addr);
-        if (rebind_dev != NULL && rebind_dev->model[0] != '\0') {
-            const zb_converter_def_t *conv = zb_converter_find(
-                rebind_dev->manufacturer, rebind_dev->model);
-            if (conv != NULL) {
-                zb_converter_bind(short_addr, conv);
-                rebind_dev->proto.zigbee.converter = (void *)conv;
-                uint32_t caps = zb_converter_get_capabilities(conv);
-                if (caps != 0) {
-                    rebind_dev->capabilities |= caps;
-                }
-                ESP_LOGI(TAG, "Auto-rebound converter for 0x%04X: %s",
-                         short_addr, conv->description ? conv->description : conv->model);
-                def = conv;
-            }
-        }
-        /* If still no converter, try generic fallback by capabilities */
-        if (def == NULL && rebind_dev != NULL && rebind_dev->capabilities != 0) {
-            const zb_converter_def_t *generic = conv_generic_for_capabilities(rebind_dev->capabilities);
-            if (generic != NULL) {
-                zb_converter_bind(short_addr, generic);
-                ESP_LOGI(TAG, "Bound generic converter for report 0x%04X: %s",
-                         short_addr, generic->description);
-                def = generic;
-            }
-        }
+        def = auto_rebind_converter(short_addr, "report");
         if (def == NULL) {
             ESP_LOGD(TAG, "No converter bound for 0x%04X", short_addr);
             return ESP_ERR_NOT_FOUND;
@@ -345,6 +429,17 @@ esp_err_t zb_converter_handle_report(uint16_t short_addr, uint8_t endpoint,
     if (json == NULL) {
         return ESP_ERR_NO_MEM;
     }
+
+    /* Set dispatch context for generic converters (fz_generic_attr etc.) */
+    xSemaphoreTake(s_dispatch_mutex, portMAX_DELAY);
+
+    zb_dispatch_ctx_t ctx = {
+        .conv = def,
+        .zcl_attr_type = zcl_attr_type,
+        .cluster_id = cluster_id,
+        .attr_id = attr_id,
+    };
+    zb_converter_set_dispatch_ctx(&ctx);
 
     bool handled = false;
     for (uint8_t i = 0; i < def->from_zigbee_count; i++) {
@@ -366,6 +461,10 @@ esp_err_t zb_converter_handle_report(uint16_t short_addr, uint8_t endpoint,
             }
         }
     }
+
+    /* Clear dispatch context */
+    zb_converter_set_dispatch_ctx(NULL);
+    xSemaphoreGive(s_dispatch_mutex);
 
     if (!handled) {
         ESP_LOGD(TAG, "No fz match for 0x%04X cluster=0x%04X attr=0x%04X — fallback to generic",
@@ -429,35 +528,9 @@ esp_err_t zb_converter_handle_command(uint16_t short_addr, uint8_t endpoint,
 
     const zb_converter_def_t *def = zb_converter_get(short_addr);
     if (def == NULL) {
-        /* Auto-rebind: after reboot, binding table is empty but device may
-         * be persisted in NVS with manufacturer/model. Look up and bind. */
-        device_t *rebind_dev = device_registry_get_by_short_addr(short_addr);
-        if (rebind_dev != NULL && rebind_dev->model[0] != '\0') {
-            const zb_converter_def_t *conv = zb_converter_find(
-                rebind_dev->manufacturer, rebind_dev->model);
-            if (conv != NULL) {
-                zb_converter_bind(short_addr, conv);
-                rebind_dev->proto.zigbee.converter = (void *)conv;
-                uint32_t caps = zb_converter_get_capabilities(conv);
-                if (caps != 0) {
-                    rebind_dev->capabilities |= caps;
-                }
-                ESP_LOGI(TAG, "Auto-rebound converter for command 0x%04X: %s",
-                         short_addr, conv->description ? conv->description : conv->model);
-                def = conv;
-            }
-        }
-        /* If still no converter, try generic fallback by capabilities */
-        if (def == NULL && rebind_dev != NULL && rebind_dev->capabilities != 0) {
-            const zb_converter_def_t *generic = conv_generic_for_capabilities(rebind_dev->capabilities);
-            if (generic != NULL) {
-                zb_converter_bind(short_addr, generic);
-                ESP_LOGI(TAG, "Bound generic converter for command 0x%04X: %s",
-                         short_addr, generic->description);
-                def = generic;
-            }
-        }
+        def = auto_rebind_converter(short_addr, "command");
         if (def == NULL) {
+            device_t *rebind_dev = device_registry_get_by_short_addr(short_addr);
             if (rebind_dev != NULL) {
                 ESP_LOGW(TAG, "Auto-rebind failed for 0x%04X: model='%s' caps=0x%08" PRIx32,
                          short_addr, rebind_dev->model, rebind_dev->capabilities);
@@ -482,6 +555,17 @@ esp_err_t zb_converter_handle_command(uint16_t short_addr, uint8_t endpoint,
                  short_addr, device->capabilities);
     }
 
+    /* Set dispatch context for generic converters (tz_generic_write_attr etc.) */
+    xSemaphoreTake(s_dispatch_mutex, portMAX_DELAY);
+
+    zb_dispatch_ctx_t tz_ctx = {
+        .conv = def,
+        .zcl_attr_type = 0,
+        .cluster_id = 0,
+        .attr_id = 0,
+    };
+    zb_converter_set_dispatch_ctx(&tz_ctx);
+
     bool handled = false;
     bool found = false;
     esp_err_t last_err = ESP_ERR_NOT_FOUND;
@@ -496,6 +580,9 @@ esp_err_t zb_converter_handle_command(uint16_t short_addr, uint8_t endpoint,
         cJSON *item = cJSON_GetObjectItem(json, tz->json_key);
         if (item != NULL) {
             found = true;
+            /* Update dispatch context with matched tz entry's cluster */
+            tz_ctx.cluster_id = tz->cluster_id;
+            zb_converter_set_dispatch_ctx(&tz_ctx);
             /* Tuya devices expect the full JSON command object, not individual values */
             const cJSON *convert_arg = (def->quirk_flags & ZB_QUIRK_TUYA_DEVICE) ? json : item;
             uint8_t target_ep = (tz->endpoint != 0) ? tz->endpoint : endpoint;
@@ -532,6 +619,10 @@ esp_err_t zb_converter_handle_command(uint16_t short_addr, uint8_t endpoint,
             }
         }
     }
+
+    /* Clear dispatch context */
+    zb_converter_set_dispatch_ctx(NULL);
+    xSemaphoreGive(s_dispatch_mutex);
 
     if (handled) return ESP_OK;
     if (found) return last_err;  /* Converter found but failed (not ESP_ERR_NOT_FOUND) */

@@ -8,6 +8,7 @@
 
 #include "zb_converter_loader.h"
 #include "zb_converter_fn_registry.h"
+#include "zb_quirk_engine.h"
 #include "core/littlefs_mount.h"
 #include "core/memory/memory_manager_ng.h"
 #include "core/memory/string_intern.h"
@@ -17,13 +18,14 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include <string.h>
+#include <stdlib.h>
 #include <stdio.h>
 
 static const char *TAG = "CONV_LOAD";
 
 #define CONVERTER_DB_PATH       LITTLEFS_MOUNT_POINT "/converters"
 #define INDEX_FILE_PATH         CONVERTER_DB_PATH "/index.json"
-#define MAX_INDEX_ENTRIES        128
+#define MAX_INDEX_ENTRIES        256
 #define MAX_CACHED_CONVERTERS    32
 #define MAX_FZ_PER_DEVICE        16
 #define MAX_TZ_PER_DEVICE        8
@@ -62,6 +64,35 @@ static size_t s_cache_bytes = 0;
 static SemaphoreHandle_t s_mutex = NULL;
 static bool s_initialized = false;
 static bool s_available = false;
+
+/* Quirk data associated with cached converter definitions */
+#define MAX_QUIRK_DATA 32
+static struct {
+    const zb_converter_def_t *def;
+    quirk_data_t *data;
+} s_quirk_assoc[MAX_QUIRK_DATA];
+static size_t s_quirk_assoc_count = 0;
+
+/* ============================================================================
+ * Quirk association helpers
+ * ============================================================================ */
+
+static void quirk_assoc_set(const zb_converter_def_t *def, quirk_data_t *data)
+{
+    if (s_quirk_assoc_count < MAX_QUIRK_DATA) {
+        s_quirk_assoc[s_quirk_assoc_count].def = def;
+        s_quirk_assoc[s_quirk_assoc_count].data = data;
+        s_quirk_assoc_count++;
+    }
+}
+
+quirk_data_t *zb_converter_loader_get_quirk_data(const zb_converter_def_t *def)
+{
+    for (size_t i = 0; i < s_quirk_assoc_count; i++) {
+        if (s_quirk_assoc[i].def == def) return s_quirk_assoc[i].data;
+    }
+    return NULL;
+}
 
 /* ============================================================================
  * File I/O helper
@@ -120,40 +151,97 @@ static esp_err_t load_index(void)
         return ESP_ERR_INVALID_RESPONSE;
     }
 
-    /* Validate version */
-    cJSON *ver = cJSON_GetObjectItem(root, "v");
-    if (ver == NULL || !cJSON_IsNumber(ver) || (int)cJSON_GetNumberValue(ver) != 1) {
-        ESP_LOGE(TAG, "Unsupported index version");
+    /* Detect index version: v2 uses "version", v1 uses "v" */
+    int index_version = 0;
+    cJSON *ver2 = cJSON_GetObjectItem(root, "version");
+    cJSON *ver1 = cJSON_GetObjectItem(root, "v");
+
+    if (ver2 && cJSON_IsNumber(ver2)) {
+        index_version = (int)cJSON_GetNumberValue(ver2);
+    } else if (ver1 && cJSON_IsNumber(ver1)) {
+        index_version = (int)cJSON_GetNumberValue(ver1);
+    }
+
+    if (index_version != 1 && index_version != 2) {
+        ESP_LOGE(TAG, "Unsupported index version: %d", index_version);
         cJSON_Delete(root);
         return ESP_ERR_INVALID_VERSION;
     }
 
-    /* Read device count */
-    cJSON *count = cJSON_GetObjectItem(root, "count");
-    if (count && cJSON_IsNumber(count)) {
-        s_db_device_count = (size_t)cJSON_GetNumberValue(count);
-    }
-
-    /* Parse files mapping */
-    cJSON *files = cJSON_GetObjectItem(root, "files");
-    if (files == NULL || !cJSON_IsObject(files)) {
-        ESP_LOGE(TAG, "No 'files' object in index.json");
-        cJSON_Delete(root);
-        return ESP_ERR_INVALID_RESPONSE;
-    }
-
     s_index_count = 0;
-    cJSON *entry = NULL;
-    cJSON_ArrayForEach(entry, files) {
-        if (s_index_count >= MAX_INDEX_ENTRIES) {
-            ESP_LOGW(TAG, "Index full at %d entries", MAX_INDEX_ENTRIES);
-            break;
-        }
-        if (!cJSON_IsString(entry)) continue;
 
-        s_index[s_index_count].manufacturer = string_intern(entry->string);
-        s_index[s_index_count].filename = string_intern(cJSON_GetStringValue(entry));
-        s_index_count++;
+    if (index_version == 2) {
+        /* v2 format: "manufacturers" object, "total_devices" */
+        cJSON *total = cJSON_GetObjectItem(root, "total_devices");
+        if (total && cJSON_IsNumber(total)) {
+            s_db_device_count = (size_t)cJSON_GetNumberValue(total);
+        }
+
+        cJSON *manufacturers = cJSON_GetObjectItem(root, "manufacturers");
+        if (manufacturers == NULL || !cJSON_IsObject(manufacturers)) {
+            ESP_LOGE(TAG, "No 'manufacturers' object in v2 index.json");
+            cJSON_Delete(root);
+            return ESP_ERR_INVALID_RESPONSE;
+        }
+
+        cJSON *entry = NULL;
+        cJSON_ArrayForEach(entry, manufacturers) {
+            if (s_index_count >= MAX_INDEX_ENTRIES) {
+                ESP_LOGW(TAG, "Index full at %d entries", MAX_INDEX_ENTRIES);
+                break;
+            }
+            if (!cJSON_IsObject(entry)) continue;
+
+            const char *mfr = string_intern(entry->string);
+
+            /* Check for "files" array (split manufacturers like LUMI → lumi_1..3) */
+            cJSON *files_arr = cJSON_GetObjectItem(entry, "files");
+            if (files_arr != NULL && cJSON_IsArray(files_arr)) {
+                cJSON *f = NULL;
+                cJSON_ArrayForEach(f, files_arr) {
+                    if (s_index_count >= MAX_INDEX_ENTRIES) break;
+                    if (!cJSON_IsString(f)) continue;
+                    s_index[s_index_count].manufacturer = mfr;
+                    s_index[s_index_count].filename = string_intern(cJSON_GetStringValue(f));
+                    s_index_count++;
+                }
+                continue;
+            }
+
+            /* Single "file" string (non-split manufacturer) */
+            cJSON *file_j = cJSON_GetObjectItem(entry, "file");
+            if (file_j == NULL || !cJSON_IsString(file_j)) continue;
+
+            s_index[s_index_count].manufacturer = mfr;
+            s_index[s_index_count].filename = string_intern(cJSON_GetStringValue(file_j));
+            s_index_count++;
+        }
+    } else {
+        /* v1 format: "files" object, "count" */
+        cJSON *count = cJSON_GetObjectItem(root, "count");
+        if (count && cJSON_IsNumber(count)) {
+            s_db_device_count = (size_t)cJSON_GetNumberValue(count);
+        }
+
+        cJSON *files = cJSON_GetObjectItem(root, "files");
+        if (files == NULL || !cJSON_IsObject(files)) {
+            ESP_LOGE(TAG, "No 'files' object in index.json");
+            cJSON_Delete(root);
+            return ESP_ERR_INVALID_RESPONSE;
+        }
+
+        cJSON *entry = NULL;
+        cJSON_ArrayForEach(entry, files) {
+            if (s_index_count >= MAX_INDEX_ENTRIES) {
+                ESP_LOGW(TAG, "Index full at %d entries", MAX_INDEX_ENTRIES);
+                break;
+            }
+            if (!cJSON_IsString(entry)) continue;
+
+            s_index[s_index_count].manufacturer = string_intern(entry->string);
+            s_index[s_index_count].filename = string_intern(cJSON_GetStringValue(entry));
+            s_index_count++;
+        }
     }
 
     cJSON_Delete(root);
@@ -179,7 +267,7 @@ static zb_expose_type_t map_expose_type(int t)
  * Parse a single device from cJSON
  * ============================================================================ */
 
-static zb_converter_def_t *parse_device(const cJSON *dev_json)
+zb_converter_def_t *zb_converter_loader_parse_device(const cJSON *dev_json)
 {
     cJSON *model_j = cJSON_GetObjectItem(dev_json, "m");
     cJSON *manuf_j = cJSON_GetObjectItem(dev_json, "mf");
@@ -308,6 +396,9 @@ static zb_converter_def_t *parse_device(const cJSON *dev_json)
                 cJSON *t = cJSON_GetObjectItem(item, "t");
                 cJSON *f = cJSON_GetObjectItem(item, "f");
                 cJSON *n = cJSON_GetObjectItem(item, "n");
+                cJSON *p = cJSON_GetObjectItem(item, "p");
+                cJSON *ac = cJSON_GetObjectItem(item, "ac");
+                cJSON *ep = cJSON_GetObjectItem(item, "ep");
                 cJSON *dc = cJSON_GetObjectItem(item, "dc");
                 cJSON *u = cJSON_GetObjectItem(item, "u");
                 cJSON *sc = cJSON_GetObjectItem(item, "sc");
@@ -318,16 +409,177 @@ static zb_converter_def_t *parse_device(const cJSON *dev_json)
                     (uint32_t)cJSON_GetNumberValue(f) : 0;
                 exposes[i].name = (n && cJSON_IsString(n)) ?
                     string_intern(cJSON_GetStringValue(n)) : NULL;
+                exposes[i].property = (p && cJSON_IsString(p)) ?
+                    string_intern(cJSON_GetStringValue(p)) : NULL;
+                exposes[i].access = (ac && cJSON_IsNumber(ac)) ?
+                    (uint8_t)cJSON_GetNumberValue(ac) : EA_STATE;
+                exposes[i].endpoint = (ep && cJSON_IsNumber(ep)) ?
+                    (uint8_t)cJSON_GetNumberValue(ep) : 0;
                 exposes[i].device_class = (dc && cJSON_IsString(dc)) ?
                     string_intern(cJSON_GetStringValue(dc)) : NULL;
                 exposes[i].unit = (u && cJSON_IsString(u)) ?
                     string_intern(cJSON_GetStringValue(u)) : NULL;
                 exposes[i].state_class = (sc && cJSON_IsString(sc)) ?
                     string_intern(cJSON_GetStringValue(sc)) : NULL;
-                exposes[i].endpoint = 0;
+
+                cJSON *icon_j = cJSON_GetObjectItem(item, "icon");
+                cJSON *desc_exp = cJSON_GetObjectItem(item, "desc");
+                exposes[i].icon = (icon_j && cJSON_IsString(icon_j)) ?
+                    string_intern(cJSON_GetStringValue(icon_j)) : NULL;
+                exposes[i].description = (desc_exp && cJSON_IsString(desc_exp)) ?
+                    string_intern(cJSON_GetStringValue(desc_exp)) : NULL;
+
+                /* Parse type-specific extension data */
+                cJSON *num_j = cJSON_GetObjectItem(item, "num");
+                if (num_j && cJSON_IsObject(num_j)) {
+                    cJSON *vmin = cJSON_GetObjectItem(num_j, "min");
+                    cJSON *vmax = cJSON_GetObjectItem(num_j, "max");
+                    cJSON *vstep = cJSON_GetObjectItem(num_j, "step");
+                    exposes[i].ext.numeric.min = (vmin && cJSON_IsNumber(vmin)) ?
+                        (float)cJSON_GetNumberValue(vmin) : 0.0f;
+                    exposes[i].ext.numeric.max = (vmax && cJSON_IsNumber(vmax)) ?
+                        (float)cJSON_GetNumberValue(vmax) : 0.0f;
+                    exposes[i].ext.numeric.step = (vstep && cJSON_IsNumber(vstep)) ?
+                        (float)cJSON_GetNumberValue(vstep) : 0.0f;
+                }
+
+                cJSON *sel_j = cJSON_GetObjectItem(item, "sel");
+                if (sel_j && cJSON_IsObject(sel_j)) {
+                    cJSON *vals = cJSON_GetObjectItem(sel_j, "v");
+                    if (vals && cJSON_IsArray(vals)) {
+                        int vcount = cJSON_GetArraySize(vals);
+                        if (vcount > 0 && vcount <= 32) {
+                            const char **values = mem_ng_calloc((size_t)vcount,
+                                sizeof(const char *), MEM_CAP_DEFAULT);
+                            if (values) {
+                                for (int vi = 0; vi < vcount; vi++) {
+                                    cJSON *v = cJSON_GetArrayItem(vals, vi);
+                                    values[vi] = (v && cJSON_IsString(v)) ?
+                                        string_intern(cJSON_GetStringValue(v)) : "";
+                                }
+                                exposes[i].ext.select.values = values;
+                                exposes[i].ext.select.count = (uint8_t)vcount;
+                            }
+                        }
+                    }
+                }
+
+                cJSON *bin_j = cJSON_GetObjectItem(item, "bin");
+                if (bin_j && cJSON_IsObject(bin_j)) {
+                    cJSON *von = cJSON_GetObjectItem(bin_j, "von");
+                    cJSON *voff = cJSON_GetObjectItem(bin_j, "voff");
+                    exposes[i].ext.binary.val_on = (von && cJSON_IsString(von)) ?
+                        string_intern(cJSON_GetStringValue(von)) : NULL;
+                    exposes[i].ext.binary.val_off = (voff && cJSON_IsString(voff)) ?
+                        string_intern(cJSON_GetStringValue(voff)) : NULL;
+                }
             }
             def->exposes = exposes;
             def->expose_count = (uint8_t)exp_count;
+        }
+    }
+
+    /* Parse quirks */
+    cJSON *quirks_obj = cJSON_GetObjectItem(dev_json, "quirks");
+    if (quirks_obj && cJSON_IsObject(quirks_obj)) {
+        quirk_data_t *qd = quirk_data_parse(quirks_obj);
+        if (qd) {
+            quirk_assoc_set(def, qd);
+        }
+    }
+
+    /* Parse tuya_dp map: {"1": {"k":"state","t":"bool"}, "2": {"k":"mode","t":"enum","v":{"auto":0}}} */
+    cJSON *tuya_dp = cJSON_GetObjectItem(dev_json, "tuya_dp");
+    if (tuya_dp && cJSON_IsObject(tuya_dp)) {
+        int dp_count = 0;
+        {   /* Count children explicitly (cJSON_GetArraySize is for arrays) */
+            cJSON *_c = NULL;
+            cJSON_ArrayForEach(_c, tuya_dp) { dp_count++; }
+        }
+        if (dp_count > 0 && dp_count <= 32) {
+            tuya_dp_entry_t *entries = mem_ng_calloc((size_t)dp_count,
+                sizeof(tuya_dp_entry_t), MEM_CAP_DEFAULT);
+            if (entries) {
+                int valid = 0;
+                cJSON *dp_item = NULL;
+                cJSON_ArrayForEach(dp_item, tuya_dp) {
+                    /* dp_item->string is the DP ID as string ("1", "2", etc.) */
+                    int dp_id = atoi(dp_item->string);
+                    if (dp_id <= 0 || dp_id > 255 || !cJSON_IsObject(dp_item)) continue;
+
+                    entries[valid].dp_id = (uint8_t)dp_id;
+
+                    /* Key ("k") */
+                    cJSON *k_j = cJSON_GetObjectItem(dp_item, "k");
+                    if (k_j && cJSON_IsString(k_j)) {
+                        entries[valid].key = string_intern(cJSON_GetStringValue(k_j));
+                    } else {
+                        continue;  /* key is required */
+                    }
+
+                    /* Type ("t") -> dp_type */
+                    cJSON *t_j = cJSON_GetObjectItem(dp_item, "t");
+                    if (t_j && cJSON_IsString(t_j)) {
+                        const char *ts = cJSON_GetStringValue(t_j);
+                        if (strcmp(ts, "bool") == 0)        entries[valid].dp_type = 1;
+                        else if (strcmp(ts, "int") == 0)    entries[valid].dp_type = 2;
+                        else if (strcmp(ts, "str") == 0)    entries[valid].dp_type = 3;
+                        else if (strcmp(ts, "enum") == 0)   entries[valid].dp_type = 4;
+                        else if (strcmp(ts, "bitmap") == 0) entries[valid].dp_type = 5;
+                        else                                entries[valid].dp_type = 0;
+                    }
+
+                    /* Scale, min, max */
+                    cJSON *scale_j = cJSON_GetObjectItem(dp_item, "scale");
+                    if (scale_j && cJSON_IsNumber(scale_j)) {
+                        entries[valid].scale = (float)cJSON_GetNumberValue(scale_j);
+                    }
+                    cJSON *min_j = cJSON_GetObjectItem(dp_item, "min");
+                    if (min_j && cJSON_IsNumber(min_j)) {
+                        entries[valid].min = (float)cJSON_GetNumberValue(min_j);
+                    }
+                    cJSON *max_j = cJSON_GetObjectItem(dp_item, "max");
+                    if (max_j && cJSON_IsNumber(max_j)) {
+                        entries[valid].max = (float)cJSON_GetNumberValue(max_j);
+                    }
+
+                    /* Enum values ("v"): {"auto":0, "heat":1, "off":2} */
+                    cJSON *v_j = cJSON_GetObjectItem(dp_item, "v");
+                    if (v_j && cJSON_IsObject(v_j)) {
+                        int vcount = 0;
+                        { cJSON *_vc = NULL; cJSON_ArrayForEach(_vc, v_j) { vcount++; } }
+                        if (vcount > 0 && vcount <= 32) {
+                            const char **names = mem_ng_calloc((size_t)vcount,
+                                sizeof(const char *), MEM_CAP_DEFAULT);
+                            uint8_t *values = mem_ng_calloc((size_t)vcount,
+                                sizeof(uint8_t), MEM_CAP_DEFAULT);
+                            if (names && values) {
+                                int vi = 0;
+                                cJSON *v_entry = NULL;
+                                cJSON_ArrayForEach(v_entry, v_j) {
+                                    if (vi >= vcount) break;
+                                    names[vi] = string_intern(v_entry->string);
+                                    values[vi] = (uint8_t)cJSON_GetNumberValue(v_entry);
+                                    vi++;
+                                }
+                                entries[valid].enum_names = names;
+                                entries[valid].enum_values = values;
+                                entries[valid].enum_count = (uint8_t)vi;
+                            } else {
+                                /* Both must succeed — free whichever was allocated */
+                                if (names) mem_ng_free((void *)names);
+                                if (values) mem_ng_free(values);
+                                /* Skip this DP entry entirely on OOM */
+                                continue;
+                            }
+                        }
+                    }
+
+                    valid++;
+                }
+                def->tuya_dp_map = entries;
+                def->tuya_dp_count = (uint8_t)valid;
+            }
         }
     }
 
@@ -355,11 +607,57 @@ static void free_cached_entry(cache_entry_t *entry)
             mem_ng_free((void *)entry->def->to_zigbee);
         }
         if (entry->def->exposes) {
+            /* Free select option arrays within exposes */
+            for (uint8_t i = 0; i < entry->def->expose_count; i++) {
+                const zb_expose_t *e = &entry->def->exposes[i];
+                if (e->type == ZB_EXPOSE_SELECT && e->ext.select.values) {
+                    mem_ng_free((void *)e->ext.select.values);
+                }
+            }
             mem_ng_free((void *)entry->def->exposes);
+        }
+        /* Free Tuya DP map entries */
+        if (entry->def->tuya_dp_map) {
+            for (uint8_t i = 0; i < entry->def->tuya_dp_count; i++) {
+                const tuya_dp_entry_t *dp = &entry->def->tuya_dp_map[i];
+                if (dp->enum_names) mem_ng_free((void *)dp->enum_names);
+                if (dp->enum_values) mem_ng_free((void *)dp->enum_values);
+            }
+            mem_ng_free((void *)entry->def->tuya_dp_map);
         }
         mem_ng_free(entry->def);
     }
     memset(entry, 0, sizeof(*entry));
+}
+
+/* ============================================================================
+ * Public: Free a standalone parsed converter definition
+ * ============================================================================ */
+
+void zb_converter_loader_free_def(zb_converter_def_t *def)
+{
+    if (!def) return;
+
+    if (def->from_zigbee) mem_ng_free((void *)def->from_zigbee);
+    if (def->to_zigbee)   mem_ng_free((void *)def->to_zigbee);
+    if (def->exposes) {
+        for (uint8_t i = 0; i < def->expose_count; i++) {
+            const zb_expose_t *e = &def->exposes[i];
+            if (e->type == ZB_EXPOSE_SELECT && e->ext.select.values) {
+                mem_ng_free((void *)e->ext.select.values);
+            }
+        }
+        mem_ng_free((void *)def->exposes);
+    }
+    if (def->tuya_dp_map) {
+        for (uint8_t i = 0; i < def->tuya_dp_count; i++) {
+            const tuya_dp_entry_t *dp = &def->tuya_dp_map[i];
+            if (dp->enum_names) mem_ng_free((void *)dp->enum_names);
+            if (dp->enum_values) mem_ng_free((void *)dp->enum_values);
+        }
+        mem_ng_free((void *)def->tuya_dp_map);
+    }
+    mem_ng_free(def);
 }
 
 /* ============================================================================
@@ -370,8 +668,16 @@ static const char *find_filename(const char *manufacturer)
 {
     if (manufacturer == NULL) return NULL;
 
+    /* Exact match */
     for (size_t i = 0; i < s_index_count; i++) {
         if (strcmp(s_index[i].manufacturer, manufacturer) == 0) {
+            return s_index[i].filename;
+        }
+    }
+
+    /* Case-insensitive match (e.g. "LUMI" vs "lumi", "innr" vs "Innr") */
+    for (size_t i = 0; i < s_index_count; i++) {
+        if (strcasecmp(s_index[i].manufacturer, manufacturer) == 0) {
             return s_index[i].filename;
         }
     }
@@ -420,6 +726,7 @@ static void cache_add(const char *model, zb_converter_def_t *def)
             evicted_bytes += evicted->from_zigbee_count * sizeof(zb_from_zigbee_t);
             evicted_bytes += evicted->to_zigbee_count * sizeof(zb_to_zigbee_t);
             evicted_bytes += evicted->expose_count * sizeof(zb_expose_t);
+            evicted_bytes += evicted->tuya_dp_count * sizeof(tuya_dp_entry_t);
             if (s_cache_bytes >= evicted_bytes) {
                 s_cache_bytes -= evicted_bytes;
             } else {
@@ -436,6 +743,7 @@ static void cache_add(const char *model, zb_converter_def_t *def)
     entry_bytes += def->from_zigbee_count * sizeof(zb_from_zigbee_t);
     entry_bytes += def->to_zigbee_count * sizeof(zb_to_zigbee_t);
     entry_bytes += def->expose_count * sizeof(zb_expose_t);
+    entry_bytes += def->tuya_dp_count * sizeof(tuya_dp_entry_t);
 
     s_cache[s_cache_count].model = string_intern(model);
     s_cache[s_cache_count].def = def;
@@ -517,6 +825,44 @@ bool zb_converter_loader_is_available(void)
     return s_available;
 }
 
+/**
+ * @brief Load and search a single JSON file for a model.
+ * @return Parsed converter definition, or NULL if not found.
+ */
+static zb_converter_def_t *load_model_from_file(const char *path, const char *model)
+{
+    size_t file_len = 0;
+    char *json_str = read_file_to_psram(path, &file_len);
+    if (json_str == NULL) {
+        return NULL;
+    }
+
+    cJSON *root = cJSON_Parse(json_str);
+    mem_ng_free(json_str);
+    if (root == NULL) {
+        return NULL;
+    }
+
+    cJSON *devices = cJSON_GetObjectItem(root, "devices");
+    if (devices == NULL || !cJSON_IsArray(devices)) {
+        cJSON_Delete(root);
+        return NULL;
+    }
+
+    zb_converter_def_t *found = NULL;
+    cJSON *dev_json = NULL;
+    cJSON_ArrayForEach(dev_json, devices) {
+        cJSON *m = cJSON_GetObjectItem(dev_json, "m");
+        if (m && cJSON_IsString(m) && strcmp(cJSON_GetStringValue(m), model) == 0) {
+            found = zb_converter_loader_parse_device(dev_json);
+            break;
+        }
+    }
+
+    cJSON_Delete(root);
+    return found;
+}
+
 const zb_converter_def_t *zb_converter_loader_find(
     const char *manufacturer, const char *model)
 {
@@ -537,58 +883,78 @@ const zb_converter_def_t *zb_converter_loader_find(
         return cached;
     }
 
-    /* Find the right file */
+    /* Find the right file by manufacturer name */
     const char *filename = find_filename(manufacturer);
-    if (filename == NULL) {
-        xSemaphoreGive(s_mutex);
-        ESP_LOGD(TAG, "No DB file for manufacturer: %s", manufacturer ? manufacturer : "null");
-        return NULL;
-    }
-
-    /* Build full path */
-    char path[80];
-    snprintf(path, sizeof(path), "%s/%s", CONVERTER_DB_PATH, filename);
-
-    /* Release mutex during file I/O */
     xSemaphoreGive(s_mutex);
 
-    size_t file_len = 0;
-    char *json_str = read_file_to_psram(path, &file_len);
-    if (json_str == NULL) {
-        ESP_LOGW(TAG, "Failed to read %s", path);
-        return NULL;
-    }
-
-    cJSON *root = cJSON_Parse(json_str);
-    mem_ng_free(json_str);
-
-    if (root == NULL) {
-        ESP_LOGW(TAG, "Failed to parse %s", path);
-        return NULL;
-    }
-
-    /* Search devices array for matching model */
-    cJSON *devices = cJSON_GetObjectItem(root, "devices");
-    if (devices == NULL || !cJSON_IsArray(devices)) {
-        ESP_LOGW(TAG, "No 'devices' array in %s", path);
-        cJSON_Delete(root);
-        return NULL;
-    }
-
     zb_converter_def_t *found_def = NULL;
-    cJSON *dev_json = NULL;
-    cJSON_ArrayForEach(dev_json, devices) {
-        cJSON *m = cJSON_GetObjectItem(dev_json, "m");
-        if (m && cJSON_IsString(m) && strcmp(cJSON_GetStringValue(m), model) == 0) {
-            found_def = parse_device(dev_json);
-            break;
+
+    if (filename != NULL) {
+        /* Direct lookup: load manufacturer's file and search for model */
+        char path[80];
+        snprintf(path, sizeof(path), "%s/%s", CONVERTER_DB_PATH, filename);
+        found_def = load_model_from_file(path, model);
+    }
+
+    /* Fallback: manufacturer known but not in index, or model not in expected file.
+     * Scan ALL index files — happens at most once per device (then cached).
+     * This handles z2m vendor/Zigbee manufacturer mismatches (e.g. the z2m
+     * vendor "Aqara" maps to file aqara.json, but the device reports "LUMI"
+     * which isn't in the index, even though the model IS in aqara.json).
+     *
+     * IMPORTANT: Only brute-force when manufacturer is known (non-empty).
+     * Empty manufacturer means the device hasn't been fully interviewed yet —
+     * the converter will be found once the interview provides the manufacturer.
+     * Brute-forcing with empty manufacturer blocks the Zigbee callback thread
+     * and triggers the task watchdog on single-core devices like ESP32-C5. */
+    bool has_manufacturer = (manufacturer != NULL && manufacturer[0] != '\0');
+    if (found_def == NULL && has_manufacturer) {
+        if (filename != NULL) {
+            ESP_LOGD(TAG, "Model %s not in %s, trying brute-force", model, filename);
+        } else {
+            ESP_LOGI(TAG, "Manufacturer '%s' not in index, brute-force for %s",
+                     manufacturer, model);
+        }
+
+        if (xSemaphoreTake(s_mutex, GW_TIMEOUT_LONG_TICKS) != pdTRUE) {
+            return NULL;
+        }
+        /* Collect unique filenames from index */
+        const char *tried = filename;  /* skip file we already searched */
+        for (size_t i = 0; i < s_index_count && found_def == NULL; i++) {
+            const char *fn = s_index[i].filename;
+            if (fn == NULL || (tried && strcmp(fn, tried) == 0)) {
+                continue;
+            }
+            /* Avoid re-scanning same file (multiple manufacturers → same file) */
+            bool dup = false;
+            for (size_t j = 0; j < i; j++) {
+                if (s_index[j].filename && strcmp(s_index[j].filename, fn) == 0) {
+                    dup = true;
+                    break;
+                }
+            }
+            if (dup) continue;
+
+            xSemaphoreGive(s_mutex);
+
+            char path[80];
+            snprintf(path, sizeof(path), "%s/%s", CONVERTER_DB_PATH, fn);
+            found_def = load_model_from_file(path, model);
+
+            if (xSemaphoreTake(s_mutex, GW_TIMEOUT_LONG_TICKS) != pdTRUE) {
+                return found_def;  /* Got it but can't cache — still return */
+            }
+        }
+        xSemaphoreGive(s_mutex);
+
+        if (found_def != NULL) {
+            ESP_LOGI(TAG, "Brute-force found %s (mfr=%s)", model, manufacturer);
         }
     }
 
-    cJSON_Delete(root);
-
     if (found_def == NULL) {
-        ESP_LOGD(TAG, "Model %s not found in %s", model, path);
+        ESP_LOGD(TAG, "Model %s not found in DB", model);
         return NULL;
     }
 
@@ -605,6 +971,14 @@ const zb_converter_def_t *zb_converter_loader_find(
         if (found_def->from_zigbee) mem_ng_free((void *)found_def->from_zigbee);
         if (found_def->to_zigbee) mem_ng_free((void *)found_def->to_zigbee);
         if (found_def->exposes) mem_ng_free((void *)found_def->exposes);
+        if (found_def->tuya_dp_map) {
+            for (uint8_t i = 0; i < found_def->tuya_dp_count; i++) {
+                const tuya_dp_entry_t *dp = &found_def->tuya_dp_map[i];
+                if (dp->enum_names) mem_ng_free((void *)dp->enum_names);
+                if (dp->enum_values) mem_ng_free((void *)dp->enum_values);
+            }
+            mem_ng_free((void *)found_def->tuya_dp_map);
+        }
         mem_ng_free(found_def);
         xSemaphoreGive(s_mutex);
         return cached;

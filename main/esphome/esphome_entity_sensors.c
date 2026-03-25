@@ -60,6 +60,7 @@ esp_err_t esphome_entity_register_sensor(const esphome_sensor_config_t *config)
     s_entities.sensors[idx].state.key = config->key;
     s_entities.sensors[idx].state.state = 0.0f;
     s_entities.sensors[idx].state.missing_state = true;
+    s_entities.sensors[idx].state.device_id = config->device_id;
     s_entities.sensors[idx].registered = true;
     s_entities.sensor_count++;
 
@@ -267,6 +268,7 @@ esp_err_t esphome_entity_register_binary_sensor(const esphome_binary_sensor_conf
     s_entities.binary_sensors[idx].state.key = config->key;
     s_entities.binary_sensors[idx].state.state = false;
     s_entities.binary_sensors[idx].state.missing_state = true;
+    s_entities.binary_sensors[idx].state.device_id = config->device_id;
     s_entities.binary_sensors[idx].registered = true;
     s_entities.binary_sensor_count++;
 
@@ -474,6 +476,7 @@ esp_err_t esphome_entity_register_text_sensor(const esphome_text_sensor_config_t
     s_entities.text_sensors[idx].state.key = config->key;
     s_entities.text_sensors[idx].state.state[0] = '\0';
     s_entities.text_sensors[idx].state.missing_state = true;
+    s_entities.text_sensors[idx].state.device_id = config->device_id;
     s_entities.text_sensors[idx].registered = true;
     s_entities.text_sensor_count++;
 
@@ -663,6 +666,11 @@ static const char *sensor_device_class_to_string(esphome_sensor_device_class_t d
         case ESPHOME_SENSOR_CLASS_ILLUMINANCE:       return "illuminance";
         case ESPHOME_SENSOR_CLASS_SIGNAL_STRENGTH:   return "signal_strength";
         case ESPHOME_SENSOR_CLASS_TIMESTAMP:         return "timestamp";
+        case ESPHOME_SENSOR_CLASS_CARBON_DIOXIDE:    return "carbon_dioxide";
+        case ESPHOME_SENSOR_CLASS_VOLATILE_ORGANIC_COMPOUNDS: return "volatile_organic_compounds";
+        case ESPHOME_SENSOR_CLASS_PM25:              return "pm25";
+        case ESPHOME_SENSOR_CLASS_MOISTURE:          return "moisture";
+        case ESPHOME_SENSOR_CLASS_DISTANCE:          return "distance";
         default:                                     return "";
     }
 }
@@ -778,6 +786,11 @@ esp_err_t esphome_encode_sensor_state(const esphome_sensor_state_t *state,
         esphome_encode_bool(&buf, 3, state->missing_state);
     }
 
+    /* Field 4: device_id (uint32) - required for sub-device entity availability */
+    if (state->device_id != 0) {
+        esphome_encode_uint32(&buf, 4, state->device_id);
+    }
+
     if (esphome_buffer_overflow(&buf)) {
         return ESPHOME_ERR_BUFFER_OVERFLOW;
     }
@@ -791,7 +804,48 @@ esp_err_t esphome_encode_sensor_state(const esphome_sensor_state_t *state,
  * ============================================================================ */
 
 /**
+ * @brief Convert binary sensor device class enum to HA-compatible string
+ */
+static const char *binary_sensor_device_class_to_string(esphome_binary_device_class_t dc)
+{
+    switch (dc) {
+        case ESPHOME_BINARY_CLASS_BATTERY:       return "battery";
+        case ESPHOME_BINARY_CLASS_COLD:          return "cold";
+        case ESPHOME_BINARY_CLASS_CONNECTIVITY:  return "connectivity";
+        case ESPHOME_BINARY_CLASS_DOOR:          return "door";
+        case ESPHOME_BINARY_CLASS_GARAGE_DOOR:   return "garage_door";
+        case ESPHOME_BINARY_CLASS_GAS:           return "gas";
+        case ESPHOME_BINARY_CLASS_HEAT:          return "heat";
+        case ESPHOME_BINARY_CLASS_LIGHT:         return "light";
+        case ESPHOME_BINARY_CLASS_LOCK:          return "lock";
+        case ESPHOME_BINARY_CLASS_MOISTURE:      return "moisture";
+        case ESPHOME_BINARY_CLASS_MOTION:        return "motion";
+        case ESPHOME_BINARY_CLASS_MOVING:        return "moving";
+        case ESPHOME_BINARY_CLASS_OCCUPANCY:     return "occupancy";
+        case ESPHOME_BINARY_CLASS_OPENING:       return "opening";
+        case ESPHOME_BINARY_CLASS_PLUG:          return "plug";
+        case ESPHOME_BINARY_CLASS_POWER:         return "power";
+        case ESPHOME_BINARY_CLASS_PRESENCE:      return "presence";
+        case ESPHOME_BINARY_CLASS_PROBLEM:       return "problem";
+        case ESPHOME_BINARY_CLASS_SAFETY:        return "safety";
+        case ESPHOME_BINARY_CLASS_SMOKE:         return "smoke";
+        case ESPHOME_BINARY_CLASS_SOUND:         return "sound";
+        case ESPHOME_BINARY_CLASS_VIBRATION:     return "vibration";
+        case ESPHOME_BINARY_CLASS_WINDOW:        return "window";
+        case ESPHOME_BINARY_CLASS_TAMPER:        return "tamper";
+        case ESPHOME_BINARY_CLASS_BATTERY_LOW:   return "battery";
+        default:                                 return "";
+    }
+}
+
+/**
  * @brief Encode binary sensor entity info for ListEntities response
+ *
+ * Protobuf: ListEntitiesBinarySensorResponse
+ *   1: object_id (string), 2: key (fixed32), 3: name (string),
+ *   4: unique_id (string), 5: device_class (string),
+ *   6: is_status_binary_sensor (bool), 7: disabled_by_default (bool),
+ *   8: icon (string), 9: entity_category (enum), 10: device_id (uint32)
  */
 esp_err_t esphome_encode_binary_sensor_list_entry(const esphome_binary_sensor_config_t *config,
                                                    uint8_t *output, size_t output_size,
@@ -817,21 +871,32 @@ esp_err_t esphome_encode_binary_sensor_list_entry(const esphome_binary_sensor_co
     /* Field 4: unique_id (string) */
     esphome_encode_string(&buf, 4, config->unique_id);
 
-    /* Field 5: icon (string) */
-    if (config->icon[0] != '\0') {
-        esphome_encode_string(&buf, 5, config->icon);
+    /* Field 5: device_class (string) */
+    {
+        const char *dc_str = binary_sensor_device_class_to_string(config->device_class);
+        if (dc_str[0] != '\0') {
+            esphome_encode_string(&buf, 5, dc_str);
+        }
     }
 
-    /* Field 6: device_class (string) - convert enum to string */
-
-    /* Field 7: is_status_binary_sensor (bool) */
+    /* Field 6: is_status_binary_sensor (bool) */
     if (config->is_status_binary_sensor) {
-        esphome_encode_bool(&buf, 7, config->is_status_binary_sensor);
+        esphome_encode_bool(&buf, 6, config->is_status_binary_sensor);
     }
 
-    /* Field 8: disabled_by_default (bool) */
+    /* Field 7: disabled_by_default (bool) */
     if (config->disabled_by_default) {
-        esphome_encode_bool(&buf, 8, config->disabled_by_default);
+        esphome_encode_bool(&buf, 7, config->disabled_by_default);
+    }
+
+    /* Field 8: icon (string) */
+    if (config->icon[0] != '\0') {
+        esphome_encode_string(&buf, 8, config->icon);
+    }
+
+    /* Field 9: entity_category (0=NONE, 1=CONFIG, 2=DIAGNOSTIC) */
+    if (config->entity_category != 0) {
+        esphome_encode_uint32(&buf, 9, (uint32_t)config->entity_category);
     }
 
     /* Field 10: device_id (sub-device grouping) */
@@ -871,6 +936,11 @@ esp_err_t esphome_encode_binary_sensor_state(const esphome_binary_sensor_state_t
     /* Field 3: missing_state (bool) */
     if (state->missing_state) {
         esphome_encode_bool(&buf, 3, state->missing_state);
+    }
+
+    /* Field 4: device_id (uint32) - required for sub-device entity availability */
+    if (state->device_id != 0) {
+        esphome_encode_uint32(&buf, 4, state->device_id);
     }
 
     if (esphome_buffer_overflow(&buf)) {
@@ -922,6 +992,11 @@ esp_err_t esphome_encode_text_sensor_list_entry(const esphome_text_sensor_config
         esphome_encode_bool(&buf, 6, config->disabled_by_default);
     }
 
+    /* Field 7: entity_category (0=NONE, 1=CONFIG, 2=DIAGNOSTIC) */
+    if (config->entity_category != 0) {
+        esphome_encode_uint32(&buf, 7, (uint32_t)config->entity_category);
+    }
+
     /* Field 9: device_id (sub-device grouping) */
     if (config->device_id != 0) {
         esphome_encode_uint32(&buf, 9, config->device_id);
@@ -959,6 +1034,11 @@ esp_err_t esphome_encode_text_sensor_state(const esphome_text_sensor_state_t *st
     /* Field 3: missing_state (bool) */
     if (state->missing_state) {
         esphome_encode_bool(&buf, 3, state->missing_state);
+    }
+
+    /* Field 4: device_id (uint32) - required for sub-device entity availability */
+    if (state->device_id != 0) {
+        esphome_encode_uint32(&buf, 4, state->device_id);
     }
 
     if (esphome_buffer_overflow(&buf)) {

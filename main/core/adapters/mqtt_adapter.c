@@ -328,6 +328,11 @@ static void handle_device_joined(event_type_t type, void *data, size_t data_size
     (void)type;
     (void)ctx;
 
+#ifdef CONFIG_ESPHOME_PRIMARY_INTEGRATION
+    /* Device availability/state handled by ESPHome adapter, skip MQTT */
+    return;
+#endif
+
     if (!data || data_size < sizeof(evt_device_joined_t)) {
         ESP_LOGW(TAG, "Invalid device joined event data");
         return;
@@ -364,6 +369,11 @@ static void handle_device_left(event_type_t type, void *data, size_t data_size, 
 {
     (void)type;
     (void)ctx;
+
+#ifdef CONFIG_ESPHOME_PRIMARY_INTEGRATION
+    /* Device availability handled by ESPHome adapter, skip MQTT */
+    return;
+#endif
 
     if (!data || data_size < sizeof(evt_device_left_t)) {
         ESP_LOGW(TAG, "Invalid device left event data");
@@ -431,6 +441,10 @@ static void handle_power_state_changed(event_type_t type, void *data, size_t dat
     (void)type;
     (void)ctx;
 
+#ifdef CONFIG_ESPHOME_PRIMARY_INTEGRATION
+    return;
+#endif
+
     if (!data || data_size < sizeof(evt_power_state_t)) {
         ESP_LOGW(TAG, "Invalid power state event data");
         return;
@@ -481,6 +495,10 @@ static void handle_tuya_datapoint(event_type_t type, void *data, size_t data_siz
 {
     (void)type;
     (void)ctx;
+
+#ifdef CONFIG_ESPHOME_PRIMARY_INTEGRATION
+    return;
+#endif
 
     if (!data || data_size < sizeof(evt_tuya_dp_t)) {
         ESP_LOGW(TAG, "Invalid Tuya datapoint event data");

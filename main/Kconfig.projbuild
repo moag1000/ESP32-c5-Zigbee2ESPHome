@@ -1037,4 +1037,42 @@ menu "ESP32-C5 Zigbee2MQTT Gateway Configuration"
                 flash wear. Default: 300 (5 minutes).
     endmenu
 
+    menu "mmWave Presence Sensor"
+        config MMWAVE_SENSOR_ENABLE
+            bool "Enable HMMD mmWave presence sensor (S3KM1110)"
+            default n
+            help
+                Enable the UART-connected 24GHz mmWave human presence sensor.
+
+        config MMWAVE_GPIO_TX
+            int "ESP32 TX GPIO (connects to sensor RX)"
+            depends on MMWAVE_SENSOR_ENABLE
+            default 5
+            help
+                GPIO for UART TX from ESP32 to sensor RX pin.
+
+        config MMWAVE_GPIO_RX
+            int "ESP32 RX GPIO (connects to sensor TX)"
+            depends on MMWAVE_SENSOR_ENABLE
+            default 4
+            help
+                GPIO for UART RX on ESP32 from sensor TX pin.
+
+        config MMWAVE_DEFAULT_MAX_GATE
+            int "Default max detection gate (0-15, each = 70cm)"
+            depends on MMWAVE_SENSOR_ENABLE
+            default 12
+            range 0 15
+            help
+                Maximum distance gate. Gate 12 = 8.4m range.
+
+        config MMWAVE_DEFAULT_ABSENCE_DELAY
+            int "Default absence delay (seconds)"
+            depends on MMWAVE_SENSOR_ENABLE
+            default 15
+            range 0 65535
+            help
+                Seconds after last detection before reporting absent.
+    endmenu
+
 endmenu

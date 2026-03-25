@@ -90,10 +90,13 @@ static const lifecycle_service_t s_phase_services[6][SERVICE_COUNT] = {
         SERVICE_COUNT
     },
 
-    /* PAIRING - stop non-essential to maximize Zigbee RAM */
+    /* PAIRING - keep HA connectivity, stop BLE/heavy services */
     [LIFECYCLE_PHASE_PAIRING] = {
-        /* Only keep MQTT logger for debugging */
+        SERVICE_ESPHOME_API,
+        SERVICE_STATE_PERSISTENCE,
+        SERVICE_AVAILABILITY,
         SERVICE_MQTT_LOGGER,
+        SERVICE_SYSTEM_MONITOR,
         SERVICE_COUNT
     },
 

@@ -22,7 +22,9 @@ static const zb_expose_t s_generic_on_off_exposes[] = {
     {
         .type = ZB_EXPOSE_LIGHT,
         .name = NULL,
+        .property = "state",
         .endpoint = 0,
+        .access = EA_STATE_SET,
         .features = 0,
         .device_class = NULL,
         .unit = NULL,
@@ -64,7 +66,9 @@ static const zb_expose_t s_generic_dimmable_exposes[] = {
     {
         .type = ZB_EXPOSE_LIGHT,
         .name = NULL,
+        .property = "state",
         .endpoint = 0,
+        .access = EA_STATE_SET,
         .features = ZB_FEATURE_BRIGHTNESS | ZB_FEATURE_TRANSITION,
         .device_class = NULL,
         .unit = NULL,
@@ -108,7 +112,9 @@ static const zb_expose_t s_generic_ct_exposes[] = {
     {
         .type = ZB_EXPOSE_LIGHT,
         .name = NULL,
+        .property = "state",
         .endpoint = 0,
+        .access = EA_STATE_SET,
         .features = ZB_FEATURE_BRIGHTNESS | ZB_FEATURE_COLOR_TEMP | ZB_FEATURE_TRANSITION,
         .device_class = NULL,
         .unit = NULL,
@@ -154,7 +160,9 @@ static const zb_expose_t s_generic_contact_exposes[] = {
     {
         .type = ZB_EXPOSE_BINARY_SENSOR,
         .name = NULL,
+        .property = NULL,
         .endpoint = 0,
+        .access = EA_STATE,
         .features = 0,
         .device_class = "door",
         .unit = NULL,
@@ -163,7 +171,9 @@ static const zb_expose_t s_generic_contact_exposes[] = {
     {
         .type = ZB_EXPOSE_SENSOR,
         .name = "battery",
+        .property = NULL,
         .endpoint = 0,
+        .access = EA_STATE,
         .features = 0,
         .device_class = "battery",
         .unit = "%",
@@ -202,7 +212,9 @@ static const zb_expose_t s_generic_motion_exposes[] = {
     {
         .type = ZB_EXPOSE_BINARY_SENSOR,
         .name = NULL,
+        .property = NULL,
         .endpoint = 0,
+        .access = EA_STATE,
         .features = 0,
         .device_class = "motion",
         .unit = NULL,
@@ -211,7 +223,9 @@ static const zb_expose_t s_generic_motion_exposes[] = {
     {
         .type = ZB_EXPOSE_SENSOR,
         .name = "battery",
+        .property = NULL,
         .endpoint = 0,
+        .access = EA_STATE,
         .features = 0,
         .device_class = "battery",
         .unit = "%",
@@ -250,7 +264,9 @@ static const zb_expose_t s_generic_temp_hum_exposes[] = {
     {
         .type = ZB_EXPOSE_SENSOR,
         .name = "temperature",
+        .property = NULL,
         .endpoint = 0,
+        .access = EA_STATE,
         .features = 0,
         .device_class = "temperature",
         .unit = "\xC2\xB0""C",  /* degree sign + C (UTF-8) */
@@ -259,7 +275,9 @@ static const zb_expose_t s_generic_temp_hum_exposes[] = {
     {
         .type = ZB_EXPOSE_SENSOR,
         .name = "humidity",
+        .property = NULL,
         .endpoint = 0,
+        .access = EA_STATE,
         .features = 0,
         .device_class = "humidity",
         .unit = "%",
@@ -268,7 +286,9 @@ static const zb_expose_t s_generic_temp_hum_exposes[] = {
     {
         .type = ZB_EXPOSE_SENSOR,
         .name = "battery",
+        .property = NULL,
         .endpoint = 0,
+        .access = EA_STATE,
         .features = 0,
         .device_class = "battery",
         .unit = "%",
@@ -308,7 +328,9 @@ static const zb_expose_t s_generic_color_xy_exposes[] = {
     {
         .type = ZB_EXPOSE_LIGHT,
         .name = NULL,
+        .property = "state",
         .endpoint = 0,
+        .access = EA_STATE_SET,
         .features = ZB_FEATURE_BRIGHTNESS | ZB_FEATURE_COLOR_XY | ZB_FEATURE_TRANSITION,
         .device_class = NULL,
         .unit = NULL,
@@ -355,7 +377,9 @@ static const zb_expose_t s_generic_lock_exposes[] = {
     {
         .type = ZB_EXPOSE_LOCK,
         .name = NULL,
+        .property = "state",
         .endpoint = 0,
+        .access = EA_STATE_SET,
         .features = 0,
         .device_class = NULL,
         .unit = NULL,
@@ -397,7 +421,9 @@ static const zb_expose_t s_generic_cover_exposes[] = {
     {
         .type = ZB_EXPOSE_COVER,
         .name = NULL,
+        .property = "state",
         .endpoint = 0,
+        .access = EA_STATE_SET,
         .features = ZB_FEATURE_POSITION,
         .device_class = NULL,
         .unit = NULL,

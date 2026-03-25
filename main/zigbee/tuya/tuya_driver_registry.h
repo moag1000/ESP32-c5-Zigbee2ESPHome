@@ -84,6 +84,14 @@ esp_err_t tuya_driver_bind(uint16_t short_addr, const tuya_device_driver_t *driv
 void tuya_driver_unbind(uint16_t short_addr);
 
 /**
+ * @brief Unbind all Tuya driver bindings
+ *
+ * Clears the entire binding table. Used during network reset/factory reset
+ * and new network formation to prevent stale bindings.
+ */
+void tuya_driver_unbind_all(void);
+
+/**
  * @brief Persist driver binding to NVS (called automatically by tuya_driver_bind)
  *
  * @param short_addr Device short address (used to look up IEEE in device registry)

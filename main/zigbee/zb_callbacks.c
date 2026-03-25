@@ -8,12 +8,15 @@
 
 #include "zb_callbacks.h"
 #include "zb_constants.h"
+#include "esp_timer.h"
 #include "zb_coordinator.h"
+#include "converter/zb_converter_std.h"
 #include "zb_device_handler_types.h"
 #include "zb_cluster_multistate.h"
 #include "zb_cluster_security.h"
 #include "zb_cluster_electrical.h"
 #include "core/device/device_registry.h"
+#include "core/device/unified_device.h"
 #include "core/device/device_persistence.h"
 #include "zb_network.h"
 #include "zb_availability.h"
@@ -40,6 +43,7 @@
 #include "core/monitoring/perf_metrics.h"
 #include "esp_log.h"
 #include "aps/esp_zigbee_aps.h"  /* API-005: APS Authentication State */
+#include "mac/esp_zigbee_mac.h"  /* MAC indirect transaction persistence time */
 #include <string.h>
 #include <inttypes.h>
 #include <time.h>
@@ -468,19 +472,20 @@ void zb_callback_device_join(esp_zb_zdp_status_t zdo_status, uint16_t short_addr
     /* Check if we have an install code for this device */
     apply_install_code_if_present(ieee64, short_addr);
 
-    /* Add device to NG registry */
-    device_t *dev = device_registry_add(ieee64, DEV_PROTOCOL_ZIGBEE);
+    /* Add device to NG registry.
+     * Note: device_registry_add() returns the existing device if already present
+     * (non-NULL), so check if device existed BEFORE the add to distinguish
+     * new joins from rejoins/re-authorization. */
+    device_t *existing = device_registry_get(ieee64);
+    device_t *dev = existing ? existing : device_registry_add(ieee64, DEV_PROTOCOL_ZIGBEE);
     if (dev == NULL) {
-        /* Check if device already exists (e.g., rejoin) */
-        dev = device_registry_get(ieee64);
-        if (dev != NULL) {
-            /* Rejoin: atomically update short_addr + availability + converter + tuya + NVS */
-            uint16_t old_addr = dev->proto.zigbee.short_addr;
-            zb_rejoin_update_short_addr(dev, old_addr, short_addr);
-        } else {
-            ESP_LOGE(TAG, "Failed to add device to registry");
-            return;
-        }
+        ESP_LOGE(TAG, "Failed to add device to registry");
+        return;
+    }
+    if (existing != NULL) {
+        /* Rejoin: atomically update short_addr + availability + converter + tuya + NVS */
+        uint16_t old_addr = dev->proto.zigbee.short_addr;
+        zb_rejoin_update_short_addr(dev, old_addr, short_addr);
     } else {
         /* New device */
         dev->proto.zigbee.short_addr = short_addr;
@@ -604,6 +609,11 @@ void zb_callback_report_attr(esp_zb_zcl_report_attr_message_t *message)
     }
     zb_availability_update_last_seen(short_addr);
 
+    /* Retry any pending write commands for sleepy devices.
+     * Aqara battery devices don't poll for indirect frames — we must
+     * re-send the command immediately when they report (= radio is on). */
+    zb_converter_std_retry_pending(short_addr);
+
     /* Add cluster to device if not already present */
     if (device != NULL) {
         device_zigbee_add_cluster(device, cluster_id);
@@ -614,7 +624,8 @@ void zb_callback_report_attr(esp_zb_zcl_report_attr_message_t *message)
         uint16_t attr_id = message->attribute.id;
         esp_err_t conv_ret = zb_converter_handle_report(
             short_addr, message->dst_endpoint, cluster_id, attr_id,
-            message->attribute.data.value, message->attribute.data.size);
+            message->attribute.data.value, message->attribute.data.size,
+            message->attribute.data.type);
         if (conv_ret == ESP_OK) {
             /* Converter handled this report - skip generic handling */
             return;
@@ -758,10 +769,12 @@ void zb_callback_signal_handler(esp_zb_app_signal_t *signal_struct)
 
         case ESP_ZB_BDB_SIGNAL_DEVICE_FIRST_START:
             ESP_LOGI(TAG, "Signal: Device first start - new network forming");
-            /* Clear stale devices from previous network */
+            /* Clear stale devices and bindings from previous network */
             ESP_LOGI(TAG, "Clearing stale devices from persistence and registry");
             device_persistence_clear();
             device_registry_clear_all();
+            zb_converter_unbind_all();
+            tuya_driver_unbind_all();
             zb_callback_network_formed();
             break;
 
@@ -844,24 +857,49 @@ void zb_callback_signal_handler(esp_zb_app_signal_t *signal_struct)
                 esp_zb_zdo_signal_nwk_status_indication_params_t *nwk_params =
                     (esp_zb_zdo_signal_nwk_status_indication_params_t *)esp_zb_app_signal_get_params(p_sg_p);
                 if (nwk_params) {
-                    const char *dev_name = "unknown";
-                    device_t *dev = device_registry_get_by_short_addr(nwk_params->network_addr);
-                    if (dev && dev->friendly_name[0]) {
-                        dev_name = dev->friendly_name;
+                    /* Rate-limit per (addr, status) to avoid log spam from sleepy
+                     * devices that generate continuous indirect_transaction_expiry
+                     * or bad_key_sequence_number after failed interview/rejoin. */
+                    static uint16_t s_nlme_last_addr = 0;
+                    static uint8_t  s_nlme_last_status = 0xFF;
+                    static uint32_t s_nlme_suppress_count = 0;
+                    static int64_t  s_nlme_last_log_us = 0;
+
+                    int64_t now_us = esp_timer_get_time();
+                    bool same = (nwk_params->network_addr == s_nlme_last_addr &&
+                                 nwk_params->status == s_nlme_last_status);
+                    bool throttled = same && (now_us - s_nlme_last_log_us < 30000000); /* 30s */
+
+                    if (throttled) {
+                        s_nlme_suppress_count++;
+                    } else {
+                        const char *dev_name = "unknown";
+                        device_t *dev = device_registry_get_by_short_addr(nwk_params->network_addr);
+                        if (dev && dev->friendly_name[0]) {
+                            dev_name = dev->friendly_name;
+                        }
+                        if (s_nlme_suppress_count > 0) {
+                            ESP_LOGW(TAG, "NLME Status: %s (0x%02X), addr=0x%04X (%s) "
+                                     "[+%lu suppressed]",
+                                     nlme_status_to_str(nwk_params->status), nwk_params->status,
+                                     nwk_params->network_addr, dev_name,
+                                     (unsigned long)s_nlme_suppress_count);
+                        } else {
+                            ESP_LOGW(TAG, "NLME Status: %s (0x%02X), addr=0x%04X (%s)",
+                                     nlme_status_to_str(nwk_params->status), nwk_params->status,
+                                     nwk_params->network_addr, dev_name);
+                        }
+                        s_nlme_last_addr = nwk_params->network_addr;
+                        s_nlme_last_status = nwk_params->status;
+                        s_nlme_last_log_us = now_us;
+                        s_nlme_suppress_count = 0;
                     }
-                    ESP_LOGW(TAG, "NLME Status: %s (0x%02X), addr=0x%04X (%s), err=%s",
-                             nlme_status_to_str(nwk_params->status), nwk_params->status,
-                             nwk_params->network_addr, dev_name, esp_err_to_name(err_status));
                 } else {
                     ESP_LOGI(TAG, "NLME Status Indication (status: %s)", esp_err_to_name(err_status));
                 }
 
                 if (err_status != ESP_OK) {
                     zb_coordinator_update_route_error_count();
-                    /* TEMPORARILY DISABLED - testing Aqara join timing issue */
-                    // if (mqtt_bridge_is_enabled()) {
-                    //     bridge_event_nlme_status(0x0000, (uint8_t)err_status);
-                    // }
                 }
             }
             break;
@@ -971,8 +1009,30 @@ void zb_callback_signal_handler(esp_zb_app_signal_t *signal_struct)
                 esp_zb_zdo_device_unavailable_params_t *unavail_params =
                     (esp_zb_zdo_device_unavailable_params_t *)esp_zb_app_signal_get_params(p_sg_p);
                 if (unavail_params) {
-                    ESP_LOGW(TAG, "Device unavailable: 0x%04X (no MAC/APS ACK)",
-                             unavail_params->short_addr);
+                    /* Rate-limit: log once per device per 30 seconds */
+                    static uint16_t s_unavail_last_addr = 0;
+                    static uint32_t s_unavail_suppress = 0;
+                    static int64_t  s_unavail_last_log_us = 0;
+
+                    int64_t now_us = esp_timer_get_time();
+                    bool throttled = (unavail_params->short_addr == s_unavail_last_addr &&
+                                      (now_us - s_unavail_last_log_us) < 30000000);
+                    if (throttled) {
+                        s_unavail_suppress++;
+                    } else {
+                        if (s_unavail_suppress > 0) {
+                            ESP_LOGW(TAG, "Device unavailable: 0x%04X (no MAC/APS ACK) "
+                                     "[+%lu suppressed]",
+                                     unavail_params->short_addr,
+                                     (unsigned long)s_unavail_suppress);
+                        } else {
+                            ESP_LOGW(TAG, "Device unavailable: 0x%04X (no MAC/APS ACK)",
+                                     unavail_params->short_addr);
+                        }
+                        s_unavail_last_addr = unavail_params->short_addr;
+                        s_unavail_last_log_us = now_us;
+                        s_unavail_suppress = 0;
+                    }
                     cmd_retry_on_unavailable(unavail_params->short_addr);
                 } else {
                     ESP_LOGW(TAG, "Device unavailable signal (no params)");
@@ -1105,6 +1165,20 @@ void zb_callback_device_announce(esp_zb_zdo_signal_device_annce_params_t *device
     }
 }
 
+/**
+ * @brief Timer callback to open permit_join after boot.
+ *
+ * Runs ~15s after network formation — lifecycle is NORMAL by then and
+ * we're outside the Zigbee callback context so the lock is available.
+ */
+static void zb_rejoin_permit_join_cb(void *arg)
+{
+    (void)arg;
+    size_t dev_count = device_registry_count();
+    ESP_LOGI("ZB_CB", "Auto-opening permit_join for 120s (%zu persisted devices)", dev_count);
+    zb_coordinator_permit_join(120);
+}
+
 void zb_callback_network_formed(void)
 {
     ESP_LOGI(TAG, "=== Network Formed ===");
@@ -1120,6 +1194,16 @@ void zb_callback_network_formed(void)
      */
     esp_zb_aps_set_authenticated(true);
     ESP_LOGI(TAG, "APS Authentication State: authenticated (coordinator/TC)");
+
+    /* Increase MAC indirect transaction persistence time from default ~7.7s to 60s.
+     * Sleepy end devices (e.g. Aqara sensors) only poll infrequently — the short
+     * default causes write-attribute commands to expire before the device wakes up. */
+    esp_err_t mac_ret = esp_zb_mac_set_transaction_persistence_time(60 * 1000000ULL);
+    if (mac_ret == ESP_OK) {
+        ESP_LOGI(TAG, "MAC indirect persistence time set to 60s");
+    } else {
+        ESP_LOGW(TAG, "Failed to set MAC persistence time: %s", esp_err_to_name(mac_ret));
+    }
 
     /* Get network info */
     zb_network_info_t net_info;
@@ -1141,16 +1225,23 @@ void zb_callback_network_formed(void)
     /* TEMPORARILY DISABLED - testing Aqara join timing issue */
     // bridge_event_network_started();
 
-    /* Note: We do NOT open permit_join here automatically. The user must
-     * explicitly enable pairing via MQTT (zigbee2mqtt/bridge/request/permit_join)
-     * or via the web UI. Keeping the network closed by default is more secure.
-     *
-     * Previously this called zb_coordinator_permit_join(0) which CLOSES the
-     * network (duration 0 = close). That was a bug - the comment said "open"
-     * but the code closed the network.
-     *
-     * If you want auto-open on boot, use: zb_coordinator_permit_join(254);
-     */
+    /* Schedule auto-permit-join after a delay.  We cannot call
+     * zb_coordinator_permit_join() directly here because:
+     *   1. Lifecycle is still BOOT → permit_join is blocked
+     *   2. We're inside the Zigbee callback → acquiring Zigbee lock would deadlock
+     * A 15-second one-shot timer runs after the lifecycle enters NORMAL phase. */
+    size_t dev_count = device_registry_count();
+    if (dev_count > 0) {
+        static esp_timer_handle_t s_rejoin_timer;
+        esp_timer_create_args_t timer_cfg = {
+            .callback = zb_rejoin_permit_join_cb,
+            .name = "rejoin_pj",
+        };
+        if (esp_timer_create(&timer_cfg, &s_rejoin_timer) == ESP_OK) {
+            esp_timer_start_once(s_rejoin_timer, 15 * 1000000ULL); /* 15s delay */
+            ESP_LOGI(TAG, "Scheduled permit_join in 15s for %zu persisted device(s)", dev_count);
+        }
+    }
 }
 
 void zb_callback_bdb_commissioning_complete(esp_zb_bdb_commissioning_status_t status)
@@ -1322,6 +1413,21 @@ static void handle_basic_cluster_report(uint16_t short_addr, esp_zb_zcl_report_a
                                 device->capabilities |= conv_caps;
                             }
 
+                            /* Generate readable friendly_name if still auto-generated IEEE hex */
+                            char ieee_default[24];
+                            device_id_to_str(device->id, ieee_default, sizeof(ieee_default));
+                            if (strcmp(device->friendly_name, ieee_default) == 0) {
+                                if (device->model[0] != '\0') {
+                                    snprintf(device->friendly_name, sizeof(device->friendly_name),
+                                             "%.23s 0x%04X", device->model, short_addr);
+                                } else {
+                                    snprintf(device->friendly_name, sizeof(device->friendly_name),
+                                             "Device 0x%04X", short_addr);
+                                }
+                                ESP_LOGI(TAG, "Device 0x%04X friendly_name: '%s'",
+                                         short_addr, device->friendly_name);
+                            }
+
                             /* Update NVS with model, clusters, and device type via NG persistence */
                             esp_err_t nvs_ret = device_persistence_save(device);
                             if (nvs_ret == ESP_OK) {
@@ -1361,6 +1467,53 @@ static void handle_basic_cluster_report(uint16_t short_addr, esp_zb_zcl_report_a
                             }
                         }
                     }
+
+                    /* Late converter binding: model is now known but no converter
+                     * bound yet (e.g. device was persisted with empty model before
+                     * the converter DB was flashed, and no interview is active).
+                     * Try to find converter, set capabilities, persist, and notify
+                     * ESPHome adapter so entities get registered on next wake-up. */
+                    if (device->proto.zigbee.converter == NULL &&
+                        !zb_interview_is_active(ieee64)) {
+                        const zb_converter_def_t *late_conv = zb_converter_find(
+                            device->manufacturer, device->model);
+                        if (late_conv != NULL) {
+                            for (uint8_t i = 0; i < late_conv->from_zigbee_count; i++) {
+                                device_zigbee_add_cluster(device, late_conv->from_zigbee[i].cluster_id);
+                            }
+                            for (uint8_t i = 0; i < late_conv->to_zigbee_count; i++) {
+                                device_zigbee_add_cluster(device, late_conv->to_zigbee[i].cluster_id);
+                            }
+                            device_determine_zigbee_type(device);
+                            zb_converter_bind(short_addr, late_conv);
+                            device->proto.zigbee.converter = late_conv;
+                            if (late_conv->init != NULL) {
+                                late_conv->init(short_addr);
+                            }
+                            uint32_t conv_caps = zb_converter_get_capabilities(late_conv);
+                            if (conv_caps != 0) {
+                                device->capabilities |= conv_caps;
+                            }
+                            ESP_LOGI(TAG, "Late-bound converter for 0x%04X: %s (caps=0x%08lx)",
+                                     short_addr,
+                                     late_conv->description ? late_conv->description : late_conv->model,
+                                     (unsigned long)device->capabilities);
+
+                            /* Publish interviewed event to trigger ESPHome entity registration */
+                            evt_device_interviewed_t evt = {
+                                .ieee_addr = device->id,
+                                .short_addr = short_addr,
+                                .success = true,
+                                .endpoint_count = 1
+                            };
+                            event_publish(EVT_DEVICE_INTERVIEWED, &evt, sizeof(evt));
+                        }
+                    }
+
+                    /* Always persist when model is newly learned — even if no
+                     * converter was found.  Next firmware with a larger DB may
+                     * find it via try_rebind_converter() on boot. */
+                    device_persistence_save(device);
                 }
             }
             break;

@@ -58,6 +58,7 @@ esp_err_t esphome_entity_register_switch(const esphome_switch_config_t *config)
     size_t idx = s_entities.switch_count;
     memcpy(&s_entities.switches[idx].config, config, sizeof(esphome_switch_config_t));
     s_entities.switches[idx].state.key = config->key;
+    s_entities.switches[idx].state.device_id = config->device_id;
     s_entities.switches[idx].state.state = false;
     s_entities.switches[idx].registered = true;
     s_entities.switch_count++;
@@ -265,6 +266,7 @@ esp_err_t esphome_entity_register_number(const esphome_number_config_t *config)
     size_t idx = s_entities.number_count;
     memcpy(&s_entities.numbers[idx].config, config, sizeof(esphome_number_config_t));
     s_entities.numbers[idx].state.key = config->key;
+    s_entities.numbers[idx].state.device_id = config->device_id;
     s_entities.numbers[idx].state.state = 0.0f;
     s_entities.numbers[idx].state.missing_state = true;
     s_entities.numbers[idx].registered = true;
@@ -507,6 +509,7 @@ esp_err_t esphome_entity_register_select(const esphome_select_config_t *config)
     size_t idx = s_entities.select_count;
     memcpy(&s_entities.selects[idx].config, config, sizeof(esphome_select_config_t));
     s_entities.selects[idx].state.key = config->key;
+    s_entities.selects[idx].state.device_id = config->device_id;
     s_entities.selects[idx].state.state[0] = '\0';
     s_entities.selects[idx].state.missing_state = true;
     s_entities.selects[idx].registered = true;
@@ -748,6 +751,7 @@ esp_err_t esphome_entity_register_light(const esphome_light_config_t *config)
     size_t idx = s_entities.light_count;
     memcpy(&s_entities.lights[idx].config, config, sizeof(esphome_light_config_t));
     s_entities.lights[idx].state.key = config->key;
+    s_entities.lights[idx].state.device_id = config->device_id;
     s_entities.lights[idx].state.state = false;
     s_entities.lights[idx].state.brightness = 0.0f;
     s_entities.lights[idx].state.color_mode = ESPHOME_COLOR_MODE_UNKNOWN;
@@ -1006,6 +1010,7 @@ esp_err_t esphome_entity_register_cover(const esphome_cover_config_t *config)
     size_t idx = s_entities.cover_count;
     memcpy(&s_entities.covers[idx].config, config, sizeof(esphome_cover_config_t));
     s_entities.covers[idx].state.key = config->key;
+    s_entities.covers[idx].state.device_id = config->device_id;
     s_entities.covers[idx].state.position = 0.0f;
     s_entities.covers[idx].state.tilt = 0.0f;
     s_entities.covers[idx].state.current_operation = ESPHOME_COVER_OPERATION_IDLE;
@@ -1246,6 +1251,7 @@ esp_err_t esphome_entity_register_fan(const esphome_fan_config_t *config)
     size_t idx = s_entities.fan_count;
     memcpy(&s_entities.fans[idx].config, config, sizeof(esphome_fan_config_t));
     s_entities.fans[idx].state.key = config->key;
+    s_entities.fans[idx].state.device_id = config->device_id;
     s_entities.fans[idx].state.state = false;
     s_entities.fans[idx].state.oscillating = false;
     s_entities.fans[idx].state.speed_level = 0;
@@ -1473,6 +1479,7 @@ esp_err_t esphome_entity_register_climate(const esphome_climate_config_t *config
     size_t idx = s_entities.climate_count;
     memcpy(&s_entities.climates[idx].config, config, sizeof(esphome_climate_config_t));
     s_entities.climates[idx].state.key = config->key;
+    s_entities.climates[idx].state.device_id = config->device_id;
     s_entities.climates[idx].state.mode = ESPHOME_CLIMATE_MODE_OFF;
     s_entities.climates[idx].state.current_temperature = 0.0f;
     s_entities.climates[idx].state.target_temperature = 0.0f;
@@ -1752,6 +1759,11 @@ esp_err_t esphome_encode_switch_state(const esphome_switch_state_t *state,
     /* Field 2: state (bool) */
     esphome_encode_bool(&buf, 2, state->state);
 
+    /* Field 3: device_id (uint32) - required for sub-device entity availability */
+    if (state->device_id != 0) {
+        esphome_encode_uint32(&buf, 3, state->device_id);
+    }
+
     if (esphome_buffer_overflow(&buf)) {
         return ESPHOME_ERR_BUFFER_OVERFLOW;
     }
@@ -1810,14 +1822,14 @@ esp_err_t esphome_encode_number_list_entry(const esphome_number_config_t *config
         esphome_encode_bool(&buf, 9, config->disabled_by_default);
     }
 
-    /* Field 10: unit_of_measurement (string) */
+    /* Field 11: unit_of_measurement (string) */
     if (config->unit_of_measurement[0] != '\0') {
-        esphome_encode_string(&buf, 10, config->unit_of_measurement);
+        esphome_encode_string(&buf, 11, config->unit_of_measurement);
     }
 
-    /* Field 11: mode (enum) */
+    /* Field 12: mode (enum) */
     if (config->mode != ESPHOME_NUMBER_MODE_AUTO) {
-        esphome_encode_uint32(&buf, 11, (uint32_t)config->mode);
+        esphome_encode_uint32(&buf, 12, (uint32_t)config->mode);
     }
 
     /* Field 14: device_id (sub-device grouping) */
@@ -1857,6 +1869,11 @@ esp_err_t esphome_encode_number_state(const esphome_number_state_t *state,
     /* Field 3: missing_state (bool) */
     if (state->missing_state) {
         esphome_encode_bool(&buf, 3, state->missing_state);
+    }
+
+    /* Field 4: device_id (uint32) - required for sub-device entity availability */
+    if (state->device_id != 0) {
+        esphome_encode_uint32(&buf, 4, state->device_id);
     }
 
     if (esphome_buffer_overflow(&buf)) {
@@ -1954,6 +1971,11 @@ esp_err_t esphome_encode_select_state(const esphome_select_state_t *state,
         esphome_encode_bool(&buf, 3, state->missing_state);
     }
 
+    /* Field 4: device_id (uint32) - required for sub-device entity availability */
+    if (state->device_id != 0) {
+        esphome_encode_uint32(&buf, 4, state->device_id);
+    }
+
     if (esphome_buffer_overflow(&buf)) {
         return ESPHOME_ERR_BUFFER_OVERFLOW;
     }
@@ -1981,6 +2003,15 @@ esp_err_t esphome_encode_light_list_entry(const esphome_light_config_t *config,
     esphome_buffer_t buf;
     esphome_buffer_init(&buf, payload, sizeof(payload));
 
+    /* Protobuf: ListEntitiesLightResponse
+     *   1: object_id, 2: key, 3: name, 4: unique_id,
+     *   5: legacy_supports_brightness (bool), 6: legacy_supports_rgb (bool),
+     *   7: legacy_supports_white_value (bool), 8: legacy_supports_color_temperature (bool),
+     *   9: min_mireds (float), 10: max_mireds (float),
+     *   11: effects (repeated string), 12: supported_color_modes (repeated ColorMode),
+     *   13: disabled_by_default (bool), 14: icon (string),
+     *   15: entity_category (enum), 16: device_id (uint32) */
+
     /* Field 1: object_id (string) */
     esphome_encode_string(&buf, 1, config->unique_id);
 
@@ -1993,57 +2024,56 @@ esp_err_t esphome_encode_light_list_entry(const esphome_light_config_t *config,
     /* Field 4: unique_id (string) */
     esphome_encode_string(&buf, 4, config->unique_id);
 
-    /* Field 5: icon (string) */
-    if (config->icon[0] != '\0') {
-        esphome_encode_string(&buf, 5, config->icon);
-    }
+    /* Fields 5-8: legacy fields - skip (deprecated) */
 
-    /* Field 6: supported_color_modes[] (repeated int) */
-    /* Encode each supported color mode as a separate field */
-    if (config->supported_color_modes & ESPHOME_COLOR_MODE_ON_OFF) {
-        esphome_encode_uint32(&buf, 6, ESPHOME_COLOR_MODE_ON_OFF);
-    }
-    if (config->supported_color_modes & ESPHOME_COLOR_MODE_BRIGHTNESS) {
-        esphome_encode_uint32(&buf, 6, ESPHOME_COLOR_MODE_BRIGHTNESS);
-    }
-    if (config->supported_color_modes & ESPHOME_COLOR_MODE_WHITE) {
-        esphome_encode_uint32(&buf, 6, ESPHOME_COLOR_MODE_WHITE);
-    }
-    if (config->supported_color_modes & ESPHOME_COLOR_MODE_COLOR_TEMP) {
-        esphome_encode_uint32(&buf, 6, ESPHOME_COLOR_MODE_COLOR_TEMP);
-    }
-    if (config->supported_color_modes & ESPHOME_COLOR_MODE_RGB) {
-        esphome_encode_uint32(&buf, 6, ESPHOME_COLOR_MODE_RGB);
-    }
-    if (config->supported_color_modes & ESPHOME_COLOR_MODE_RGB_WHITE) {
-        esphome_encode_uint32(&buf, 6, ESPHOME_COLOR_MODE_RGB_WHITE);
-    }
-    if (config->supported_color_modes & ESPHOME_COLOR_MODE_RGB_CT) {
-        esphome_encode_uint32(&buf, 6, ESPHOME_COLOR_MODE_RGB_CT);
-    }
-
-    /* Field 7: legacy_supports_brightness (bool) - deprecated, skip */
-
-    /* Field 8: min_mireds (float) */
+    /* Field 9: min_mireds (float) */
     if (config->min_mireds > 0) {
-        esphome_encode_float(&buf, 8, config->min_mireds);
+        esphome_encode_float(&buf, 9, config->min_mireds);
     }
 
-    /* Field 9: max_mireds (float) */
+    /* Field 10: max_mireds (float) */
     if (config->max_mireds > 0) {
-        esphome_encode_float(&buf, 9, config->max_mireds);
+        esphome_encode_float(&buf, 10, config->max_mireds);
     }
 
-    /* Field 10: effects[] (repeated string) */
+    /* Field 11: effects[] (repeated string) */
     for (int i = 0; i < config->effect_count && i < ESPHOME_MAX_LIGHT_EFFECTS; i++) {
         if (config->effects[i][0] != '\0') {
-            esphome_encode_string(&buf, 10, config->effects[i]);
+            esphome_encode_string(&buf, 11, config->effects[i]);
         }
     }
 
-    /* Field 11: disabled_by_default (bool) */
+    /* Field 12: supported_color_modes[] (repeated ColorMode) */
+    if (config->supported_color_modes & ESPHOME_COLOR_MODE_ON_OFF) {
+        esphome_encode_uint32(&buf, 12, ESPHOME_COLOR_MODE_ON_OFF);
+    }
+    if (config->supported_color_modes & ESPHOME_COLOR_MODE_BRIGHTNESS) {
+        esphome_encode_uint32(&buf, 12, ESPHOME_COLOR_MODE_BRIGHTNESS);
+    }
+    if (config->supported_color_modes & ESPHOME_COLOR_MODE_WHITE) {
+        esphome_encode_uint32(&buf, 12, ESPHOME_COLOR_MODE_WHITE);
+    }
+    if (config->supported_color_modes & ESPHOME_COLOR_MODE_COLOR_TEMP) {
+        esphome_encode_uint32(&buf, 12, ESPHOME_COLOR_MODE_COLOR_TEMP);
+    }
+    if (config->supported_color_modes & ESPHOME_COLOR_MODE_RGB) {
+        esphome_encode_uint32(&buf, 12, ESPHOME_COLOR_MODE_RGB);
+    }
+    if (config->supported_color_modes & ESPHOME_COLOR_MODE_RGB_WHITE) {
+        esphome_encode_uint32(&buf, 12, ESPHOME_COLOR_MODE_RGB_WHITE);
+    }
+    if (config->supported_color_modes & ESPHOME_COLOR_MODE_RGB_CT) {
+        esphome_encode_uint32(&buf, 12, ESPHOME_COLOR_MODE_RGB_CT);
+    }
+
+    /* Field 13: disabled_by_default (bool) */
     if (config->disabled_by_default) {
-        esphome_encode_bool(&buf, 11, config->disabled_by_default);
+        esphome_encode_bool(&buf, 13, config->disabled_by_default);
+    }
+
+    /* Field 14: icon (string) */
+    if (config->icon[0] != '\0') {
+        esphome_encode_string(&buf, 14, config->icon);
     }
 
     /* Field 16: device_id (sub-device grouping) */
@@ -2074,6 +2104,13 @@ esp_err_t esphome_encode_light_state(const esphome_light_state_t *state,
     esphome_buffer_t buf;
     esphome_buffer_init(&buf, payload, sizeof(payload));
 
+    /* LightStateResponse proto fields:
+     *   1: key (fixed32), 2: state (bool), 3: brightness (float),
+     *   4: red (float), 5: green (float), 6: blue (float),
+     *   7: white (float), 8: color_temperature (float), 9: effect (string),
+     *   10: color_brightness (float), 11: color_mode (ColorMode),
+     *   14: device_id (uint32) */
+
     /* Field 1: key (fixed32) */
     esphome_encode_fixed32(&buf, 1, state->key);
 
@@ -2085,39 +2122,44 @@ esp_err_t esphome_encode_light_state(const esphome_light_state_t *state,
         esphome_encode_float(&buf, 3, state->brightness);
     }
 
-    /* Field 4: color_mode (int) */
-    if (state->color_mode != ESPHOME_COLOR_MODE_UNKNOWN) {
-        esphome_encode_uint32(&buf, 4, (uint32_t)state->color_mode);
-    }
-
-    /* Field 5: red (float) */
+    /* Field 4: red (float) */
     if (state->red > 0.0f) {
-        esphome_encode_float(&buf, 5, state->red);
+        esphome_encode_float(&buf, 4, state->red);
     }
 
-    /* Field 6: green (float) */
+    /* Field 5: green (float) */
     if (state->green > 0.0f) {
-        esphome_encode_float(&buf, 6, state->green);
+        esphome_encode_float(&buf, 5, state->green);
     }
 
-    /* Field 7: color_temperature (float) */
-    if (state->color_temp > 0.0f) {
-        esphome_encode_float(&buf, 7, state->color_temp);
-    }
-
-    /* Field 8: blue (float) */
+    /* Field 6: blue (float) */
     if (state->blue > 0.0f) {
-        esphome_encode_float(&buf, 8, state->blue);
+        esphome_encode_float(&buf, 6, state->blue);
     }
 
-    /* Field 9: white (float) */
+    /* Field 7: white (float) */
     if (state->white > 0.0f) {
-        esphome_encode_float(&buf, 9, state->white);
+        esphome_encode_float(&buf, 7, state->white);
     }
 
-    /* Field 10: effect (string) */
+    /* Field 8: color_temperature (float) */
+    if (state->color_temp > 0.0f) {
+        esphome_encode_float(&buf, 8, state->color_temp);
+    }
+
+    /* Field 9: effect (string) */
     if (state->effect[0] != '\0') {
-        esphome_encode_string(&buf, 10, state->effect);
+        esphome_encode_string(&buf, 9, state->effect);
+    }
+
+    /* Field 11: color_mode (ColorMode enum) */
+    if (state->color_mode != ESPHOME_COLOR_MODE_UNKNOWN) {
+        esphome_encode_uint32(&buf, 11, (uint32_t)state->color_mode);
+    }
+
+    /* Field 14: device_id (uint32) - required for sub-device entity availability */
+    if (state->device_id != 0) {
+        esphome_encode_uint32(&buf, 14, state->device_id);
     }
 
     if (esphome_buffer_overflow(&buf)) {
@@ -2147,6 +2189,14 @@ esp_err_t esphome_encode_cover_list_entry(const esphome_cover_config_t *config,
     esphome_buffer_t buf;
     esphome_buffer_init(&buf, payload, sizeof(payload));
 
+    /* Protobuf: ListEntitiesCoverResponse
+     *   1: object_id, 2: key, 3: name, 4: unique_id,
+     *   5: assumed_state (bool), 6: supports_position (bool),
+     *   7: supports_tilt (bool), 8: device_class (string),
+     *   9: disabled_by_default (bool), 10: icon (string),
+     *   11: entity_category (enum), 12: supports_stop (bool),
+     *   13: device_id (uint32) */
+
     /* Field 1: object_id (string) */
     esphome_encode_string(&buf, 1, config->unique_id);
 
@@ -2159,34 +2209,51 @@ esp_err_t esphome_encode_cover_list_entry(const esphome_cover_config_t *config,
     /* Field 4: unique_id (string) */
     esphome_encode_string(&buf, 4, config->unique_id);
 
-    /* Field 5: icon (string) */
-    if (config->icon[0] != '\0') {
-        esphome_encode_string(&buf, 5, config->icon);
-    }
-
-    /* Field 6: disabled_by_default (bool) */
-    if (config->disabled_by_default) {
-        esphome_encode_bool(&buf, 6, config->disabled_by_default);
-    }
-
-    /* Field 7: device_class (enum as uint32) */
-    if (config->device_class != ESPHOME_COVER_CLASS_NONE) {
-        esphome_encode_uint32(&buf, 7, (uint32_t)config->device_class);
-    }
-
-    /* Field 8: assumed_state (bool) */
+    /* Field 5: assumed_state (bool) */
     if (config->assumed_state) {
-        esphome_encode_bool(&buf, 8, config->assumed_state);
+        esphome_encode_bool(&buf, 5, config->assumed_state);
     }
 
-    /* Field 9: supports_position (bool) */
+    /* Field 6: supports_position (bool) */
     if (config->supports_position) {
-        esphome_encode_bool(&buf, 9, config->supports_position);
+        esphome_encode_bool(&buf, 6, config->supports_position);
     }
 
-    /* Field 10: supports_tilt (bool) */
+    /* Field 7: supports_tilt (bool) */
     if (config->supports_tilt) {
-        esphome_encode_bool(&buf, 10, config->supports_tilt);
+        esphome_encode_bool(&buf, 7, config->supports_tilt);
+    }
+
+    /* Field 8: device_class (string) */
+    if (config->device_class != ESPHOME_COVER_CLASS_NONE) {
+        /* Cover device_class is a string in the proto */
+        const char *dc_str = "";
+        switch (config->device_class) {
+            case ESPHOME_COVER_CLASS_AWNING:   dc_str = "awning"; break;
+            case ESPHOME_COVER_CLASS_BLIND:    dc_str = "blind"; break;
+            case ESPHOME_COVER_CLASS_CURTAIN:  dc_str = "curtain"; break;
+            case ESPHOME_COVER_CLASS_DAMPER:   dc_str = "damper"; break;
+            case ESPHOME_COVER_CLASS_DOOR:     dc_str = "door"; break;
+            case ESPHOME_COVER_CLASS_GARAGE:   dc_str = "garage"; break;
+            case ESPHOME_COVER_CLASS_GATE:     dc_str = "gate"; break;
+            case ESPHOME_COVER_CLASS_SHADE:    dc_str = "shade"; break;
+            case ESPHOME_COVER_CLASS_SHUTTER:  dc_str = "shutter"; break;
+            case ESPHOME_COVER_CLASS_WINDOW:   dc_str = "window"; break;
+            default: break;
+        }
+        if (dc_str[0] != '\0') {
+            esphome_encode_string(&buf, 8, dc_str);
+        }
+    }
+
+    /* Field 9: disabled_by_default (bool) */
+    if (config->disabled_by_default) {
+        esphome_encode_bool(&buf, 9, config->disabled_by_default);
+    }
+
+    /* Field 10: icon (string) */
+    if (config->icon[0] != '\0') {
+        esphome_encode_string(&buf, 10, config->icon);
     }
 
     /* Field 13: device_id (sub-device grouping) */
@@ -2217,17 +2284,29 @@ esp_err_t esphome_encode_cover_state(const esphome_cover_state_t *state,
     esphome_buffer_t buf;
     esphome_buffer_init(&buf, payload, sizeof(payload));
 
+    /* CoverStateResponse proto fields:
+     *   1: key (fixed32), 2: legacy_state (deprecated, skip),
+     *   3: position (float), 4: tilt (float),
+     *   5: current_operation (CoverOperation), 6: device_id (uint32) */
+
     /* Field 1: key (fixed32) */
     esphome_encode_fixed32(&buf, 1, state->key);
 
-    /* Field 2: position (float) */
-    esphome_encode_float(&buf, 2, state->position);
+    /* Field 2: legacy_state - skipped (deprecated) */
 
-    /* Field 3: tilt (float) */
-    esphome_encode_float(&buf, 3, state->tilt);
+    /* Field 3: position (float) */
+    esphome_encode_float(&buf, 3, state->position);
 
-    /* Field 4: current_operation (enum) */
-    esphome_encode_uint32(&buf, 4, (uint32_t)state->current_operation);
+    /* Field 4: tilt (float) */
+    esphome_encode_float(&buf, 4, state->tilt);
+
+    /* Field 5: current_operation (enum) */
+    esphome_encode_uint32(&buf, 5, (uint32_t)state->current_operation);
+
+    /* Field 6: device_id (uint32) - required for sub-device entity availability */
+    if (state->device_id != 0) {
+        esphome_encode_uint32(&buf, 6, state->device_id);
+    }
 
     if (esphome_buffer_overflow(&buf)) {
         return ESPHOME_ERR_BUFFER_OVERFLOW;
@@ -2256,6 +2335,14 @@ esp_err_t esphome_encode_fan_list_entry(const esphome_fan_config_t *config,
     esphome_buffer_t buf;
     esphome_buffer_init(&buf, payload, sizeof(payload));
 
+    /* Protobuf: ListEntitiesFanResponse
+     *   1: object_id, 2: key, 3: name, 4: unique_id,
+     *   5: supports_oscillation (bool), 6: supports_speed (bool),
+     *   7: supports_direction (bool), 8: supported_speed_count (int32),
+     *   9: disabled_by_default (bool), 10: icon (string),
+     *   11: entity_category (enum), 12: supported_preset_modes (repeated string),
+     *   13: device_id (uint32) */
+
     /* Field 1: object_id (string) */
     esphome_encode_string(&buf, 1, config->unique_id);
 
@@ -2268,34 +2355,34 @@ esp_err_t esphome_encode_fan_list_entry(const esphome_fan_config_t *config,
     /* Field 4: unique_id (string) */
     esphome_encode_string(&buf, 4, config->unique_id);
 
-    /* Field 5: icon (string) */
-    if (config->icon[0] != '\0') {
-        esphome_encode_string(&buf, 5, config->icon);
-    }
-
-    /* Field 6: supports_oscillation (bool) */
+    /* Field 5: supports_oscillation (bool) */
     if (config->supports_oscillation) {
-        esphome_encode_bool(&buf, 6, config->supports_oscillation);
+        esphome_encode_bool(&buf, 5, config->supports_oscillation);
     }
 
-    /* Field 7: supports_speed (bool) */
+    /* Field 6: supports_speed (bool) */
     if (config->supports_speed) {
-        esphome_encode_bool(&buf, 7, config->supports_speed);
+        esphome_encode_bool(&buf, 6, config->supports_speed);
     }
 
-    /* Field 8: supports_direction (bool) */
+    /* Field 7: supports_direction (bool) */
     if (config->supports_direction) {
-        esphome_encode_bool(&buf, 8, config->supports_direction);
+        esphome_encode_bool(&buf, 7, config->supports_direction);
     }
 
-    /* Field 9: supported_speed_count (int32) */
+    /* Field 8: supported_speed_count (int32) */
     if (config->supported_speed_count > 0) {
-        esphome_encode_int32(&buf, 9, config->supported_speed_count);
+        esphome_encode_int32(&buf, 8, config->supported_speed_count);
     }
 
-    /* Field 10: disabled_by_default (bool) */
+    /* Field 9: disabled_by_default (bool) */
     if (config->disabled_by_default) {
-        esphome_encode_bool(&buf, 10, config->disabled_by_default);
+        esphome_encode_bool(&buf, 9, config->disabled_by_default);
+    }
+
+    /* Field 10: icon (string) */
+    if (config->icon[0] != '\0') {
+        esphome_encode_string(&buf, 10, config->icon);
     }
 
     /* Field 13: device_id (sub-device grouping) */
@@ -2326,6 +2413,12 @@ esp_err_t esphome_encode_fan_state(const esphome_fan_state_t *state,
     esphome_buffer_t buf;
     esphome_buffer_init(&buf, payload, sizeof(payload));
 
+    /* FanStateResponse proto fields:
+     *   1: key (fixed32), 2: state (bool), 3: oscillating (bool),
+     *   4: speed (legacy FanSpeed, skip), 5: direction (FanDirection),
+     *   6: speed_level (int32), 7: preset_mode (string),
+     *   8: device_id (uint32) */
+
     /* Field 1: key (fixed32) */
     esphome_encode_fixed32(&buf, 1, state->key);
 
@@ -2337,14 +2430,21 @@ esp_err_t esphome_encode_fan_state(const esphome_fan_state_t *state,
         esphome_encode_bool(&buf, 3, state->oscillating);
     }
 
-    /* Field 4: speed_level (int32) */
-    if (state->speed_level > 0) {
-        esphome_encode_int32(&buf, 4, state->speed_level);
-    }
+    /* Field 4: speed (legacy) - skipped (deprecated) */
 
     /* Field 5: direction (enum) */
     if (state->direction != ESPHOME_FAN_DIRECTION_FORWARD) {
         esphome_encode_uint32(&buf, 5, (uint32_t)state->direction);
+    }
+
+    /* Field 6: speed_level (int32) */
+    if (state->speed_level > 0) {
+        esphome_encode_int32(&buf, 6, state->speed_level);
+    }
+
+    /* Field 8: device_id (uint32) - required for sub-device entity availability */
+    if (state->device_id != 0) {
+        esphome_encode_uint32(&buf, 8, state->device_id);
     }
 
     if (esphome_buffer_overflow(&buf)) {
@@ -2433,21 +2533,21 @@ esp_err_t esphome_encode_climate_list_entry(const esphome_climate_config_t *conf
         }
     }
 
-    /* Field 15: supported_presets[] (repeated enum from bitmask) */
+    /* Field 16: supported_presets[] (repeated enum from bitmask) */
     for (int preset = ESPHOME_CLIMATE_PRESET_NONE; preset <= ESPHOME_CLIMATE_PRESET_ACTIVITY; preset++) {
         if (config->supported_presets & (1 << preset)) {
-            esphome_encode_uint32(&buf, 15, (uint32_t)preset);
+            esphome_encode_uint32(&buf, 16, (uint32_t)preset);
         }
     }
 
-    /* Field 16: disabled_by_default (bool) */
+    /* Field 18: disabled_by_default (bool) */
     if (config->disabled_by_default) {
-        esphome_encode_bool(&buf, 16, config->disabled_by_default);
+        esphome_encode_bool(&buf, 18, config->disabled_by_default);
     }
 
-    /* Field 17: icon (string) */
+    /* Field 19: icon (string) */
     if (config->icon[0] != '\0') {
-        esphome_encode_string(&buf, 17, config->icon);
+        esphome_encode_string(&buf, 19, config->icon);
     }
 
     /* Field 26: device_id (sub-device grouping) */
@@ -2478,7 +2578,16 @@ esp_err_t esphome_encode_climate_state(const esphome_climate_state_t *state,
     esphome_buffer_t buf;
     esphome_buffer_init(&buf, payload, sizeof(payload));
 
-    /* Field 1: key (fixed32) - standard for all state messages */
+    /* ClimateStateResponse proto fields:
+     *   1: key (fixed32), 2: mode (ClimateMode), 3: current_temperature (float),
+     *   4: target_temperature (float), 5: target_temperature_low (float),
+     *   6: target_temperature_high (float), 7: unused_legacy_away (skip),
+     *   8: action (ClimateAction), 9: fan_mode (ClimateFanMode),
+     *   10: swing_mode (ClimateSwingMode), 11: custom_fan_mode (string),
+     *   12: preset (ClimatePreset), 13: custom_preset (string),
+     *   16: device_id (uint32) */
+
+    /* Field 1: key (fixed32) */
     esphome_encode_fixed32(&buf, 1, state->key);
 
     /* Field 2: mode (enum) */
@@ -2500,24 +2609,31 @@ esp_err_t esphome_encode_climate_state(const esphome_climate_state_t *state,
         esphome_encode_float(&buf, 6, state->target_temperature_high);
     }
 
-    /* Field 7: action (enum) */
+    /* Field 7: unused_legacy_away - skipped (deprecated) */
+
+    /* Field 8: action (enum) */
     if (state->action != ESPHOME_CLIMATE_ACTION_OFF) {
-        esphome_encode_uint32(&buf, 7, (uint32_t)state->action);
+        esphome_encode_uint32(&buf, 8, (uint32_t)state->action);
     }
 
-    /* Field 8: fan_mode (enum) */
+    /* Field 9: fan_mode (enum) */
     if (state->fan_mode != ESPHOME_CLIMATE_FAN_AUTO) {
-        esphome_encode_uint32(&buf, 8, (uint32_t)state->fan_mode);
+        esphome_encode_uint32(&buf, 9, (uint32_t)state->fan_mode);
     }
 
-    /* Field 9: swing_mode (enum) */
+    /* Field 10: swing_mode (enum) */
     if (state->swing_mode != ESPHOME_CLIMATE_SWING_OFF) {
-        esphome_encode_uint32(&buf, 9, (uint32_t)state->swing_mode);
+        esphome_encode_uint32(&buf, 10, (uint32_t)state->swing_mode);
     }
 
-    /* Field 10: preset (enum) */
+    /* Field 12: preset (enum) */
     if (state->preset != ESPHOME_CLIMATE_PRESET_NONE) {
-        esphome_encode_uint32(&buf, 10, (uint32_t)state->preset);
+        esphome_encode_uint32(&buf, 12, (uint32_t)state->preset);
+    }
+
+    /* Field 16: device_id (uint32) - required for sub-device entity availability */
+    if (state->device_id != 0) {
+        esphome_encode_uint32(&buf, 16, state->device_id);
     }
 
     if (esphome_buffer_overflow(&buf)) {

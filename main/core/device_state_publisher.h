@@ -35,6 +35,16 @@ extern "C" {
 esp_err_t device_state_publisher_init(void);
 
 /**
+ * @brief Deinitialize device state publisher
+ *
+ * Unsubscribes event bus handlers. Called from mqtt_bridge_deinit().
+ *
+ * @return ESP_OK on success
+ * @return ESP_ERR_INVALID_STATE if not initialized
+ */
+esp_err_t device_state_publisher_deinit(void);
+
+/**
  * @brief Publish full device state to MQTT
  *
  * Publishes the complete state of a device to MQTT topic:

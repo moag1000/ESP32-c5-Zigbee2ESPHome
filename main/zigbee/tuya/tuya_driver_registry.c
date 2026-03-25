@@ -178,6 +178,22 @@ void tuya_driver_unbind(uint16_t short_addr)
     xSemaphoreGive(s_mutex);
 }
 
+void tuya_driver_unbind_all(void)
+{
+    if (!s_initialized) {
+        return;
+    }
+
+    xSemaphoreTake(s_mutex, GW_TIMEOUT_LONG_TICKS);
+    size_t old_count = s_binding_count;
+    s_binding_count = 0;
+    xSemaphoreGive(s_mutex);
+
+    if (old_count > 0) {
+        ESP_LOGI(TAG, "Cleared all %zu Tuya driver bindings", old_count);
+    }
+}
+
 /* ============================================================================
  * NVS Persistence for Tuya Driver Bindings
  *

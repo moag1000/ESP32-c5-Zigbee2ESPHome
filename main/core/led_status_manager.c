@@ -188,6 +188,31 @@ esp_err_t led_status_manager_init(void)
 #endif
 }
 
+void led_status_manager_deinit(void)
+{
+#if CONFIG_GW_LED_ENABLED
+    if (!s_initialized) {
+        return;
+    }
+
+    /* Unsubscribe event bus handlers */
+    event_unsubscribe(EVT_WIFI_CONNECTED, led_event_handler);
+    event_unsubscribe(EVT_WIFI_DISCONNECTED, led_event_handler);
+    event_unsubscribe(EVT_MQTT_CONNECTED, led_event_handler);
+    event_unsubscribe(EVT_MQTT_DISCONNECTED, led_event_handler);
+    event_unsubscribe(EVT_NETWORK_READY, led_event_handler);
+
+    s_initialized = false;
+
+    if (s_mutex != NULL) {
+        vSemaphoreDelete(s_mutex);
+        s_mutex = NULL;
+    }
+
+    ESP_LOGI(TAG, "LED status manager deinitialized");
+#endif
+}
+
 void led_status_manager_set_condition(led_condition_t condition, bool active)
 {
 #if CONFIG_GW_LED_ENABLED

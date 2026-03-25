@@ -435,10 +435,27 @@ static void handle_device_interviewed(event_type_t type, void *data,
  * Public API Functions
  * ============================================================================ */
 
+static bool s_publisher_initialized = false;
+
 esp_err_t device_state_publisher_init(void)
 {
+    if (s_publisher_initialized) {
+        return ESP_OK;
+    }
     event_subscribe(EVT_DEVICE_INTERVIEWED, handle_device_interviewed, NULL);
+    s_publisher_initialized = true;
     ESP_LOGI(TAG, "Device state publisher initialized");
+    return ESP_OK;
+}
+
+esp_err_t device_state_publisher_deinit(void)
+{
+    if (!s_publisher_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    event_unsubscribe(EVT_DEVICE_INTERVIEWED, handle_device_interviewed);
+    s_publisher_initialized = false;
+    ESP_LOGI(TAG, "Device state publisher deinitialized");
     return ESP_OK;
 }
 

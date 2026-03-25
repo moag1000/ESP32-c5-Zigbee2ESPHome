@@ -53,9 +53,9 @@ static const char *TAG = "WIFI_MGR";
 
 #ifdef CONFIG_WIFI_AUTO_BAND_SWITCH
 /* Band switching constants */
-#define WIFI_RSSI_POOR_THRESHOLD        (-75)   /**< dBm - consider switching bands */
-#define WIFI_RSSI_CHECK_COUNT           3       /**< Consecutive poor readings before switch */
-#define WIFI_BAND_SWITCH_COOLDOWN_SEC   300     /**< Seconds between band switches */
+#define WIFI_RSSI_POOR_THRESHOLD        (-85)   /**< dBm - consider switching bands (relaxed for Zigbee coex) */
+#define WIFI_RSSI_CHECK_COUNT           6       /**< Consecutive poor readings before switch (60s at 10s interval) */
+#define WIFI_BAND_SWITCH_COOLDOWN_SEC   600     /**< Seconds between band switches (10 minutes) */
 #define WIFI_RSSI_MONITOR_INTERVAL_US   (10 * 1000 * 1000)  /**< RSSI check interval (10 seconds) */
 
 /**
@@ -91,6 +91,7 @@ static struct {
     bool sntp_initialized;       /**< SNTP service initialized flag */
     uint8_t consecutive_failures; /**< Consecutive reconnect failures (for band fallback) */
     bool band_fallback_active;   /**< True if AUTO band mode fallback is active */
+    esp_timer_handle_t watchdog_timer; /**< Safety watchdog: full WiFi restart if disconnected too long */
 #ifdef CONFIG_WIFI_AUTO_BAND_SWITCH
     esp_timer_handle_t rssi_monitor_timer;  /**< Timer for RSSI monitoring */
     uint8_t poor_rssi_count;                /**< Consecutive poor RSSI readings */
@@ -120,6 +121,8 @@ static void ip_event_handler(void *arg, esp_event_base_t event_base,
                              int32_t event_id, void *event_data);
 static void set_state(wifi_state_t new_state);
 static void reconnect_timer_callback(void *arg);
+static void wifi_watchdog_callback(void *arg);
+static void schedule_reconnect(uint32_t delay_ms);
 static void uptime_timer_callback(void *arg);
 static esp_err_t wifi_manager_setup_mdns(void);
 static void wifi_manager_cleanup_mdns(void);
@@ -172,6 +175,65 @@ static void uptime_timer_callback(void *arg)
     /* Update RSSI every WIFI_MGR_RSSI_UPDATE_INTERVAL_SEC seconds */
     if (uptime > 0 && (uptime % WIFI_MGR_RSSI_UPDATE_INTERVAL_SEC) == 0) {
         wifi_manager_update_rssi();
+    }
+}
+
+/**
+ * @brief Safe helper to schedule a reconnect timer.
+ * Always stops the timer first to avoid ESP_ERR_INVALID_STATE.
+ */
+static void schedule_reconnect(uint32_t delay_ms)
+{
+    if (!s_wifi.reconnect_timer) return;
+    esp_timer_stop(s_wifi.reconnect_timer);  /* safe even if not running */
+    esp_err_t ret = esp_timer_start_once(s_wifi.reconnect_timer, (uint64_t)delay_ms * 1000);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to start reconnect timer: %s", esp_err_to_name(ret));
+    }
+}
+
+/**
+ * @brief WiFi watchdog — full WiFi restart if disconnected for too long.
+ * Fires 5 minutes after disconnect. Stops+starts WiFi driver to reset state.
+ */
+static void wifi_watchdog_callback(void *arg)
+{
+    (void)arg;
+    wifi_ap_record_t ap_info;
+    if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
+        /* Already connected — nothing to do */
+        return;
+    }
+
+    ESP_LOGW(TAG, "WiFi watchdog: still disconnected after 5 min — full WiFi restart");
+
+    /* Full WiFi restart: disconnect → stop → start → connect */
+    esp_wifi_disconnect();
+    esp_wifi_stop();
+    vTaskDelay(pdMS_TO_TICKS(500));
+    esp_wifi_start();
+    vTaskDelay(pdMS_TO_TICKS(200));
+    esp_err_t ret = esp_wifi_connect();
+    if (ret == ESP_OK) {
+        set_state(WIFI_STATE_RECONNECTING);
+    } else {
+        ESP_LOGE(TAG, "WiFi watchdog: connect failed: %s — will retry via timer", esp_err_to_name(ret));
+    }
+
+    /* Reset counters so reconnect logic starts fresh */
+    if (xSemaphoreTake(s_wifi.state_mutex, pdMS_TO_TICKS(WIFI_MGR_TIMER_MUTEX_TIMEOUT_MS)) == pdTRUE) {
+        s_wifi.retry_count = 0;
+        s_wifi.consecutive_failures = 0;
+        s_wifi.reconnect_delay_ms = WIFI_MGR_RECONNECT_BASE_DELAY_MS;
+        s_wifi.band_fallback_active = false;
+        s_wifi.auto_reconnect = true;
+        xSemaphoreGive(s_wifi.state_mutex);
+    }
+
+    /* Schedule another watchdog in case this restart also fails */
+    if (s_wifi.watchdog_timer) {
+        esp_timer_stop(s_wifi.watchdog_timer);
+        esp_timer_start_once(s_wifi.watchdog_timer, 5ULL * 60 * 1000000);
     }
 }
 
@@ -243,7 +305,7 @@ static void reconnect_timer_callback(void *arg)
         return;
     }
 
-    /* Other errors - schedule retry with exponential backoff */
+    /* esp_wifi_connect() API error — may need WiFi restart */
     ESP_LOGE(TAG, "Failed to initiate reconnection: %s", esp_err_to_name(ret));
 
     uint32_t next_delay_ms = WIFI_MGR_RECONNECT_MAX_DELAY_MS; /* Default if mutex fails */
@@ -255,16 +317,23 @@ static void reconnect_timer_callback(void *arg)
         }
         next_delay_ms = s_wifi.reconnect_delay_ms;
         s_wifi.consecutive_failures++;
+        failures = s_wifi.consecutive_failures;
         xSemaphoreGive(s_wifi.state_mutex);
     } else {
         ESP_LOGW(TAG, "Failed to acquire mutex for backoff update");
     }
 
-    ESP_LOGI(TAG, "Next reconnect attempt in %lu ms (failures: %d)", next_delay_ms, failures + 1);
-    esp_err_t timer_ret = esp_timer_start_once(s_wifi.reconnect_timer, next_delay_ms * 1000);
-    if (timer_ret != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to start reconnect timer: %s", esp_err_to_name(timer_ret));
+    /* If API keeps failing, try a WiFi stop/start cycle to reset driver state */
+    if (failures >= WIFI_RECONNECT_FAIL_THRESHOLD * 2) {
+        ESP_LOGW(TAG, "Persistent API errors (%d) — restarting WiFi driver", failures);
+        esp_wifi_disconnect();
+        esp_wifi_stop();
+        vTaskDelay(pdMS_TO_TICKS(500));
+        esp_wifi_start();
     }
+
+    ESP_LOGI(TAG, "Next reconnect attempt in %lu ms (failures: %d)", next_delay_ms, failures);
+    schedule_reconnect(next_delay_ms);
 }
 
 /**
@@ -293,6 +362,11 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                              ap_info.ssid, ap_info.primary, band_str, ap_info.rssi);
                 } else {
                     ESP_LOGI(TAG, "Connected to AP");
+                }
+
+                /* Stop watchdog — we're connected */
+                if (s_wifi.watchdog_timer) {
+                    esp_timer_stop(s_wifi.watchdog_timer);
                 }
 
                 /* Update stats and reset retry counters with mutex protection */
@@ -361,6 +435,12 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                 xEventGroupSetBits(s_wifi.event_group, WIFI_DISCONNECTED_BIT);
                 xEventGroupClearBits(s_wifi.event_group, WIFI_CONNECTED_BIT);
 
+                /* Start watchdog: full WiFi restart if still disconnected after 5 min */
+                if (s_wifi.watchdog_timer) {
+                    esp_timer_stop(s_wifi.watchdog_timer);
+                    esp_timer_start_once(s_wifi.watchdog_timer, 5ULL * 60 * 1000000);
+                }
+
                 /* Publish WiFi disconnected event to event bus */
                 event_publish(EVT_WIFI_DISCONNECTED, NULL, 0);
 
@@ -375,111 +455,79 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                     esp_timer_stop(s_wifi.uptime_timer);
                 }
 
-                /* Handle NO_AP_FOUND (201) and BEACON_TIMEOUT (200) specially */
-                bool use_longer_delay = false;
-                if (event->reason == WIFI_REASON_NO_AP_FOUND ||
-                    event->reason == WIFI_REASON_BEACON_TIMEOUT) {
-                    /* Increment consecutive failure counter */
-                    if (xSemaphoreTake(s_wifi.state_mutex, pdMS_TO_TICKS(WIFI_MGR_EVENT_MUTEX_TIMEOUT_MS)) == pdTRUE) {
-                        s_wifi.consecutive_failures++;
-                        consecutive_failures = s_wifi.consecutive_failures;
-                        xSemaphoreGive(s_wifi.state_mutex);
-                    }
-
-                    ESP_LOGW(TAG, "AP not found or beacon timeout (consecutive: %d)", consecutive_failures);
-
-#ifdef CONFIG_WIFI_PREFER_5GHZ
-                    /* After multiple failures, switch to AUTO band mode */
-                    if (consecutive_failures >= WIFI_RECONNECT_FAIL_THRESHOLD && !s_wifi.band_fallback_active) {
-                        ESP_LOGW(TAG, "Switching to AUTO band mode after %d failures", consecutive_failures);
-                        esp_err_t band_ret = esp_wifi_set_band_mode(WIFI_BAND_MODE_AUTO);
-                        if (band_ret == ESP_OK) {
-                            if (xSemaphoreTake(s_wifi.state_mutex, pdMS_TO_TICKS(WIFI_MGR_EVENT_MUTEX_TIMEOUT_MS)) == pdTRUE) {
-                                s_wifi.band_fallback_active = true;
-                                xSemaphoreGive(s_wifi.state_mutex);
-                            }
-                        }
-                    }
-#endif
-                    /* Use longer delay for NO_AP_FOUND to allow AP to become visible */
-                    use_longer_delay = true;
+                /* Increment consecutive failure counter for ALL disconnect reasons */
+                if (xSemaphoreTake(s_wifi.state_mutex, pdMS_TO_TICKS(WIFI_MGR_EVENT_MUTEX_TIMEOUT_MS)) == pdTRUE) {
+                    s_wifi.consecutive_failures++;
+                    consecutive_failures = s_wifi.consecutive_failures;
+                    xSemaphoreGive(s_wifi.state_mutex);
                 }
 
-                /* Auto-reconnect logic */
+                ESP_LOGW(TAG, "Disconnect reason %d (consecutive failures: %d)", event->reason, consecutive_failures);
+
+                /* Handle NO_AP_FOUND and BEACON_TIMEOUT: band fallback */
+                bool ap_not_reachable = (event->reason == WIFI_REASON_NO_AP_FOUND ||
+                                         event->reason == WIFI_REASON_BEACON_TIMEOUT);
+
+#ifdef CONFIG_WIFI_PREFER_5GHZ
+                /* After multiple failures, switch to AUTO band mode */
+                if (consecutive_failures >= WIFI_RECONNECT_FAIL_THRESHOLD && !s_wifi.band_fallback_active) {
+                    ESP_LOGW(TAG, "Switching to AUTO band mode after %d failures", consecutive_failures);
+                    esp_err_t band_ret = esp_wifi_set_band_mode(WIFI_BAND_MODE_AUTO);
+                    if (band_ret == ESP_OK) {
+                        if (xSemaphoreTake(s_wifi.state_mutex, pdMS_TO_TICKS(WIFI_MGR_EVENT_MUTEX_TIMEOUT_MS)) == pdTRUE) {
+                            s_wifi.band_fallback_active = true;
+                            xSemaphoreGive(s_wifi.state_mutex);
+                        }
+                    }
+                }
+#endif
+
+                /* Auto-reconnect logic — ALWAYS timer-based to give radio time to settle */
                 if (auto_reconnect) {
+                    /* Calculate delay with exponential backoff */
+                    uint32_t delay_ms = reconnect_delay_ms;
+
+                    /* For AP-not-reachable, use longer delays to allow AP to come back */
+                    if (ap_not_reachable && consecutive_failures > 1) {
+                        delay_ms = delay_ms * consecutive_failures;
+                    }
+
+                    /* Cap at max delay */
+                    if (delay_ms > WIFI_MGR_RECONNECT_MAX_DELAY_MS) {
+                        delay_ms = WIFI_MGR_RECONNECT_MAX_DELAY_MS;
+                    }
+
                     if (retry_count < max_retry) {
-                        /* For NO_AP_FOUND/BEACON_TIMEOUT, use timer with delay instead of immediate retry */
-                        if (use_longer_delay) {
-                            uint32_t delay_ms = reconnect_delay_ms;
-                            /* Increase delay for repeated failures */
-                            if (consecutive_failures > 1) {
-                                delay_ms = delay_ms * consecutive_failures;
-                                if (delay_ms > WIFI_MGR_RECONNECT_MAX_DELAY_MS) {
-                                    delay_ms = WIFI_MGR_RECONNECT_MAX_DELAY_MS;
-                                }
-                            }
-                            ESP_LOGI(TAG, "Scheduling reconnect in %lu ms (retry %d/%d)...",
-                                    delay_ms, retry_count + 1, max_retry);
-                            set_state(WIFI_STATE_RECONNECTING);
+                        ESP_LOGI(TAG, "Scheduling reconnect in %lu ms (retry %d/%d)...",
+                                delay_ms, retry_count + 1, max_retry);
 
-                            if (xSemaphoreTake(s_wifi.state_mutex, pdMS_TO_TICKS(WIFI_MGR_EVENT_MUTEX_TIMEOUT_MS)) == pdTRUE) {
-                                s_wifi.retry_count++;
-                                s_wifi.stats.reconnect_count++;
-                                xSemaphoreGive(s_wifi.state_mutex);
+                        if (xSemaphoreTake(s_wifi.state_mutex, pdMS_TO_TICKS(WIFI_MGR_EVENT_MUTEX_TIMEOUT_MS)) == pdTRUE) {
+                            s_wifi.retry_count++;
+                            s_wifi.stats.reconnect_count++;
+                            /* Apply exponential backoff for next attempt */
+                            s_wifi.reconnect_delay_ms = reconnect_delay_ms * 2;
+                            if (s_wifi.reconnect_delay_ms > WIFI_MGR_RECONNECT_MAX_DELAY_MS) {
+                                s_wifi.reconnect_delay_ms = WIFI_MGR_RECONNECT_MAX_DELAY_MS;
                             }
-
-                            esp_err_t timer_ret = esp_timer_start_once(s_wifi.reconnect_timer, delay_ms * 1000);
-                            if (timer_ret != ESP_OK) {
-                                ESP_LOGW(TAG, "Failed to start reconnect timer: %s", esp_err_to_name(timer_ret));
-                            }
-                        } else {
-                            ESP_LOGI(TAG, "Retrying connection (%d/%d)...",
-                                    retry_count + 1, max_retry);
-
-                            /* Check esp_wifi_connect() return value before updating state */
-                            esp_err_t connect_ret = esp_wifi_connect();
-                            if (connect_ret == ESP_ERR_WIFI_CONN) {
-                                /* Already connecting, just wait - don't schedule timer */
-                                ESP_LOGD(TAG, "WiFi already connecting, waiting...");
-                                set_state(WIFI_STATE_RECONNECTING);
-                            } else if (connect_ret == ESP_OK) {
-                                /* Update retry count and stats with mutex protection */
-                                if (xSemaphoreTake(s_wifi.state_mutex, pdMS_TO_TICKS(WIFI_MGR_EVENT_MUTEX_TIMEOUT_MS)) == pdTRUE) {
-                                    s_wifi.retry_count++;
-                                    s_wifi.stats.reconnect_count++;
-                                    xSemaphoreGive(s_wifi.state_mutex);
-                                }
-                                set_state(WIFI_STATE_RECONNECTING);
-                            } else {
-                                ESP_LOGE(TAG, "Failed to initiate reconnect: %s", esp_err_to_name(connect_ret));
-                                /* Don't increment retry_count since reconnection wasn't initiated */
-                                /* Schedule reconnect with backoff instead */
-                                esp_err_t timer_ret = esp_timer_start_once(s_wifi.reconnect_timer,
-                                                   reconnect_delay_ms * 1000);
-                                if (timer_ret != ESP_OK) {
-                                    ESP_LOGW(TAG, "Failed to start reconnect timer: %s", esp_err_to_name(timer_ret));
-                                }
-                            }
+                            xSemaphoreGive(s_wifi.state_mutex);
                         }
                     } else {
-                        ESP_LOGE(TAG, "Max retries reached, scheduling reconnect with backoff");
-                        set_state(WIFI_STATE_FAILED);
-                        xEventGroupSetBits(s_wifi.event_group, WIFI_FAIL_BIT);
+                        ESP_LOGW(TAG, "Max retries (%d) reached, continuing with max backoff",
+                                 max_retry);
 
-                        /* Update fail count and reset retry count with mutex protection */
+                        /* Reset retry count but keep backoff delay — never give up */
+                        delay_ms = WIFI_MGR_RECONNECT_MAX_DELAY_MS;
                         if (xSemaphoreTake(s_wifi.state_mutex, pdMS_TO_TICKS(WIFI_MGR_EVENT_MUTEX_TIMEOUT_MS)) == pdTRUE) {
                             s_wifi.stats.fail_count++;
                             s_wifi.retry_count = 0;
+                            /* Keep delay at max — don't reset to base */
+                            s_wifi.reconnect_delay_ms = WIFI_MGR_RECONNECT_MAX_DELAY_MS;
                             xSemaphoreGive(s_wifi.state_mutex);
                         }
-
-                        /* Schedule reconnect with exponential backoff */
-                        esp_err_t timer_ret = esp_timer_start_once(s_wifi.reconnect_timer,
-                                           reconnect_delay_ms * 1000);
-                        if (timer_ret != ESP_OK) {
-                            ESP_LOGW(TAG, "Failed to start reconnect timer: %s", esp_err_to_name(timer_ret));
-                        }
                     }
+
+                    set_state(WIFI_STATE_RECONNECTING);
+                    schedule_reconnect(delay_ms);
                 } else {
                     set_state(WIFI_STATE_DISCONNECTED);
                 }
@@ -534,8 +582,9 @@ static void ip_event_handler(void *arg, esp_event_base_t event_base,
         /* Publish WiFi connected event to event bus */
         event_publish(EVT_WIFI_CONNECTED, NULL, 0);
 
-        /* Start uptime timer */
+        /* Start uptime timer (stop first in case of IP renewal without disconnect) */
         if (s_wifi.uptime_timer) {
+            esp_timer_stop(s_wifi.uptime_timer);  /* safe even if not running */
             esp_err_t timer_ret = esp_timer_start_periodic(s_wifi.uptime_timer, 1000000); /* 1 second */
             if (timer_ret != ESP_OK) {
                 ESP_LOGW(TAG, "Failed to start uptime timer: %s", esp_err_to_name(timer_ret));
@@ -737,6 +786,13 @@ esp_err_t wifi_manager_init(void)
         goto cleanup;
     }
     reconnect_timer_created = true;
+
+    /* Create WiFi watchdog timer — full restart if disconnected > 5 min */
+    const esp_timer_create_args_t watchdog_args = {
+        .callback = &wifi_watchdog_callback,
+        .name = "wifi_wd"
+    };
+    esp_timer_create(&watchdog_args, &s_wifi.watchdog_timer);
 
     /* Initialize stats */
     memset(&s_wifi.stats, 0, sizeof(wifi_stats_t));

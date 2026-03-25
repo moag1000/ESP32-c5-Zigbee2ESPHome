@@ -570,6 +570,11 @@ cleanup:
 
 static void publish_device_availability(const evt_device_availability_t *evt)
 {
+#ifdef CONFIG_ESPHOME_PRIMARY_INTEGRATION
+    /* Device availability handled by ESPHome adapter, skip MQTT */
+    return;
+#endif
+
     if (!mqtt_client_is_connected()) {
         ESP_LOGD(TAG, "MQTT not connected, skipping availability publish");
         return;

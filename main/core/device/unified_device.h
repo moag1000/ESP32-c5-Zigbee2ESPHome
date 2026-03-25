@@ -93,6 +93,17 @@ typedef enum {
     DEV_CAP_COVER        = (1 << 19),  /**< Cover/blind control */
     DEV_CAP_FAN          = (1 << 20),  /**< Fan control */
     DEV_CAP_CLIMATE      = (1 << 21),  /**< Climate/thermostat control */
+
+    /* Environmental sensors (extended) */
+    DEV_CAP_ILLUMINANCE    = (1 << 22),  /**< Illuminance sensing (lux) */
+    DEV_CAP_CO2            = (1 << 23),  /**< CO2 concentration (ppm) */
+    DEV_CAP_VOC            = (1 << 24),  /**< VOC index */
+    DEV_CAP_PM25           = (1 << 25),  /**< PM2.5 concentration (ug/m3) */
+    DEV_CAP_SOIL_MOISTURE  = (1 << 26),  /**< Soil moisture (%) */
+
+    /* Additional binary sensors */
+    DEV_CAP_TAMPER         = (1 << 27),  /**< Tamper detection */
+    DEV_CAP_BATTERY_LOW    = (1 << 28),  /**< Battery low indication */
 } device_capability_t;
 
 /* ============================================================================

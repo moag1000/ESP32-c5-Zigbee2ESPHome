@@ -40,6 +40,7 @@
 #include "esp_mac.h"
 #include "esp_timer.h"
 #include "nvs_flash.h"
+#include "test/esp_zigbee_test_utils.h"  /* TC rejoin policy APIs */
 #include <string.h>
 #include <inttypes.h>
 
@@ -341,6 +342,14 @@ esp_err_t zb_coordinator_init(void)
      * pre-configured ZigBeeAlliance09 link key without TCLK negotiation. */
     esp_zb_secur_link_key_exchange_required_set(false);
     ESP_LOGI(TAG, "TCLK exchange requirement DISABLED for compatibility");
+
+    /* Allow known devices to rejoin without permit_join being open.
+     * - allow_tc_rejoins: TC accepts rejoin requests from known devices
+     * - unsecure_tc_rejoin: Also accept unsecure rejoins (needed for some Aqara devices
+     *   that do MAC association instead of secured rejoin after coordinator reboot) */
+    esp_zb_secur_tcpol_set_allow_tc_rejoins(1);
+    esp_zb_secur_set_unsecure_tc_rejoin_enabled(true);
+    ESP_LOGI(TAG, "TC rejoin policy: allow secured + unsecured rejoins for known devices");
 
     /* Configure coordinator endpoint and clusters */
     ret = configure_coordinator();
@@ -1028,6 +1037,11 @@ static void esp_zb_task(void *pvParameters)
     ESP_LOGI(TAG, "Extended PAN ID: %02X:%02X:%02X:%02X:%02X:%02X:%02X:%02X",
              extended_pan_id[7], extended_pan_id[6], extended_pan_id[5], extended_pan_id[4],
              extended_pan_id[3], extended_pan_id[2], extended_pan_id[1], extended_pan_id[0]);
+
+    /* Set PAN ID from config (fixes diagnostics showing 0xFFFF) */
+    if (pan_id != 0xFFFF) {
+        esp_zb_set_pan_id(pan_id);
+    }
 
     /* Set channel mask */
     uint32_t channel_mask = (1 << channel);

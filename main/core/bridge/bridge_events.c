@@ -268,6 +268,13 @@ esp_err_t bridge_events_deinit(void)
         return ESP_ERR_INVALID_STATE;
     }
 
+    /* Unsubscribe all event bus handlers */
+    event_unsubscribe(EVT_DEVICE_JOINED, bridge_event_bus_handler);
+    event_unsubscribe(EVT_DEVICE_LEFT, bridge_event_bus_handler);
+    event_unsubscribe(EVT_DEVICE_INTERVIEWED, bridge_event_bus_handler);
+    event_unsubscribe(EVT_ZB_PERMIT_JOIN, bridge_event_bus_handler);
+    event_unsubscribe(EVT_NETWORK_READY, bridge_event_bus_handler);
+
     s_initialized = false;
     ESP_LOGI(TAG, "Bridge events module deinitialized (total: %" PRIu32 ", errors: %" PRIu32 ")",
              s_total_events, s_error_count);

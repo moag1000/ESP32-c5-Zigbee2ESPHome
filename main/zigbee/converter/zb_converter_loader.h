@@ -12,6 +12,9 @@
 #include "zb_converter_types.h"
 #include <stddef.h>
 
+/* Forward declaration — full definition in zb_quirk_engine.h */
+typedef struct quirk_data quirk_data_t;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -76,6 +79,30 @@ bool zb_converter_loader_is_runtime(const zb_converter_def_t *def);
  * @param[out] bytes_used Approximate PSRAM bytes used by cache
  */
 void zb_converter_loader_get_stats(size_t *db_count, size_t *loaded, size_t *bytes_used);
+
+/** Get quirk data associated with a loaded converter definition */
+quirk_data_t *zb_converter_loader_get_quirk_data(const zb_converter_def_t *def);
+
+/**
+ * @brief Parse a single device JSON object into a converter definition
+ *
+ * Public wrapper for the internal parser. Used by the custom quirk module
+ * to parse user-submitted device definitions.
+ *
+ * @param dev_json cJSON device object (compact format with "m", "mf", "fz", "tz", "e", etc.)
+ * @return Dynamically allocated converter definition, or NULL on parse error
+ */
+zb_converter_def_t *zb_converter_loader_parse_device(const cJSON *dev_json);
+
+/**
+ * @brief Free a standalone parsed converter definition
+ *
+ * Frees all nested allocations (fz/tz arrays, exposes, select options, DP maps).
+ * Use this for definitions returned by zb_converter_loader_parse_device().
+ *
+ * @param def Definition to free (NULL-safe)
+ */
+void zb_converter_loader_free_def(zb_converter_def_t *def);
 
 #ifdef __cplusplus
 }

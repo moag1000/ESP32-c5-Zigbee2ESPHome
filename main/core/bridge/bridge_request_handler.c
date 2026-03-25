@@ -49,8 +49,12 @@
 #include <stdlib.h>
 #include <time.h>
 #include <sys/stat.h>
+#include <dirent.h>
 #include "mbedtls/base64.h"
+#include "zigbee/converter/zb_converter.h"
 #include "zigbee/converter/zb_converter_loader.h"
+#include "zigbee/converter/zb_custom_quirk.h"
+#include "zigbee/tuya/tuya_driver_registry.h"
 #include "core/littlefs_mount.h"
 
 #if CONFIG_STATE_PERSISTENCE_ENABLE
@@ -115,6 +119,11 @@ static const char *TAG = "BRIDGE_REQ";
 
 /* Converter DB update response topic */
 #define RESPONSE_TOPIC_CONVERTER_DB_UPDATE "zigbee2mqtt/bridge/response/converter_db/update"
+
+/* Custom quirk response topics */
+#define RESPONSE_TOPIC_CUSTOM_QUIRK_ADD    "zigbee2mqtt/bridge/response/custom/add"
+#define RESPONSE_TOPIC_CUSTOM_QUIRK_REMOVE "zigbee2mqtt/bridge/response/custom/remove"
+#define RESPONSE_TOPIC_CUSTOM_QUIRK_LIST   "zigbee2mqtt/bridge/response/custom/list"
 
 /* NVS namespace for device options */
 #define DEVICE_OPTIONS_NVS_NAMESPACE    "dev_opts"
@@ -312,6 +321,9 @@ static esp_err_t handle_time_get(const char *topic, const char *payload, size_t 
 static esp_err_t handle_ble_scanner(const char *topic, const char *payload, size_t len);
 #endif
 static esp_err_t handle_converter_db_update(const char *topic, const char *payload, size_t len);
+static esp_err_t handle_custom_quirk_add(const char *topic, const char *payload, size_t len);
+static esp_err_t handle_custom_quirk_remove(const char *topic, const char *payload, size_t len);
+static esp_err_t handle_custom_quirk_list(const char *topic, const char *payload, size_t len);
 
 /**
  * @brief Request handler dispatch table
@@ -365,6 +377,9 @@ static const request_handler_entry_t s_request_handlers[] = {
     { "/time/config",                             handle_time_config,           true },
     { "/request/time",                            handle_time_get,              true },
     { "/converter_db/update",                     handle_converter_db_update,   true },
+    { "/custom/add",                              handle_custom_quirk_add,      true },
+    { "/custom/remove",                           handle_custom_quirk_remove,   true },
+    { "/custom/list",                             handle_custom_quirk_list,     true },
 
     /* Sentinel - must be last */
     { NULL, NULL, false }
@@ -628,6 +643,43 @@ static esp_err_t handle_factory_reset(const char *topic, const char *payload, si
 }
 
 /**
+ * @brief Remove all files inside a directory (non-recursive, flat dir only)
+ *
+ * Used by network reset and factory reset to clean LittleFS directories.
+ * Does NOT remove the directory itself.
+ *
+ * @param dir_path Absolute path to directory (e.g. "/littlefs/backup")
+ * @return Number of files removed, or -1 on error
+ */
+static int remove_dir_contents(const char *dir_path)
+{
+    DIR *dir = opendir(dir_path);
+    if (dir == NULL) {
+        return 0;  /* Directory doesn't exist - nothing to clean */
+    }
+
+    int removed = 0;
+    struct dirent *entry;
+    char filepath[288];  /* dir_path (max ~30) + '/' + d_name (max 255) + NUL */
+
+    while ((entry = readdir(dir)) != NULL) {
+        /* Skip . and .. */
+        if (entry->d_name[0] == '.') {
+            continue;
+        }
+        snprintf(filepath, sizeof(filepath), "%.30s/%s", dir_path, entry->d_name);
+        if (remove(filepath) == 0) {
+            removed++;
+        } else {
+            ESP_LOGW(TAG, "Failed to remove: %s", filepath);
+        }
+    }
+
+    closedir(dir);
+    return removed;
+}
+
+/**
  * @brief Handle network reset request
  * Erases Zigbee network data, devices, and state but preserves WiFi/MQTT config.
  */
@@ -649,11 +701,35 @@ static esp_err_t handle_network_reset(const char *topic, const char *payload, si
     /* Wait for MQTT delivery */
     vTaskDelay(pdMS_TO_TICKS(2000));
 
-    /* Erase Zigbee-related NVS namespaces */
+    /* Clear in-memory device registry, bindings, and NG persistence */
+    ESP_LOGI(TAG, "Clearing device registry and bindings...");
+    device_registry_clear_all();
+    device_persistence_clear();
+    zb_converter_unbind_all();
+    tuya_driver_unbind_all();
+
+    /* Erase Zigbee-related NVS namespaces (preserves wifi_config + gateway_cfg) */
     static const char *zb_namespaces[] = {
-        "zb_devices", "dev_names", "zb_network", "zb_report",
-        "zb_binding", "zb_groups", "zb_scenes", "dev_opts",
-        "zb_avail", "zb_topology", "zb_diag", "zb_ic", "gp_storage"
+        "devices",       /* NG device persistence (primary) */
+        "zb_devices",    /* Legacy device persistence */
+        "dev_names",     /* Legacy device names */
+        "dev_opts",      /* Device options (friendly names, icons) */
+        "zb_network",    /* Zigbee network config (PAN ID, channel) */
+        "zb_report",     /* Zigbee attribute reporting config */
+        "zb_binding",    /* Zigbee binding table */
+        "zb_groups",     /* Zigbee group membership */
+        "zb_scenes",     /* Zigbee scenes */
+        "zb_avail",      /* Device availability tracking */
+        "zb_topology",   /* Network topology map */
+        "zb_diag",       /* Zigbee diagnostics counters */
+        "zb_ic",         /* Zigbee install codes */
+        "gp_storage",    /* Green Power proxy config */
+        "zb_ota",        /* Zigbee OTA update state */
+        "zb_touchlink",  /* Touchlink pairing state */
+        "zb_router",     /* Router configuration */
+        "zb_multi_pan",  /* Multi-PAN coordinator state */
+        "zb_backup",     /* Backup metadata */
+        "tuya_drv",      /* Tuya device driver config */
     };
 
     for (size_t i = 0; i < sizeof(zb_namespaces) / sizeof(zb_namespaces[0]); i++) {
@@ -668,24 +744,27 @@ static esp_err_t handle_network_reset(const char *topic, const char *payload, si
     }
 
     /* Erase Zigbee storage partitions */
-    const esp_partition_t *zb_storage = esp_partition_find_first(
-        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "zb_storage");
-    if (zb_storage != NULL) {
-        esp_partition_erase_range(zb_storage, 0, zb_storage->size);
-        ESP_LOGI(TAG, "Erased zb_storage partition");
-    }
-
-    const esp_partition_t *zb_fct = esp_partition_find_first(
-        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, "zb_fct");
-    if (zb_fct != NULL) {
-        esp_partition_erase_range(zb_fct, 0, zb_fct->size);
-        ESP_LOGI(TAG, "Erased zb_fct partition");
+    static const char *zb_partitions[] = {"zb_storage", "zb_fct"};
+    for (size_t i = 0; i < sizeof(zb_partitions) / sizeof(zb_partitions[0]); i++) {
+        const esp_partition_t *part = esp_partition_find_first(
+            ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, zb_partitions[i]);
+        if (part != NULL) {
+            esp_partition_erase_range(part, 0, part->size);
+            ESP_LOGI(TAG, "Erased partition '%s'", zb_partitions[i]);
+        }
     }
 
     /* Erase persisted state */
 #if CONFIG_STATE_PERSISTENCE_ENABLE
     state_persistence_erase_all();
 #endif
+
+    /* Clean LittleFS: backups (contain network keys!) and OTA staging */
+    int n;
+    n = remove_dir_contents("/littlefs/backup");
+    if (n > 0) ESP_LOGI(TAG, "Removed %d backup files", n);
+    n = remove_dir_contents("/littlefs/ota_storage");
+    if (n > 0) ESP_LOGI(TAG, "Removed %d OTA staging files", n);
 
     ESP_LOGW(TAG, "Network reset complete - restarting...");
     esp_restart();
@@ -1074,6 +1153,173 @@ static esp_err_t handle_converter_db_update(const char *topic, const char *paylo
     return ESP_OK;
 }
 
+/* ============================================================================
+ * Custom Quirk Handlers
+ * ============================================================================ */
+
+/**
+ * @brief Add a custom community quirk
+ *
+ * Payload: {"name": "my_quirk", "definition": { ... device JSON ... }}
+ */
+static esp_err_t handle_custom_quirk_add(const char *topic, const char *payload, size_t len)
+{
+    (void)topic;
+    (void)len;
+
+    cJSON *json = cJSON_Parse(payload);
+    if (!json) {
+        bridge_response_publish_error(RESPONSE_TOPIC_CUSTOM_QUIRK_ADD,
+                                      "Invalid JSON payload",
+                                      get_current_transaction());
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const cJSON *name_item = cJSON_GetObjectItem(json, "name");
+    const cJSON *def_item = cJSON_GetObjectItem(json, "definition");
+
+    if (!cJSON_IsString(name_item) || !cJSON_IsObject(def_item)) {
+        cJSON_Delete(json);
+        bridge_response_publish_error(RESPONSE_TOPIC_CUSTOM_QUIRK_ADD,
+                                      "Missing 'name' (string) or 'definition' (object)",
+                                      get_current_transaction());
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    /* Serialize definition back to string for the quirk API */
+    char *def_str = cJSON_PrintUnformatted(def_item);
+    if (!def_str) {
+        cJSON_Delete(json);
+        bridge_response_publish_error(RESPONSE_TOPIC_CUSTOM_QUIRK_ADD,
+                                      "Failed to serialize definition",
+                                      get_current_transaction());
+        return ESP_ERR_NO_MEM;
+    }
+
+    esp_err_t ret = zb_custom_quirk_add(name_item->valuestring, def_str);
+    cJSON_free(def_str);
+    cJSON_Delete(json);
+
+    if (ret != ESP_OK) {
+        char err_msg[64];
+        snprintf(err_msg, sizeof(err_msg), "Failed to add quirk: %s", esp_err_to_name(ret));
+        bridge_response_publish_error(RESPONSE_TOPIC_CUSTOM_QUIRK_ADD,
+                                      err_msg,
+                                      get_current_transaction());
+        return ret;
+    }
+
+    cJSON *resp_data = cJSON_CreateObject();
+    if (resp_data) {
+        cJSON_AddStringToObject(resp_data, "name", name_item->valuestring);
+        cJSON_AddNumberToObject(resp_data, "total", (double)zb_custom_quirk_count());
+    }
+
+    bridge_response_publish_ok(RESPONSE_TOPIC_CUSTOM_QUIRK_ADD,
+                               resp_data,
+                               get_current_transaction());
+    cJSON_Delete(resp_data);
+
+    return ESP_OK;
+}
+
+/**
+ * @brief Remove a custom community quirk
+ *
+ * Payload: {"name": "my_quirk"}
+ */
+static esp_err_t handle_custom_quirk_remove(const char *topic, const char *payload, size_t len)
+{
+    (void)topic;
+    (void)len;
+
+    cJSON *json = cJSON_Parse(payload);
+    if (!json) {
+        bridge_response_publish_error(RESPONSE_TOPIC_CUSTOM_QUIRK_REMOVE,
+                                      "Invalid JSON payload",
+                                      get_current_transaction());
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const cJSON *name_item = cJSON_GetObjectItem(json, "name");
+    if (!cJSON_IsString(name_item)) {
+        cJSON_Delete(json);
+        bridge_response_publish_error(RESPONSE_TOPIC_CUSTOM_QUIRK_REMOVE,
+                                      "Missing 'name' field",
+                                      get_current_transaction());
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    esp_err_t ret = zb_custom_quirk_remove(name_item->valuestring);
+    cJSON_Delete(json);
+
+    if (ret != ESP_OK) {
+        char err_msg[64];
+        snprintf(err_msg, sizeof(err_msg), "Failed to remove quirk: %s", esp_err_to_name(ret));
+        bridge_response_publish_error(RESPONSE_TOPIC_CUSTOM_QUIRK_REMOVE,
+                                      err_msg,
+                                      get_current_transaction());
+        return ret;
+    }
+
+    bridge_response_publish_ok(RESPONSE_TOPIC_CUSTOM_QUIRK_REMOVE,
+                               NULL,
+                               get_current_transaction());
+
+    return ESP_OK;
+}
+
+/**
+ * @brief List all custom community quirks
+ *
+ * Payload: (empty or {})
+ */
+static esp_err_t handle_custom_quirk_list(const char *topic, const char *payload, size_t len)
+{
+    (void)topic;
+    (void)payload;
+    (void)len;
+
+    zb_custom_quirk_info_t infos[ZB_CUSTOM_QUIRK_MAX];
+    size_t count = zb_custom_quirk_list(infos, ZB_CUSTOM_QUIRK_MAX);
+
+    cJSON *resp_data = cJSON_CreateObject();
+    if (!resp_data) {
+        bridge_response_publish_error(RESPONSE_TOPIC_CUSTOM_QUIRK_LIST,
+                                      "Out of memory",
+                                      get_current_transaction());
+        return ESP_ERR_NO_MEM;
+    }
+
+    cJSON_AddNumberToObject(resp_data, "count", (double)count);
+
+    cJSON *arr = cJSON_AddArrayToObject(resp_data, "quirks");
+    if (arr) {
+        for (size_t i = 0; i < count; i++) {
+            cJSON *item = cJSON_CreateObject();
+            if (!item) break;
+            cJSON_AddStringToObject(item, "name", infos[i].name ? infos[i].name : "");
+            if (infos[i].manufacturer) {
+                cJSON_AddStringToObject(item, "manufacturer", infos[i].manufacturer);
+            }
+            if (infos[i].model) {
+                cJSON_AddStringToObject(item, "model", infos[i].model);
+            }
+            if (infos[i].description) {
+                cJSON_AddStringToObject(item, "description", infos[i].description);
+            }
+            cJSON_AddItemToArray(arr, item);
+        }
+    }
+
+    bridge_response_publish_ok(RESPONSE_TOPIC_CUSTOM_QUIRK_LIST,
+                               resp_data,
+                               get_current_transaction());
+    cJSON_Delete(resp_data);
+
+    return ESP_OK;
+}
+
 /**
  * @brief Find and execute the appropriate handler for a request topic
  *
@@ -1370,10 +1616,12 @@ esp_err_t bridge_request_factory_reset(void)
     /* Wait for message to be sent */
     vTaskDelay(pdMS_TO_TICKS(GW_TIMEOUT_LONG_MS));
 
-    /* Clear in-memory registries first (prevents stale saves between erase and restart) */
-    ESP_LOGI(TAG, "Clearing device registry and persistence...");
+    /* Clear in-memory registries and bindings (prevents stale saves between erase and restart) */
+    ESP_LOGI(TAG, "Clearing device registry, bindings, and persistence...");
     device_registry_clear_all();
     device_persistence_clear();
+    zb_converter_unbind_all();
+    tuya_driver_unbind_all();
 
     /* Erase ALL NVS data */
     ESP_LOGW(TAG, "Erasing NVS flash...");
@@ -1403,10 +1651,18 @@ esp_err_t bridge_request_factory_reset(void)
         }
     }
 
-    /* Erase persisted state */
-#if CONFIG_STATE_PERSISTENCE_ENABLE
-    state_persistence_erase_all();
-#endif
+    /* Erase LittleFS user data but PRESERVE converter DB.
+     * Converter DB (/littlefs/converters/) is firmware-like data that was
+     * uploaded separately and should survive factory reset. */
+    {
+        int n;
+        n = remove_dir_contents("/littlefs/state");
+        if (n > 0) ESP_LOGI(TAG, "Removed %d state files", n);
+        n = remove_dir_contents("/littlefs/backup");
+        if (n > 0) ESP_LOGI(TAG, "Removed %d backup files (network keys)", n);
+        n = remove_dir_contents("/littlefs/ota_storage");
+        if (n > 0) ESP_LOGI(TAG, "Removed %d OTA staging files", n);
+    }
 
     /* Restart to apply changes */
     ESP_LOGW(TAG, "Restarting...");

@@ -28,6 +28,43 @@ extern "C" {
 #endif
 
 /**
+ * @brief Tuya entity type for ESPHome auto-registration
+ *
+ * Controls how a JSON field from build_state_json() maps to an ESPHome entity.
+ * AUTO means the adapter infers the type from the cJSON value type.
+ */
+typedef enum {
+    TUYA_ENTITY_AUTO = 0,       /**< Auto-detect from JSON value type */
+    TUYA_ENTITY_SWITCH,         /**< Boolean → ESPHome Switch (writable) */
+    TUYA_ENTITY_SENSOR,         /**< Number → ESPHome Sensor (read-only) */
+    TUYA_ENTITY_NUMBER,         /**< Number → ESPHome Number (writable, min/max/step) */
+    TUYA_ENTITY_SELECT,         /**< String → ESPHome Select (writable, options) */
+    TUYA_ENTITY_TEXT_SENSOR,    /**< String → ESPHome TextSensor (read-only) */
+    TUYA_ENTITY_TEXT,           /**< String → ESPHome Text (writable) */
+    TUYA_ENTITY_BINARY_SENSOR,  /**< Boolean → ESPHome BinarySensor (read-only) */
+    TUYA_ENTITY_SKIP,           /**< Do not create an entity for this field */
+} tuya_entity_type_t;
+
+/**
+ * @brief Per-field metadata for ESPHome entity registration
+ *
+ * Optional: if a driver provides entity_meta, the adapter uses it to
+ * upgrade auto-detected types (e.g., sensor → number with min/max).
+ */
+typedef struct {
+    const char *field_name;         /**< JSON key from build_state_json() */
+    tuya_entity_type_t entity_type; /**< Override entity type (or AUTO) */
+    const char *device_class;       /**< ESPHome device_class string (NULL = none) */
+    const char *unit;               /**< Unit of measurement (NULL = none) */
+    const char *icon;               /**< MDI icon (NULL = default) */
+    float min;                      /**< Number min (only for NUMBER) */
+    float max;                      /**< Number max (only for NUMBER) */
+    float step;                     /**< Number step (only for NUMBER) */
+    const char *const *options;     /**< Select options array (only for SELECT) */
+    uint8_t option_count;           /**< Number of select options */
+} tuya_entity_meta_t;
+
+/**
  * @brief Tuya device driver interface (vtable)
  *
  * Each Tuya device type provides a static instance of this struct
@@ -106,6 +143,12 @@ typedef struct tuya_device_driver {
      * @param short_addr Device short address
      */
     void (*remove_device)(uint16_t short_addr);
+
+    /** @brief Optional entity metadata array for ESPHome registration */
+    const tuya_entity_meta_t *entity_meta;
+
+    /** @brief Number of entries in entity_meta array */
+    uint8_t entity_meta_count;
 
 } tuya_device_driver_t;
 

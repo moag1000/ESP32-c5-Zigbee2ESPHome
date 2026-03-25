@@ -718,6 +718,18 @@ esp_err_t zb_availability_handle_timeout(uint16_t short_addr)
     return ESP_OK;
 }
 
+esp_err_t zb_availability_mark_offline(uint16_t short_addr)
+{
+    device_t *dev = device_registry_get_by_short_addr(short_addr);
+    if (dev == NULL) {
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    set_device_state(dev, ZB_AVAIL_OFFLINE);
+    ESP_LOGI(TAG, "Device 0x%04X forced offline (interview failed)", short_addr);
+    return ESP_OK;
+}
+
 /* ============================================================================
  * Utility Functions
  * ============================================================================ */
@@ -915,15 +927,20 @@ static bool timeout_check_iterator(device_t *dev, void *ctx)
         }
     }
 
-    /* Check if device has timed out (battery/unknown devices only) */
-    uint32_t timeout = get_device_timeout(meta);
-    uint32_t elapsed = (tc->now > dev->last_seen) ? (tc->now - dev->last_seen) : 0;
+    /* Check if device has timed out (battery/unknown devices only).
+     * Skip when last_seen == 0: device was loaded from NVS but hasn't been
+     * seen since boot — we can't determine elapsed time without a valid
+     * timestamp, so don't mark offline prematurely. */
+    if (dev->last_seen != 0) {
+        uint32_t timeout = get_device_timeout(meta);
+        uint32_t elapsed = (tc->now > dev->last_seen) ? (tc->now - dev->last_seen) : 0;
 
-    if (dev->availability == DEV_AVAIL_ONLINE && elapsed > timeout) {
-        if (meta->power_type == (uint8_t)ZB_AVAIL_POWER_BATTERY ||
-            meta->power_type == (uint8_t)ZB_AVAIL_POWER_UNKNOWN) {
-            if (tc->offline_count < DEVICE_REGISTRY_MAX_DEVICES) {
-                tc->offline_addrs[tc->offline_count++] = dev->proto.zigbee.short_addr;
+        if (dev->availability == DEV_AVAIL_ONLINE && elapsed > timeout) {
+            if (meta->power_type == (uint8_t)ZB_AVAIL_POWER_BATTERY ||
+                meta->power_type == (uint8_t)ZB_AVAIL_POWER_UNKNOWN) {
+                if (tc->offline_count < DEVICE_REGISTRY_MAX_DEVICES) {
+                    tc->offline_addrs[tc->offline_count++] = dev->proto.zigbee.short_addr;
+                }
             }
         }
     }

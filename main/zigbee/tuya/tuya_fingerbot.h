@@ -25,6 +25,9 @@ extern "C" {
 /** Forward declaration of the driver vtable type */
 typedef struct tuya_device_driver tuya_device_driver_t;
 
+/** @brief Fingerbot driver vtable (used by conv_tuya_fingerbot.c) */
+extern const tuya_device_driver_t tuya_fingerbot_driver;
+
 /**
  * @brief Register the Fingerbot device driver
  *

@@ -130,7 +130,11 @@ esp_err_t esphome_api_send_message(esphome_client_t *client, const uint8_t *data
 
         ret = esphome_api_send_raw_bytes(client, encrypted, encrypted_len);
         if (ret == ESP_OK) {
-            if (xSemaphoreTake(state->mutex, ESPHOME_MUTEX_TIMEOUT_FAST_TICKS) == pdTRUE) {
+            /* Use trylock (timeout=0) for stats — this function is called from
+             * esphome_api_broadcast_state() which already holds state->mutex.
+             * A non-zero timeout on the same non-recursive mutex triggers
+             * vTaskPriorityDisinheritAfterTimeout assert on single-core. */
+            if (xSemaphoreTake(state->mutex, 0) == pdTRUE) {
                 state->stats.messages_sent++;
                 state->stats.bytes_sent += encrypted_len;
                 xSemaphoreGive(state->mutex);
@@ -145,7 +149,8 @@ esp_err_t esphome_api_send_message(esphome_client_t *client, const uint8_t *data
     esp_err_t ret = esphome_api_send_raw_bytes(client, data, len);
 
     if (ret == ESP_OK) {
-        if (xSemaphoreTake(state->mutex, ESPHOME_MUTEX_TIMEOUT_FAST_TICKS) == pdTRUE) {
+        /* Use trylock (timeout=0) — see encrypted path comment above */
+        if (xSemaphoreTake(state->mutex, 0) == pdTRUE) {
             state->stats.messages_sent++;
             state->stats.bytes_sent += len;
             xSemaphoreGive(state->mutex);

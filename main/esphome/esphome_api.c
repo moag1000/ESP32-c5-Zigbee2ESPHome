@@ -888,6 +888,26 @@ esp_err_t esphome_api_broadcast_state(esphome_entity_type_t entity_type,
                                                buffer, ESPHOME_BUFFER_MEDIUM, &buffer_len);
             break;
 
+        case ESPHOME_ENTITY_LOCK:
+            ret = esphome_encode_lock_state((const esphome_lock_entity_state_t *)state,
+                                            buffer, ESPHOME_BUFFER_MEDIUM, &buffer_len);
+            break;
+
+        case ESPHOME_ENTITY_TEXT:
+            ret = esphome_encode_text_state((const esphome_text_entity_state_t *)state,
+                                            buffer, ESPHOME_BUFFER_MEDIUM, &buffer_len);
+            break;
+
+        case ESPHOME_ENTITY_MEDIA_PLAYER:
+            ret = esphome_encode_media_player_state((const esphome_media_player_entity_state_t *)state,
+                                                     buffer, ESPHOME_BUFFER_MEDIUM, &buffer_len);
+            break;
+
+        case ESPHOME_ENTITY_ALARM_PANEL:
+            ret = esphome_encode_alarm_state((const esphome_alarm_entity_state_t *)state,
+                                              buffer, ESPHOME_BUFFER_MEDIUM, &buffer_len);
+            break;
+
         case ESPHOME_ENTITY_BUTTON:
             /* Buttons have no state to broadcast */
             mem_ng_free(buffer);
@@ -903,8 +923,15 @@ esp_err_t esphome_api_broadcast_state(esphome_entity_type_t entity_type,
         return ret;
     }
 
-    /* Send to all subscribed clients */
-    if (xSemaphoreTake(s_api.mutex, ESPHOME_MUTEX_TIMEOUT_EXTENDED_TICKS) != pdTRUE) {
+    /* Send to all subscribed clients.
+     * Use trylock (timeout=0) to avoid FreeRTOS priority-inheritance assertion
+     * on single-core ESP32-C5 when the event dispatcher (prio 5) contends
+     * with the ESPHome client task (prio 4) — both end up at the same
+     * effective priority after inheritance, triggering
+     * vTaskPriorityDisinheritAfterTimeout assert.  Skipping one broadcast
+     * is harmless; the next state change will deliver the update. */
+    if (xSemaphoreTake(s_api.mutex, 0) != pdTRUE) {
+        ESP_LOGD(TAG, "Broadcast skipped — API mutex busy");
         mem_ng_free(buffer);
         return ESP_ERR_TIMEOUT;
     }

@@ -30,6 +30,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "core/gateway_timeouts.h"
+#include "zigbee/zb_leave_helper.h"
 #include "cJSON.h"
 #include <string.h>
 
@@ -624,7 +625,10 @@ static esp_err_t fingerbot_handle_command(uint16_t short_addr, uint8_t endpoint,
                 };
                 memcpy(leave_req.device_address, ieee_addr, 8);
 
-                device_registry_remove(reset_dev->id);
+                /* Full cleanup: event publish, ESPHome unmark, converter/tuya
+                 * unbind, availability, registry remove, persistence delete.
+                 * Must happen BEFORE leave req so subscribers can look up device. */
+                zb_device_leave_cleanup(reset_dev->id, short_addr);
 
                 esp_zb_lock_acquire(GW_TIMEOUT_VERY_LONG_TICKS);
                 esp_zb_zdo_device_leave_req(&leave_req, NULL, NULL);
@@ -1680,10 +1684,44 @@ const tuya_fingerbot_state_t *tuya_fingerbot_get_state(uint16_t short_addr)
 }
 
 /* ============================================================================
+ * ESPHome Entity Metadata
+ * ============================================================================ */
+
+static const char *const s_mode_options[] = { "push", "switch", "program" };
+
+static const tuya_entity_meta_t s_fingerbot_entity_meta[] = {
+    { "state",          TUYA_ENTITY_SKIP,    NULL,        NULL, NULL,  0,  0,   0, NULL, 0 },
+    { "mode",           TUYA_ENTITY_SELECT,  NULL,        NULL, "mdi:gesture-tap-button",
+                        0, 0, 0, s_mode_options, 3 },
+    { "down_movement",  TUYA_ENTITY_NUMBER,  NULL,        "%",  "mdi:arrow-down-bold",
+                        51, 100, 1, NULL, 0 },
+    { "up_movement",    TUYA_ENTITY_NUMBER,  NULL,        "%",  "mdi:arrow-up-bold",
+                        0, 50, 1, NULL, 0 },
+    { "sustain_time",   TUYA_ENTITY_NUMBER,  NULL,        "s",  "mdi:timer-outline",
+                        0, 25, 1, NULL, 0 },
+    { "reverse",        TUYA_ENTITY_SWITCH,  NULL,        NULL, "mdi:swap-horizontal",
+                        0, 0, 0, NULL, 0 },
+    { "touch_control",  TUYA_ENTITY_SWITCH,  NULL,        NULL, "mdi:gesture-tap",
+                        0, 0, 0, NULL, 0 },
+    { "click_control",  TUYA_ENTITY_SWITCH,  NULL,        NULL, "mdi:gesture-tap-button",
+                        0, 0, 0, NULL, 0 },
+    { "program_enable", TUYA_ENTITY_SWITCH,  NULL,        NULL, "mdi:play-circle-outline",
+                        0, 0, 0, NULL, 0 },
+    { "repeat_forever", TUYA_ENTITY_SWITCH,  NULL,        NULL, "mdi:repeat",
+                        0, 0, 0, NULL, 0 },
+    { "battery",        TUYA_ENTITY_SENSOR,  "battery",   "%",  "mdi:battery",
+                        0, 0, 0, NULL, 0 },
+    { "click_count",    TUYA_ENTITY_SENSOR,  NULL,        NULL, "mdi:counter",
+                        0, 0, 0, NULL, 0 },
+    { "program",        TUYA_ENTITY_TEXT,    NULL,        NULL, "mdi:script-text-outline",
+                        0, 0, 0, NULL, 0 },
+};
+
+/* ============================================================================
  * Driver Vtable
  * ============================================================================ */
 
-static const tuya_device_driver_t s_fingerbot_driver = {
+const tuya_device_driver_t tuya_fingerbot_driver = {
     .name             = "fingerbot",
     .match            = fingerbot_match,
     .process_dp       = fingerbot_process_dp,
@@ -1692,6 +1730,8 @@ static const tuya_device_driver_t s_fingerbot_driver = {
     .publish_discovery = fingerbot_publish_discovery,
     .init_device      = fingerbot_init_device,
     .remove_device    = fingerbot_remove_device,
+    .entity_meta      = s_fingerbot_entity_meta,
+    .entity_meta_count = sizeof(s_fingerbot_entity_meta) / sizeof(s_fingerbot_entity_meta[0]),
 };
 
 /* ============================================================================
@@ -1713,7 +1753,7 @@ esp_err_t tuya_fingerbot_register(void)
     memset(s_fingerbot_states, 0, sizeof(s_fingerbot_states));
 
     /* Register with the driver registry */
-    esp_err_t ret = tuya_driver_register(&s_fingerbot_driver);
+    esp_err_t ret = tuya_driver_register(&tuya_fingerbot_driver);
     if (ret == ESP_OK) {
         ESP_LOGI(TAG, "Fingerbot driver registered");
     }

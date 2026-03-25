@@ -82,9 +82,13 @@ static uint32_t s_scan_interval_ms = BLE_DEFAULT_SCAN_INTERVAL_MS;
 static uint32_t s_scan_window_ms = BLE_DEFAULT_SCAN_WINDOW_MS;
 
 /* BLE 5.0 Extended Scanning configuration */
+#if MYNEWT_VAL(BLE_EXT_ADV)
 static bool s_extended_scanning_enabled = true;
+#else
+static bool s_extended_scanning_enabled = false;
+#endif
 static bool s_coded_phy_enabled = false;
-static bool s_2m_phy_enabled = true;
+static bool s_2m_phy_enabled = false;
 
 /* Extended advertisement callbacks */
 static ble_ext_adv_callback_t s_ext_callbacks[MAX_EXT_ADV_CALLBACKS] = {NULL};
@@ -121,12 +125,14 @@ static const char *s_state_strings[] = {
 static void set_scanner_state(ble_scanner_state_t state);
 static int ble_gap_event_handler(struct ble_gap_event *event, void *arg);
 static void process_advertisement(const struct ble_gap_disc_desc *disc);
-static void process_ext_advertisement(const struct ble_gap_ext_disc_desc *ext_disc);
 static ble_tracked_device_t *find_or_create_device(const uint8_t *mac, ble_addr_type_t addr_type);
 static void invoke_callbacks(const ble_adv_data_t *adv);
-static void invoke_ext_callbacks(const ble_ext_adv_data_t *ext_adv);
 static uint32_t get_timestamp_ms(void);
+#if MYNEWT_VAL(BLE_EXT_ADV)
+static void process_ext_advertisement(const struct ble_gap_ext_disc_desc *ext_disc);
+static void invoke_ext_callbacks(const ble_ext_adv_data_t *ext_adv);
 static ble_phy_t nimble_phy_to_ble_phy(uint8_t nimble_phy);
+#endif
 
 esp_err_t ble_scanner_init(void)
 {
@@ -908,6 +914,7 @@ static void invoke_callbacks(const ble_adv_data_t *adv)
     }
 }
 
+#if MYNEWT_VAL(BLE_EXT_ADV)
 static void invoke_ext_callbacks(const ble_ext_adv_data_t *ext_adv)
 {
     ble_ext_adv_callback_t callbacks[MAX_EXT_ADV_CALLBACKS];
@@ -934,8 +941,6 @@ static ble_phy_t nimble_phy_to_ble_phy(uint8_t nimble_phy)
         default: return BLE_PHY_UNKNOWN;
     }
 }
-
-#if MYNEWT_VAL(BLE_EXT_ADV)
 static void process_ext_advertisement(const struct ble_gap_ext_disc_desc *ext_disc)
 {
     if (ext_disc == NULL) {

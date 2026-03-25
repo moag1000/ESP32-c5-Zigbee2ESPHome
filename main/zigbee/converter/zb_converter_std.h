@@ -131,6 +131,96 @@ esp_err_t fz_power_on_behavior(const void *raw, size_t len, cJSON *json, const c
 /** @brief Xiaomi battery voltage (uint16) -> volts */
 esp_err_t fz_xiaomi_voltage(const void *raw, size_t len, cJSON *json, const char *key);
 
+/**
+ * @brief Generic attribute converter — auto-converts based on ZCL data type
+ *
+ * Uses dispatch context (zb_converter_get_dispatch_ctx()) to read the ZCL
+ * attribute data type. Handles: bool, uint8/16/24/32, int8/16/24/32,
+ * float, and octet string.
+ *
+ * For temperature/humidity clusters (0x0402/0x0405), applies /100 scaling.
+ * For pressure cluster (0x0403), applies /10 scaling.
+ * For illuminance (0x0400), applies log10 formula.
+ */
+esp_err_t fz_generic_attr(const void *raw, size_t len, cJSON *json, const char *key);
+
+/* --- std/zb_converter_std_hvac.c --- */
+
+/** @brief Thermostat setpoint (int16) -> degrees C (raw/100) */
+esp_err_t fz_thermostat_setpoint(const void *raw, size_t len, cJSON *json, const char *key);
+
+/** @brief Thermostat weekly schedule -> JSON schedule object */
+esp_err_t fz_thermostat_weekly_schedule(const void *raw, size_t len, cJSON *json, const char *key);
+
+/* --- std/zb_converter_std_security.c --- */
+
+/** @brief IAS zone enrollment status -> JSON "enrolled" bool */
+esp_err_t fz_ias_zone_enrollment(const void *raw, size_t len, cJSON *json, const char *key);
+
+/** @brief IAS WD/Siren mode -> string */
+esp_err_t fz_ias_wd(const void *raw, size_t len, cJSON *json, const char *key);
+
+/** @brief Door lock user status -> string */
+esp_err_t fz_door_lock_user_status(const void *raw, size_t len, cJSON *json, const char *key);
+
+/** @brief Door lock PIN code response -> JSON */
+esp_err_t fz_door_lock_pin_code(const void *raw, size_t len, cJSON *json, const char *key);
+
+/** @brief Door lock operation event -> JSON object */
+esp_err_t fz_door_lock_event(const void *raw, size_t len, cJSON *json, const char *key);
+
+/* --- std/zb_converter_std_lighting.c --- */
+
+/** @brief Enhanced color hue/saturation (uint16+uint8) -> color object */
+esp_err_t fz_color_enhance_hs(const void *raw, size_t len, cJSON *json, const char *key);
+
+/* --- std/zb_converter_std_electrical.c --- */
+
+/** @brief AC frequency (uint16) -> Hz (raw/10) */
+esp_err_t fz_electrical_frequency(const void *raw, size_t len, cJSON *json, const char *key);
+
+/** @brief Diagnostics RSSI (int8) -> dBm */
+esp_err_t fz_diagnostics_rssi(const void *raw, size_t len, cJSON *json, const char *key);
+
+/** @brief Diagnostics LQI (uint8) -> 0-255 */
+esp_err_t fz_diagnostics_lqi(const void *raw, size_t len, cJSON *json, const char *key);
+
+/* --- std/zb_converter_std_tuya.c --- */
+
+/** @brief Universal Tuya DP report parser -> JSON */
+esp_err_t fz_tuya_dp(const void *raw, size_t len, cJSON *json, const char *key);
+
+/* --- std/zb_converter_std_vendor.c --- */
+
+/** @brief Aqara Opple cluster (0xFCC0) attribute -> JSON */
+esp_err_t fz_aqara_opple(const void *raw, size_t len, cJSON *json, const char *key);
+
+/** @brief IKEA air purifier PM2.5/filter (0xFC7D) -> JSON */
+esp_err_t fz_ikea_air_purifier(const void *raw, size_t len, cJSON *json, const char *key);
+
+/** @brief IKEA VOC index (0xFC7D) -> number */
+esp_err_t fz_ikea_voc_index(const void *raw, size_t len, cJSON *json, const char *key);
+
+/** @brief Philips Hue motion (0xFC00) sensitivity/LED -> JSON */
+esp_err_t fz_philips_hue_motion(const void *raw, size_t len, cJSON *json, const char *key);
+
+/* --- Remaining in zb_converter_std.c --- */
+
+/** @brief PM2.5 concentration (0x042A) -> ug/m3 */
+esp_err_t fz_pm25(const void *raw, size_t len, cJSON *json, const char *key);
+
+/** @brief Soil moisture (0x0408) -> percent */
+esp_err_t fz_soil_moisture(const void *raw, size_t len, cJSON *json, const char *key);
+
+/** @brief Device temperature (cluster 0x0002) -> degrees C */
+esp_err_t fz_device_temperature(const void *raw, size_t len, cJSON *json, const char *key);
+
+/** @brief Multistate input (cluster 0x0012) -> number */
+esp_err_t fz_multistate_input(const void *raw, size_t len, cJSON *json, const char *key);
+
+/** @brief Analog input (cluster 0x000C) -> float */
+esp_err_t fz_analog_input(const void *raw, size_t len, cJSON *json, const char *key);
+
 /* ============================================================================
  * toZigbee (tz_*) Converters: JSON Command -> ZCL
  *
@@ -164,6 +254,9 @@ esp_err_t tz_lock_command(uint16_t short_addr, uint8_t endpoint, const cJSON *va
 /** @brief "low"/"medium"/"high" -> Xiaomi sensitivity (Basic cluster 0xFF0D, manuf 0x115F) */
 esp_err_t tz_xiaomi_sensitivity(uint16_t short_addr, uint8_t endpoint, const cJSON *value);
 
+/** @brief Retry pending write command if device just reported (sleepy device wake) */
+void zb_converter_std_retry_pending(uint16_t short_addr);
+
 /** @brief {hue, saturation} -> ZCL color hue/saturation command */
 esp_err_t tz_color_hs(uint16_t short_addr, uint8_t endpoint, const cJSON *value);
 
@@ -178,6 +271,55 @@ esp_err_t tz_cover_tilt(uint16_t short_addr, uint8_t endpoint, const cJSON *valu
 
 /** @brief "off"/"on"/"toggle"/"previous" -> ZCL StartUpOnOff write */
 esp_err_t tz_power_on_behavior(uint16_t short_addr, uint8_t endpoint, const cJSON *value);
+
+/**
+ * @brief Generic attribute write — JSON value -> ZCL Write Attribute
+ *
+ * Uses dispatch context to get cluster_id. Cross-references the converter's
+ * from_zigbee entries to find the matching attr_id for the JSON key.
+ * Auto-infers ZCL data type from the JSON value type and fz entry context.
+ */
+esp_err_t tz_generic_write_attr(uint16_t short_addr, uint8_t endpoint, const cJSON *value);
+
+/* --- std/zb_converter_std_hvac.c --- */
+
+/** @brief JSON schedule -> ZCL SetWeeklySchedule command */
+esp_err_t tz_thermostat_weekly_schedule(uint16_t short_addr, uint8_t endpoint, const cJSON *value);
+
+/* --- std/zb_converter_std_security.c --- */
+
+/** @brief JSON {mode, strobe, duration} -> IAS WD Start Warning */
+esp_err_t tz_warning(uint16_t short_addr, uint8_t endpoint, const cJSON *value);
+
+/** @brief JSON {user_id, pin_code} -> Door Lock Set PIN Code */
+esp_err_t tz_door_lock_pin(uint16_t short_addr, uint8_t endpoint, const cJSON *value);
+
+/** @brief JSON {zone_id, response} -> IAS Zone Enroll Response */
+esp_err_t tz_ias_zone_enroll_response(uint16_t short_addr, uint8_t endpoint, const cJSON *value);
+
+/* --- std/zb_converter_std_lighting.c --- */
+
+/** @brief Effect string -> ZCL Identify Trigger Effect command */
+esp_err_t tz_effect(uint16_t short_addr, uint8_t endpoint, const cJSON *value);
+
+/* --- std/zb_converter_std_tuya.c --- */
+
+/** @brief Tuya command via registered driver -> cluster 0xEF00 command */
+esp_err_t tz_tuya_command(uint16_t short_addr, uint8_t endpoint, const cJSON *value);
+
+/** @brief Universal Tuya DP writer -> cluster 0xEF00 command */
+esp_err_t tz_tuya_dp(uint16_t short_addr, uint8_t endpoint, const cJSON *value);
+
+/* --- std/zb_converter_std_vendor.c --- */
+
+/** @brief Number/string -> Aqara Opple manufacturer-specific write */
+esp_err_t tz_aqara_opple(uint16_t short_addr, uint8_t endpoint, const cJSON *value);
+
+/** @brief Number (seconds) -> ZCL Identify command */
+esp_err_t tz_identify(uint16_t short_addr, uint8_t endpoint, const cJSON *value);
+
+/** @brief Effect string -> ZCL Identify Trigger Effect command */
+esp_err_t tz_identify_effect(uint16_t short_addr, uint8_t endpoint, const cJSON *value);
 
 #ifdef __cplusplus
 }

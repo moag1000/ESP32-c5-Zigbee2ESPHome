@@ -49,6 +49,14 @@ typedef struct {
 esp_err_t mqtt_bridge_init(void);
 
 /**
+ * @brief Deinitialize MQTT bridge and all sub-modules
+ *
+ * Unsubscribes event bus handlers in sub-modules to prevent leaks.
+ * Should be called during shutdown or before re-initialization.
+ */
+void mqtt_bridge_deinit(void);
+
+/**
  * @brief Start MQTT bridge
  *
  * Registers MQTT message callback and subscribes to command topics.

@@ -20,6 +20,7 @@
 #include "freertos/idf_additions.h"
 #include "freertos/semphr.h"
 #include "esp_heap_caps.h"
+#include "utils/freertos_helpers.h"
 #include <string.h>
 #include <stdlib.h>
 
@@ -31,8 +32,8 @@ static const char *TAG = "EVENT_BUS";
 /** Maximum number of events in the high priority queue */
 #define EVENT_HIGH_PRIO_QUEUE_SIZE  16
 
-/** Maximum number of subscribers per event type */
-#define MAX_SUBSCRIBERS         16
+/** Maximum number of subscribers per event type (max actual usage: 5) */
+#define MAX_SUBSCRIBERS         8
 
 /** Dispatcher task priority */
 #define DISPATCHER_TASK_PRIO    (tskIDLE_PRIORITY + 5)
@@ -78,7 +79,7 @@ static QueueHandle_t s_event_queue = NULL;
 static QueueHandle_t s_event_queue_high = NULL;
 
 /** Dispatcher task handle */
-static TaskHandle_t s_dispatcher_task = NULL;
+static psram_task_handle_t s_dispatcher_task = {0};
 
 /** Mutex for subscriber array modifications */
 static SemaphoreHandle_t s_subscriber_mutex = NULL;
@@ -335,6 +336,7 @@ static void event_dispatcher_task(void *arg)
     }
 
     ESP_LOGI(TAG, "Dispatcher task stopped");
+    psram_task_mark_deleted(&s_dispatcher_task);
     vTaskDelete(NULL);
 }
 
@@ -380,9 +382,10 @@ esp_err_t event_bus_init(void)
         return ESP_ERR_NO_MEM;
     }
 
-    /* Create dispatcher task */
+    /* Create dispatcher task (stack in PSRAM to save ~4KB internal RAM) */
     s_stop_dispatcher = false;
-    BaseType_t ret = xTaskCreate(
+    memset(&s_dispatcher_task, 0, sizeof(s_dispatcher_task));
+    esp_err_t task_err = psram_task_create(
         event_dispatcher_task,
         "event_disp",
         DISPATCHER_STACK_SIZE,
@@ -391,7 +394,7 @@ esp_err_t event_bus_init(void)
         &s_dispatcher_task
     );
 
-    if (ret != pdPASS) {
+    if (task_err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to create dispatcher task");
         vQueueDelete(s_event_queue_high);
         s_event_queue_high = NULL;
@@ -420,12 +423,11 @@ esp_err_t event_bus_deinit(void)
     /* Signal dispatcher task to stop */
     s_stop_dispatcher = true;
 
-    /* Wait for task to finish (with timeout) */
-    if (s_dispatcher_task != NULL) {
-        /* Give task time to exit */
+    /* Wait for task to finish (with timeout), then free PSRAM stack/TCB */
+    if (s_dispatcher_task.task_handle != NULL) {
         vTaskDelay(pdMS_TO_TICKS(200));
-        s_dispatcher_task = NULL;
     }
+    psram_task_delete(&s_dispatcher_task);
 
     /* Drain the high priority queue and free any copied data */
     if (s_event_queue_high != NULL) {

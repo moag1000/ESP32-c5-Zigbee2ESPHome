@@ -20,32 +20,12 @@
 
 static const char *TAG = "CONV_TUYA";
 
-/**
- * @brief fromZigbee converter that delegates to Tuya DP handler
- *
- * For Tuya devices using the private cluster (0xEF00), this converter
- * is a passthrough - the actual DP handling is done by the Tuya driver
- * system. This entry exists to signal that the converter can handle
- * the Tuya cluster reports.
- */
-static esp_err_t fz_tuya_dp(const void *raw, size_t len, cJSON *json, const char *key)
-{
-    /* Tuya DP reports are handled by the existing Tuya subsystem.
-     * This converter serves as a marker that the device uses Tuya DPs.
-     * The actual DP parsing is done in zb_tuya.c / tuya driver vtable. */
-    (void)raw;
-    (void)len;
-    (void)json;
-    (void)key;
-    /* Return ESP_OK to prevent spurious warning logs in the registry dispatch.
-     * No JSON fields are populated here since the real DP handling is in zb_tuya.c. */
-    return ESP_OK;
-}
+/* fz_tuya_dp is now implemented in std/zb_converter_std_tuya.c */
 
 /**
  * @brief toZigbee converter that delegates to Tuya driver command handler
  */
-static esp_err_t tz_tuya_command(uint16_t short_addr, uint8_t endpoint, const cJSON *value)
+esp_err_t tz_tuya_command(uint16_t short_addr, uint8_t endpoint, const cJSON *value)
 {
     /* Look up the Tuya driver for this device */
     const tuya_device_driver_t *driver = tuya_driver_get(short_addr);
@@ -71,7 +51,9 @@ static const zb_expose_t s_tuya_bridge_exposes[] = {
     {
         .type = ZB_EXPOSE_SWITCH,
         .name = NULL,
+        .property = "state",
         .endpoint = 0,
+        .access = EA_STATE_SET,
         .features = 0,
         .device_class = NULL,
         .unit = NULL,

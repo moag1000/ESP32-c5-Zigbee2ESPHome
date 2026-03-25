@@ -29,8 +29,8 @@ static const char *TAG = "ZB_TOPOLOGY";
  * Static Variables
  * ============================================================================ */
 
-/** Topology data */
-static zb_topology_t s_topology = {0};
+/** Topology data (PSRAM-allocated to save ~80KB DRAM) */
+static zb_topology_t *s_topology = NULL;
 
 /** Module initialized flag */
 static bool s_initialized = false;
@@ -112,9 +112,15 @@ esp_err_t zb_topology_init(void)
         return ESP_ERR_NO_MEM;
     }
 
-    /* Initialize topology structure */
-    memset(&s_topology, 0, sizeof(s_topology));
-    s_topology.scan_state = ZB_TOPO_SCAN_STATE_IDLE;
+    /* Allocate topology structure in PSRAM (~80KB) */
+    s_topology = mem_ng_calloc(1, sizeof(zb_topology_t), MEM_CAP_DEFAULT);
+    if (s_topology == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate topology structure (%zu bytes)", sizeof(zb_topology_t));
+        vSemaphoreDelete(s_mutex);
+        s_mutex = NULL;
+        return ESP_ERR_NO_MEM;
+    }
+    s_topology->scan_state = ZB_TOPO_SCAN_STATE_IDLE;
 
     /* Initialize pending LQI tracking */
     memset(s_pending_lqi, 0, sizeof(s_pending_lqi));
@@ -139,7 +145,7 @@ esp_err_t zb_topology_init(void)
     /* Try to load cached topology from NVS */
     ret = zb_topology_load_nvs();
     if (ret == ESP_OK) {
-        ESP_LOGI(TAG, "Loaded cached topology with %d nodes", s_topology.node_count);
+        ESP_LOGI(TAG, "Loaded cached topology with %d nodes", s_topology->node_count);
     } else {
         ESP_LOGI(TAG, "No cached topology found, starting fresh");
     }
@@ -169,6 +175,12 @@ esp_err_t zb_topology_deinit(void)
         s_scan_timer = NULL;
     }
 
+    /* Free topology structure */
+    if (s_topology != NULL) {
+        mem_ng_free(s_topology);
+        s_topology = NULL;
+    }
+
     /* Delete mutex */
     if (s_mutex != NULL) {
         vSemaphoreDelete(s_mutex);
@@ -196,7 +208,7 @@ esp_err_t zb_topology_scan(zb_topology_scan_cb_t callback)
         return ESP_ERR_TIMEOUT;
     }
 
-    if (s_topology.scan_state == ZB_TOPO_SCAN_STATE_SCANNING) {
+    if (s_topology->scan_state == ZB_TOPO_SCAN_STATE_SCANNING) {
         ESP_LOGW(TAG, "Scan already in progress");
         xSemaphoreGive(s_mutex);
         return ESP_ERR_INVALID_STATE;
@@ -208,8 +220,8 @@ esp_err_t zb_topology_scan(zb_topology_scan_cb_t callback)
     s_scan_callback = callback;
 
     /* Reset scan state */
-    s_topology.scan_state = ZB_TOPO_SCAN_STATE_SCANNING;
-    s_topology.pending_requests = 0;
+    s_topology->scan_state = ZB_TOPO_SCAN_STATE_SCANNING;
+    s_topology->pending_requests = 0;
 
     /* Clear pending LQI tracking */
     memset(s_pending_lqi, 0, sizeof(s_pending_lqi));
@@ -264,10 +276,10 @@ esp_err_t zb_topology_scan_stop(void)
         return ESP_ERR_TIMEOUT;
     }
 
-    if (s_topology.scan_state == ZB_TOPO_SCAN_STATE_SCANNING) {
+    if (s_topology->scan_state == ZB_TOPO_SCAN_STATE_SCANNING) {
         ESP_LOGI(TAG, "Stopping topology scan");
         esp_timer_stop(s_scan_timer);
-        s_topology.scan_state = ZB_TOPO_SCAN_STATE_IDLE;
+        s_topology->scan_state = ZB_TOPO_SCAN_STATE_IDLE;
         s_scan_callback = NULL;
     }
 
@@ -277,7 +289,7 @@ esp_err_t zb_topology_scan_stop(void)
 
 zb_topo_scan_state_t zb_topology_get_scan_state(void)
 {
-    return s_topology.scan_state;
+    return s_topology->scan_state;
 }
 
 esp_err_t zb_topology_request_neighbors(uint16_t short_addr, uint8_t start_index)
@@ -339,7 +351,7 @@ esp_err_t zb_topology_process_mgmt_lqi_rsp(uint16_t src_addr,
     if (status != 0) {
         ESP_LOGW(TAG, "LQI request to 0x%04X failed with status %d", src_addr, status);
         /* Continue with scan even if one device fails */
-        if (s_topology.scan_state == ZB_TOPO_SCAN_STATE_SCANNING) {
+        if (s_topology->scan_state == ZB_TOPO_SCAN_STATE_SCANNING) {
             topology_scan_next_device();
         }
         return ESP_OK;
@@ -435,7 +447,7 @@ esp_err_t zb_topology_process_mgmt_lqi_rsp(uint16_t src_addr,
     xSemaphoreGive(s_mutex);
 
     /* Continue with next device in scan */
-    if (s_topology.scan_state == ZB_TOPO_SCAN_STATE_SCANNING) {
+    if (s_topology->scan_state == ZB_TOPO_SCAN_STATE_SCANNING) {
         topology_scan_next_device();
     }
 
@@ -515,7 +527,7 @@ const zb_topology_t* zb_topology_get(void)
     if (!s_initialized) {
         return NULL;
     }
-    return &s_topology;
+    return s_topology;
 }
 
 int zb_topology_get_neighbors(uint16_t short_addr,
@@ -625,8 +637,8 @@ char* zb_topology_to_json_ext(bool include_routes, bool include_offline)
 
     char ieee_str[24];
 
-    for (uint8_t i = 0; i < s_topology.node_count; i++) {
-        const zb_topo_node_t *node = &s_topology.nodes[i];
+    for (uint8_t i = 0; i < s_topology->node_count; i++) {
+        const zb_topo_node_t *node = &s_topology->nodes[i];
 
         /* Skip offline nodes if not requested */
         if (!include_offline && !node->online) {
@@ -689,8 +701,8 @@ char* zb_topology_to_json_ext(bool include_routes, bool include_offline)
     }
     cJSON_AddItemToObject(root, "links", links_array);
 
-    for (uint8_t i = 0; i < s_topology.link_count; i++) {
-        const zb_topo_link_t *link = &s_topology.links[i];
+    for (uint8_t i = 0; i < s_topology->link_count; i++) {
+        const zb_topo_link_t *link = &s_topology->links[i];
 
         cJSON *link_obj = cJSON_CreateObject();
         if (link_obj == NULL) {
@@ -767,7 +779,7 @@ esp_err_t zb_topology_publish_mqtt(void)
     /* Publish topology response event */
     evt_zb_topology_response_t evt = {
         .coordinator_ieee = coord_ieee_u64,
-        .device_count = s_topology.node_count,
+        .device_count = s_topology->node_count,
         .json_topology = json_str
     };
 
@@ -847,14 +859,14 @@ esp_err_t zb_topology_save_nvs(void)
         return ESP_ERR_NO_MEM;
     }
 
-    cache->node_count = s_topology.node_count;
-    for (uint8_t i = 0; i < s_topology.node_count && i < ZB_TOPOLOGY_MAX_NODES; i++) {
-        memcpy(cache->nodes[i].ieee_addr, s_topology.nodes[i].ieee_addr, sizeof(esp_zb_ieee_addr_t));
-        cache->nodes[i].short_addr = s_topology.nodes[i].short_addr;
-        cache->nodes[i].device_type = (uint8_t)s_topology.nodes[i].device_type;
-        cache->nodes[i].depth = s_topology.nodes[i].depth;
-        cache->nodes[i].parent_addr = s_topology.nodes[i].parent_addr;
-        cache->nodes[i].lqi = s_topology.nodes[i].lqi;
+    cache->node_count = s_topology->node_count;
+    for (uint8_t i = 0; i < s_topology->node_count && i < ZB_TOPOLOGY_MAX_NODES; i++) {
+        memcpy(cache->nodes[i].ieee_addr, s_topology->nodes[i].ieee_addr, sizeof(esp_zb_ieee_addr_t));
+        cache->nodes[i].short_addr = s_topology->nodes[i].short_addr;
+        cache->nodes[i].device_type = (uint8_t)s_topology->nodes[i].device_type;
+        cache->nodes[i].depth = s_topology->nodes[i].depth;
+        cache->nodes[i].parent_addr = s_topology->nodes[i].parent_addr;
+        cache->nodes[i].lqi = s_topology->nodes[i].lqi;
     }
 
     ret = nvs_set_blob(handle, ZB_TOPOLOGY_NVS_KEY, cache, sizeof(topo_cache_t));
@@ -917,9 +929,9 @@ esp_err_t zb_topology_load_nvs(void)
     }
 
     /* Restore topology from cache */
-    s_topology.node_count = 0;
+    s_topology->node_count = 0;
     for (uint8_t i = 0; i < cache->node_count && i < ZB_TOPOLOGY_MAX_NODES; i++) {
-        zb_topo_node_t *node = &s_topology.nodes[s_topology.node_count];
+        zb_topo_node_t *node = &s_topology->nodes[s_topology->node_count];
         memcpy(node->ieee_addr, cache->nodes[i].ieee_addr, sizeof(esp_zb_ieee_addr_t));
         node->short_addr = cache->nodes[i].short_addr;
         node->device_type = (zb_topo_device_type_t)cache->nodes[i].device_type;
@@ -929,14 +941,14 @@ esp_err_t zb_topology_load_nvs(void)
         node->online = false;  /* Will be updated on next scan */
         node->neighbor_count = 0;
         node->route_count = 0;
-        s_topology.node_count++;
+        s_topology->node_count++;
     }
 
     xSemaphoreGive(s_mutex);
     mem_ng_free(cache);
     nvs_close(handle);
 
-    ESP_LOGI(TAG, "Loaded topology cache with %d nodes", s_topology.node_count);
+    ESP_LOGI(TAG, "Loaded topology cache with %d nodes", s_topology->node_count);
     return ESP_OK;
 }
 
@@ -985,12 +997,12 @@ esp_err_t zb_topology_add_node(const esp_zb_ieee_addr_t ieee_addr,
     }
 
     /* Add new node */
-    if (s_topology.node_count >= ZB_TOPOLOGY_MAX_NODES) {
+    if (s_topology->node_count >= ZB_TOPOLOGY_MAX_NODES) {
         ESP_LOGE(TAG, "Topology full, cannot add node 0x%04X", short_addr);
         return ESP_ERR_NO_MEM;
     }
 
-    zb_topo_node_t *node = &s_topology.nodes[s_topology.node_count];
+    zb_topo_node_t *node = &s_topology->nodes[s_topology->node_count];
     memset(node, 0, sizeof(zb_topo_node_t));
     memcpy(node->ieee_addr, ieee_addr, sizeof(esp_zb_ieee_addr_t));
     node->short_addr = short_addr;
@@ -999,9 +1011,9 @@ esp_err_t zb_topology_add_node(const esp_zb_ieee_addr_t ieee_addr,
     node->online = true;
     node->last_seen = topology_get_timestamp();
 
-    s_topology.node_count++;
+    s_topology->node_count++;
 
-    ESP_LOGD(TAG, "Added node 0x%04X to topology (total: %d)", short_addr, s_topology.node_count);
+    ESP_LOGD(TAG, "Added node 0x%04X to topology (total: %d)", short_addr, s_topology->node_count);
     return ESP_OK;
 }
 
@@ -1015,15 +1027,15 @@ esp_err_t zb_topology_remove_node(uint16_t short_addr)
         return ESP_ERR_TIMEOUT;
     }
 
-    for (uint8_t i = 0; i < s_topology.node_count; i++) {
-        if (s_topology.nodes[i].short_addr == short_addr) {
+    for (uint8_t i = 0; i < s_topology->node_count; i++) {
+        if (s_topology->nodes[i].short_addr == short_addr) {
             /* Shift remaining nodes */
-            if (i < s_topology.node_count - 1) {
-                memmove(&s_topology.nodes[i],
-                        &s_topology.nodes[i + 1],
-                        (s_topology.node_count - i - 1) * sizeof(zb_topo_node_t));
+            if (i < s_topology->node_count - 1) {
+                memmove(&s_topology->nodes[i],
+                        &s_topology->nodes[i + 1],
+                        (s_topology->node_count - i - 1) * sizeof(zb_topo_node_t));
             }
-            s_topology.node_count--;
+            s_topology->node_count--;
             xSemaphoreGive(s_mutex);
             ESP_LOGD(TAG, "Removed node 0x%04X from topology", short_addr);
             return ESP_OK;
@@ -1096,7 +1108,7 @@ static esp_err_t topology_scan_next_device(void)
     for (uint8_t i = 0; i < s_pending_lqi_count; i++) {
         if (!s_pending_lqi[i].waiting) {
             s_pending_lqi[i].waiting = true;
-            s_topology.pending_requests++;
+            s_topology->pending_requests++;
 
             ESP_LOGD(TAG, "Requesting neighbors from 0x%04X", s_pending_lqi[i].short_addr);
             return zb_topology_request_neighbors(s_pending_lqi[i].short_addr,
@@ -1115,9 +1127,9 @@ static void topology_scan_complete(bool success)
     esp_timer_stop(s_scan_timer);
 
     if (xSemaphoreTake(s_mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) == pdTRUE) {
-        s_topology.scan_state = success ? ZB_TOPO_SCAN_STATE_COMPLETE : ZB_TOPO_SCAN_STATE_ERROR;
-        s_topology.last_full_scan = topology_get_timestamp();
-        s_topology.pending_requests = 0;
+        s_topology->scan_state = success ? ZB_TOPO_SCAN_STATE_COMPLETE : ZB_TOPO_SCAN_STATE_ERROR;
+        s_topology->last_full_scan = topology_get_timestamp();
+        s_topology->pending_requests = 0;
 
         /* Build links from neighbor data */
         topology_build_links();
@@ -1127,12 +1139,12 @@ static void topology_scan_complete(bool success)
 
     ESP_LOGI(TAG, "Topology scan %s: %d nodes, %d links",
              success ? "completed" : "failed",
-             s_topology.node_count,
-             s_topology.link_count);
+             s_topology->node_count,
+             s_topology->link_count);
 
     /* Notify callback */
     if (s_scan_callback != NULL) {
-        s_scan_callback(&s_topology, success);
+        s_scan_callback(s_topology, success);
     }
 
     /* Publish to MQTT */
@@ -1144,9 +1156,9 @@ static void topology_scan_complete(bool success)
 
 static zb_topo_node_t* topology_find_node(uint16_t short_addr)
 {
-    for (uint8_t i = 0; i < s_topology.node_count; i++) {
-        if (s_topology.nodes[i].short_addr == short_addr) {
-            return &s_topology.nodes[i];
+    for (uint8_t i = 0; i < s_topology->node_count; i++) {
+        if (s_topology->nodes[i].short_addr == short_addr) {
+            return &s_topology->nodes[i];
         }
     }
     return NULL;
@@ -1154,9 +1166,9 @@ static zb_topo_node_t* topology_find_node(uint16_t short_addr)
 
 static zb_topo_node_t* topology_find_node_by_ieee(const esp_zb_ieee_addr_t ieee_addr)
 {
-    for (uint8_t i = 0; i < s_topology.node_count; i++) {
-        if (memcmp(s_topology.nodes[i].ieee_addr, ieee_addr, sizeof(esp_zb_ieee_addr_t)) == 0) {
-            return &s_topology.nodes[i];
+    for (uint8_t i = 0; i < s_topology->node_count; i++) {
+        if (memcmp(s_topology->nodes[i].ieee_addr, ieee_addr, sizeof(esp_zb_ieee_addr_t)) == 0) {
+            return &s_topology->nodes[i];
         }
     }
     return NULL;
@@ -1170,20 +1182,20 @@ static esp_err_t topology_add_link(const esp_zb_ieee_addr_t source_ieee,
                                    zb_topo_relationship_t relationship)
 {
     /* Check for duplicate link */
-    for (uint8_t i = 0; i < s_topology.link_count; i++) {
-        if (memcmp(s_topology.links[i].source_ieee, source_ieee, sizeof(esp_zb_ieee_addr_t)) == 0 &&
-            memcmp(s_topology.links[i].target_ieee, target_ieee, sizeof(esp_zb_ieee_addr_t)) == 0) {
+    for (uint8_t i = 0; i < s_topology->link_count; i++) {
+        if (memcmp(s_topology->links[i].source_ieee, source_ieee, sizeof(esp_zb_ieee_addr_t)) == 0 &&
+            memcmp(s_topology->links[i].target_ieee, target_ieee, sizeof(esp_zb_ieee_addr_t)) == 0) {
             /* Update existing link */
-            s_topology.links[i].lqi = lqi;
+            s_topology->links[i].lqi = lqi;
             return ESP_OK;
         }
     }
 
-    if (s_topology.link_count >= ZB_TOPOLOGY_MAX_LINKS) {
+    if (s_topology->link_count >= ZB_TOPOLOGY_MAX_LINKS) {
         return ESP_ERR_NO_MEM;
     }
 
-    zb_topo_link_t *link = &s_topology.links[s_topology.link_count];
+    zb_topo_link_t *link = &s_topology->links[s_topology->link_count];
     memcpy(link->source_ieee, source_ieee, sizeof(esp_zb_ieee_addr_t));
     memcpy(link->target_ieee, target_ieee, sizeof(esp_zb_ieee_addr_t));
     link->source_addr = source_addr;
@@ -1191,18 +1203,18 @@ static esp_err_t topology_add_link(const esp_zb_ieee_addr_t source_ieee,
     link->lqi = lqi;
     link->relationship = relationship;
 
-    s_topology.link_count++;
+    s_topology->link_count++;
     return ESP_OK;
 }
 
 static void topology_build_links(void)
 {
     /* Clear existing links */
-    s_topology.link_count = 0;
+    s_topology->link_count = 0;
 
     /* Build links from neighbor tables */
-    for (uint8_t i = 0; i < s_topology.node_count; i++) {
-        zb_topo_node_t *node = &s_topology.nodes[i];
+    for (uint8_t i = 0; i < s_topology->node_count; i++) {
+        zb_topo_node_t *node = &s_topology->nodes[i];
 
         for (uint8_t j = 0; j < node->neighbor_count; j++) {
             zb_topo_neighbor_entry_t *neighbor = &node->neighbors[j];

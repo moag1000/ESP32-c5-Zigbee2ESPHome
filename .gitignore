@@ -58,3 +58,16 @@ credentials.h
 sdkconfig.local
 local_config.h
 .cache/
+
+# Cloned upstream repos (used by transpilers)
+tools/zhaquirks/
+tools/zhc/
+
+# Node.js
+scripts/node_modules/
+
+# Transpiler intermediate output
+scripts/data/
+
+# Screen logs
+screenlog.*

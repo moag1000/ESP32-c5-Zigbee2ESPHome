@@ -1280,6 +1280,7 @@ static esp_err_t publish_expose_entity(const device_t *dev, const zb_expose_t *e
     if (key == NULL) {
         return ESP_OK;  /* Skip unnamed exposes */
     }
+    const char *prop = zb_expose_property(expose);
 
     char ieee_str[20];
     device_id_to_ieee_str(dev->id, ieee_str, sizeof(ieee_str));
@@ -1327,9 +1328,9 @@ static esp_err_t publish_expose_entity(const device_t *dev, const zb_expose_t *e
     snprintf(state_topic, sizeof(state_topic), "zigbee2mqtt/%s", dev->friendly_name);
     cJSON_AddStringToObject(config, "state_topic", state_topic);
 
-    /* Value template */
+    /* Value template — use property key for JSON state lookup */
     char value_tmpl[80];
-    snprintf(value_tmpl, sizeof(value_tmpl), "{{ value_json.%s }}", key);
+    snprintf(value_tmpl, sizeof(value_tmpl), "{{ value_json.%s }}", prop);
     cJSON_AddStringToObject(config, "value_template", value_tmpl);
 
     /* Device class */
@@ -1354,11 +1355,20 @@ static esp_err_t publish_expose_entity(const device_t *dev, const zb_expose_t *e
         cJSON_AddStringToObject(config, "command_topic", cmd_topic);
 
         char cmd_tmpl[80];
-        snprintf(cmd_tmpl, sizeof(cmd_tmpl), "{\"%s\": \"{{ value }}\"}", key);
+        snprintf(cmd_tmpl, sizeof(cmd_tmpl), "{\"%s\": \"{{ value }}\"}", prop);
         cJSON_AddStringToObject(config, "command_template", cmd_tmpl);
 
-        /* Sensitivity options for Aqara vibration sensor */
-        if (strcmp(key, "sensitivity") == 0) {
+        /* Use options from expose ext.select if available */
+        if (expose->ext.select.values && expose->ext.select.count > 0) {
+            cJSON *options = cJSON_CreateArray();
+            for (uint8_t oi = 0; oi < expose->ext.select.count; oi++) {
+                if (expose->ext.select.values[oi]) {
+                    cJSON_AddItemToArray(options, cJSON_CreateString(expose->ext.select.values[oi]));
+                }
+            }
+            cJSON_AddItemToObject(config, "options", options);
+        } else if (strcmp(key, "sensitivity") == 0) {
+            /* Legacy fallback */
             cJSON *options = cJSON_CreateArray();
             cJSON_AddItemToArray(options, cJSON_CreateString("low"));
             cJSON_AddItemToArray(options, cJSON_CreateString("medium"));
