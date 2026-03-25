@@ -1,0 +1,14 @@
+{
+  "name": "esp32-c5-zigbee-converter-tools",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tools for extracting and converting Zigbee device databases",
+  "scripts": {
+    "extract-z2m": "node z2m_extract.js",
+    "convert": "python3 convert_db.py",
+    "build-db": "node z2m_extract.js && python3 convert_db.py"
+  },
+  "dependencies": {
+    "zigbee-herdsman-converters": "^26.11.0"
+  }
+}

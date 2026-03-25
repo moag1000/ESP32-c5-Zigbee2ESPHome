@@ -1,0 +1,1 @@
+{"devices":[{"m":"TS0601","mf":"_TZE200_dmfguuli","v":"Evanell","d":"Thermostatic radiator valve","fz":[{"c":0,"a":65535,"k":"generic","fn":"fz_generic_attr"}],"e":[{"t":1,"ac":3,"n":"child_lock","p":"child_lock"},{"t":2,"ac":1,"n":"battery","p":"battery","dc":"battery","u":"%","sc":"measurement"},{"t":6,"f":0,"p":"state","ac":3}],"q":16}]}

@@ -1,0 +1,1 @@
+{"devices":[{"m":"501.34","mf":"Paulmann LichtGmbH","v":"Paulmann","d":"Custom device representing Paulmann 4-button 501.34 remote control.","src":"zhaquirks","pri":1,"fz":[{"c":1,"a":33,"k":"battery","fn":"fz_battery"}],"e":[{"t":2,"f":0,"dc":"battery","u":"%","sc":"measurement","p":"battery","ac":1}],"_compat":true,"quirks":{"bind":[1]}}]}

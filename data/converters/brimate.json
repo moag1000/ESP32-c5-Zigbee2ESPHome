@@ -1,0 +1,1 @@
+{"devices":[{"m":"FB56-BOT02HM1A5","mf":"Brimate","v":"Brimate","d":"Smart motion sensor","fz":[{"c":1280,"a":2,"k":"alarm","fn":"fz_ias_zone_status"}],"e":[{"t":3,"ac":1,"n":"occupancy","p":"occupancy","dc":"motion","bin":{"von":"True","voff":"False"}},{"t":3,"ac":1,"n":"battery_low","p":"battery_low","bin":{"von":"True","voff":"False"}}]}]}

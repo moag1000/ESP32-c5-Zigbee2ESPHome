@@ -1,0 +1,1 @@
+{"devices":[{"m":"2GBatteryDimmer50AU","mf":"Aurora","v":"Aurora","d":"Aurora dimmer switch, battery powered.","src":"zhaquirks","pri":1,"fz":[{"c":1,"a":33,"k":"battery","fn":"fz_battery"}],"e":[{"t":2,"f":0,"dc":"battery","u":"%","sc":"measurement","p":"battery","ac":1}],"_compat":true,"quirks":{"bind":[1]}}]}

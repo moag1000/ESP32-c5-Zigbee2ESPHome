@@ -1,0 +1,1 @@
+{"devices":[{"m":"TS004F","mf":"_TZ3000_uri7ongn","v":"Tuya","d":"Tuya Smart (rotating) Knob device.","src":"zhaquirks","pri":1,"fz":[{"c":1,"a":33,"k":"battery","fn":"fz_battery"}],"e":[{"t":2,"f":0,"dc":"battery","u":"%","sc":"measurement","p":"battery","ac":1}],"_compat":true,"quirks":{"bind":[1]}}]}

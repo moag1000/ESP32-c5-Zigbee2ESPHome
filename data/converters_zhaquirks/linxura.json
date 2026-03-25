@@ -1,0 +1,1 @@
+{"devices":[{"m":"Smart Controller","mf":"Linxura","v":"Linxura","d":"Linxura button device.","src":"zhaquirks","pri":1,"fz":[{"c":1280,"a":2,"k":"alarm","fn":"fz_ias_zone_status"}],"e":[{"t":3,"f":0,"p":"alarm","ac":1}],"_compat":true,"quirks":{"bind":[1280]}}]}
