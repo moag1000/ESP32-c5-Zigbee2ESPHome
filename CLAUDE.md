@@ -1,36 +1,102 @@
-# CLAUDE.md - ESP32-C5 Zigbee2MQTT NG
+# CLAUDE.md - ESP32-C5 Zigbee HA Native (ESPHome Primary)
 
 ## Vision
-**Unified Gateway** mit ALLEN Features auf ESP32-C5 single-core RISC-V.
+**Hybrid ESPHome Native API + MQTT Gateway** auf ESP32-C5 single-core RISC-V.
+ESPHome Native API ist die PRIMARY Home Assistant Integration (Port 6053, Noise encryption).
+MQTT ist sekundaer: Bridge-Management, Debug-Logs, Fallback.
 Memory-optimiert, saubere Architektur, keine Code-Duplikation.
+
+## Hybrid Architecture
+
+### Integration Modes
+| Mode | Config | HA Integration | MQTT |
+|------|--------|----------------|------|
+| **ESPHome Primary** (default) | `CONFIG_ESPHOME_PRIMARY_INTEGRATION=y` | ESPHome Native API | Bridge status + debug only |
+| MQTT Primary (legacy) | `CONFIG_ESPHOME_PRIMARY_INTEGRATION=n` | MQTT Discovery | Full MQTT state/command |
+
+When `CONFIG_ESPHOME_PRIMARY_INTEGRATION=y`:
+- MQTT Discovery (`ha_discovery_ng.c`) is **disabled**
+- MQTT state publishing (`mqtt_adapter.c`) is **disabled**
+- All device entities are exposed via ESPHome Native API
+- Zigbee devices appear as **sub-devices** under the gateway (ESPHome 2025.7.0+)
+
+### Data Flow (ESPHome Primary)
+```
+Command Flow:
+  HA --> ESPHome API (port 6053) --> esphome_adapter.c
+    --> zb_converter_handle_command() --> ZCL command --> Zigbee device
+
+State Flow:
+  Zigbee Report --> zb_callbacks.c --> Event Bus (EVT_DEVICE_STATE_CHANGED)
+    --> esphome_adapter.c --> ESPHome entity state update --> HA
+```
+
+### ESPHome Sub-Device Support
+Each Zigbee device registers as a sub-device under the ESP32-C5 gateway.
+The `device_id` field in entity protobuf messages links entities to their parent sub-device.
+Sub-device info is provided in `DeviceInfoResponse` via `esphome_api_handlers.c`.
+
+#### Protobuf device_id Field Numbers
+| Entity Type | Field # | Entity Type | Field # |
+|-------------|---------|-------------|---------|
+| Sensor | 14 | Light | 16 |
+| BinarySensor | 10 | Cover | 13 |
+| Switch | 10 | Fan | 13 |
+| TextSensor | 9 | Climate | 26 |
+| Number | 14 | Lock | 12 |
+| Button | 9 | MediaPlayer | 10 |
+| Select | 9 | AlarmPanel | 11 |
+| Text | 12 | | |
+
+### ESPHome Entity Mapping (esphome_adapter.c)
+| Device Capability | ESPHome Entity | Notes |
+|-------------------|----------------|-------|
+| `DEV_CAP_TEMPERATURE` | SENSOR | device_class: temperature |
+| `DEV_CAP_HUMIDITY` | SENSOR | device_class: humidity |
+| `DEV_CAP_PRESSURE` | SENSOR | device_class: pressure |
+| `DEV_CAP_BATTERY` | SENSOR | device_class: battery |
+| `DEV_CAP_POWER` | SENSOR | device_class: power |
+| `DEV_CAP_ENERGY` | SENSOR | device_class: energy |
+| `DEV_CAP_VOLTAGE` | SENSOR | device_class: voltage |
+| `DEV_CAP_CURRENT` | SENSOR | device_class: current |
+| `DEV_CAP_MOTION` | BINARY_SENSOR | device_class: motion |
+| `DEV_CAP_CONTACT` | BINARY_SENSOR | device_class: door |
+| `DEV_CAP_VIBRATION` | BINARY_SENSOR | device_class: vibration |
+| `DEV_CAP_WATER_LEAK` | BINARY_SENSOR | device_class: moisture |
+| `DEV_CAP_SMOKE` | BINARY_SENSOR | device_class: smoke |
+| `DEV_CAP_BRIGHTNESS` | LIGHT | + color_temp, RGB support |
+| `DEV_CAP_ON_OFF` (no brightness) | SWITCH | simple on/off |
+| `DEV_CAP_COVER` | COVER | position, tilt |
+| `DEV_CAP_FAN` | FAN | speed levels, oscillation |
+| `DEV_CAP_CLIMATE` | CLIMATE | mode, target temp |
+| `DEV_CAP_LOCK` | LOCK | lock/unlock/open |
 
 ## Features
 | Feature | Heap | Status |
 |---------|------|--------|
-| Zigbee Coordinator | ~80KB | ✅ |
-| MQTT Bridge + LWT | ~15KB | ✅ |
-| HA Discovery NG | ~5KB | ✅ |
-| Captive Portal | ~10KB | ✅ |
-| Event Bus | ~2KB | ✅ |
-| Device Registry | ~8KB | ✅ |
-| Memory Manager NG | ~2KB | ✅ |
-| Device Sync Layer | — | ✅ ELIMINIERT (AP-7.3) |
-| Cluster State NG | ~2KB | ✅ |
-| Device Persistence | ~1KB | ✅ |
-| BLE Scanner | ~40KB | ✅ |
-| ESPHome API + BLE Proxy | ~25KB | ✅ |
-| OTA Updates (MQTT/HTTP/ESPHome/Zigbee) | ~5KB | ✅ |
-| Zigbee Groups | ~2KB | ✅ |
-| Zigbee Scenes | ~2KB | ✅ |
-| Zigbee Direct Binding | ~2KB | ✅ |
-| Zigbee Touchlink | ~2KB | ✅ |
-| Network Topology/Heal | ~3KB | ✅ |
-| Zigbee Availability Tracker | ~2KB | ✅ |
-| WiFi/Zigbee/BLE Coexistence | ~1KB | ✅ |
-| System Monitor + Crash Reporter | ~2KB | ✅ |
-| LED Status Manager | ~1KB | ✅ |
+| Zigbee Coordinator | ~80KB | done |
+| ESPHome Native API (Primary) | ~25KB | done |
+| MQTT Bridge (Secondary) | ~15KB | done |
+| Captive Portal | ~10KB | done |
+| Event Bus | ~2KB | done |
+| Device Registry | ~8KB | done |
+| Memory Manager NG | ~2KB | done |
+| Cluster State NG | ~2KB | done |
+| Device Persistence | ~1KB | done |
+| BLE Scanner | ~40KB | done |
+| ESPHome BLE Proxy | ~5KB | done |
+| OTA Updates (MQTT/HTTP/ESPHome/Zigbee) | ~5KB | done |
+| Zigbee Groups | ~2KB | done |
+| Zigbee Scenes | ~2KB | done |
+| Zigbee Direct Binding | ~2KB | done |
+| Zigbee Touchlink | ~2KB | done |
+| Network Topology/Heal | ~3KB | done |
+| Zigbee Availability Tracker | ~2KB | done |
+| WiFi/Zigbee/BLE Coexistence | ~1KB | done |
+| System Monitor + Crash Reporter | ~2KB | done |
+| LED Status Manager | ~1KB | done |
 
-**Hardware:** 384KB SRAM, 8MB PSRAM → ~40KB internal free after full init (WiFi+Zigbee+MQTT)
+**Hardware:** 384KB SRAM, 8MB PSRAM -> ~40KB internal free after full init (WiFi+Zigbee+ESPHome)
 
 ## ESP-IDF
 
@@ -44,11 +110,11 @@ source ~/esp/esp-idf-v6/export.sh
 ```
 
 ### Merkmale
-- **Picolibc** statt Newlib (Newlib-Kompatibilitätsmodus aktiv)
-- **C23 Standard** (gnu23) — `bool`/`true`/`false` built-in, `static_assert` ohne `<assert.h>`, `nullptr` verfügbar, `<stdbool.h>` entfernt (AP-7.5)
-- **MbedTLS v4.x** — PSA Crypto selektiv (Noise, OTA, Install Codes), sonst Legacy mbedTLS
-- Warnings: `-Wall` via ESP-IDF Default, **kein** `-Wextra`/`-Werror` (AP-5.4)
-- Bootloader linker: `bootloader.ld` → `bootloader.ld.in`
+- **Picolibc** statt Newlib (Newlib-Kompatibilitaetsmodus aktiv)
+- **C23 Standard** (gnu23) -- `bool`/`true`/`false` built-in, `static_assert` ohne `<assert.h>`, `nullptr` verfuegbar
+- **MbedTLS v4.x** -- PSA Crypto selektiv (Noise, OTA, Install Codes), sonst Legacy mbedTLS
+- Warnings: `-Wall` via ESP-IDF Default, **kein** `-Wextra`/`-Werror`
+- Bootloader linker: `bootloader.ld` -> `bootloader.ld.in`
 
 ## Build
 ```bash
@@ -59,22 +125,22 @@ source ./scripts/setup_env.sh && ./scripts/build.sh && ./scripts/flash.sh
 
 ### Layer Abstraction
 ```
-┌─────────────────────────────────────┐
-│         Application Layer           │  ← HA Discovery, Commands
-├─────────────────────────────────────┤
-│         Protocol Layer              │  ← MQTT, ESPHome API
-├─────────────────────────────────────┤
-│         Event Bus                   │  ← Event-Driven (State-Propagation, nicht Commands)
-├─────────────────────────────────────┤
-│         Device Abstraction          │  ← device_t, device_registry ✅
-├─────────────────────────────────────┤
-│         Transport Layer             │  ← Zigbee, BLE, WiFi
-└─────────────────────────────────────┘
++-------------------------------------+
+|         Application Layer           |  <- ESPHome Adapter, Commands
++-------------------------------------+
+|         Integration Layer           |  <- ESPHome Native API (primary), MQTT (secondary)
++-------------------------------------+
+|         Event Bus                   |  <- Event-Driven (State-Propagation, nicht Commands)
++-------------------------------------+
+|         Device Abstraction          |  <- device_t, device_registry
++-------------------------------------+
+|         Transport Layer             |  <- Zigbee, BLE, WiFi
++-------------------------------------+
 ```
 
-### Device Model Migration (✅ Complete)
+### Device Model (NG Complete)
 
-NG `device_t` ist Primary. Legacy `zb_device_handler.c` wurde vollständig eliminiert (~1.750 LOC gelöscht).
+NG `device_t` ist Primary. Legacy `zb_device_handler.c` wurde vollstaendig eliminiert (~1.750 LOC geloescht).
 Alle Cluster-Handler sind in eigene Dateien migriert:
 - `zb_cluster_hvac.c` (Thermostat + Fan Control)
 - `zb_cluster_measurement.c` (Illuminance + Pressure + PM2.5)
@@ -83,19 +149,7 @@ Alle Cluster-Handler sind in eigene Dateien migriert:
 - `zb_cluster_closures.c` (Window Covering)
 - `zb_cluster_multistate.c` (Multistate Input/Output/Value)
 
-#### Migration Status
-
-| Komponente | Legacy | NG | Status |
-|------------|--------|-----|--------|
-| Device Struct | `zb_device_t` | `device_t` | ✅ NG primary |
-| Device Registry | ~~`zb_device_handler.c`~~ | `device_registry.c` | ✅ Legacy eliminiert |
-| Type Determination | ~~`zb_device_determine_type()`~~ | `device_determine_zigbee_type()` | ✅ NG |
-| Cluster State | Eigene `zb_cluster_*.c` Dateien | `cluster_state_ng.c` (cJSON) | ✅ Modularisiert |
-| HA Discovery | `ha_discovery.c` | `ha_discovery_ng.c` | ✅ NG primary |
-| State Publisher | `device_state_publisher.c` | `mqtt_adapter.c` + Events | ✅ Legacy-Helper entfernt |
-| NVS Persistence | `zb_devices` (auto-erased) | `devices` namespace | ✅ NG primary |
-
-### Event Bus (✅ Implemented)
+### Event Bus
 ```c
 #include "core/events/event_bus.h"
 
@@ -110,12 +164,12 @@ event_subscribe(EVT_DEVICE_STATE_CHANGED, on_state_change, NULL);
 **Event Types:** `EVT_DEVICE_JOINED`, `EVT_DEVICE_LEFT`, `EVT_DEVICE_STATE_CHANGED`,
 `EVT_DEVICE_INTERVIEWED`, `EVT_MQTT_CONNECTED`, `EVT_MQTT_DISCONNECTED`
 
-### Unified Device Model (✅ Implemented)
+### Unified Device Model
 ```c
 #include "core/device/unified_device.h"
 #include "core/device/device_registry.h"
 
-// Device lookup (NG)
+// Device lookup
 device_t *dev = device_registry_get(ieee_addr);
 device_t *dev = device_registry_get_by_short_addr(0x1234);
 
@@ -127,16 +181,7 @@ if (dev->capabilities & DEV_CAP_ON_OFF) { ... }
 const void *conv = device_registry_get_converter(dev->id);
 ```
 
-### Device Access (Direct Registry)
-```c
-// Direct device lookup by short address (NG primary)
-device_t *dev = device_registry_get_by_short_addr(short_addr);
-
-// Direct device lookup by IEEE/device_id
-device_t *dev = device_registry_get(ieee64);
-```
-
-### Cluster State NG (✅ Implemented)
+### Cluster State NG
 ```c
 #include "zigbee/cluster_state_ng.h"
 
@@ -151,21 +196,21 @@ cluster_state_update_bool(dev->id, "contact", true);
 // Event wird automatisch publiziert: EVT_DEVICE_STATE_CHANGED
 ```
 
-### Device Persistence (✅ Implemented)
+### Device Persistence
 ```c
 #include "core/device/device_persistence.h"
 
-// Lädt Geräte aus NVS, validiert Format
-device_persistence_load_all();  // Auto-clear bei ungültigen Records
+// Laedt Geraete aus NVS, validiert Format
+device_persistence_load_all();  // Auto-clear bei ungueltigen Records
 
-// Speichert einzelnes Gerät
+// Speichert einzelnes Geraet
 device_persistence_save(dev);
 
-// Speichert alle Geräte
+// Speichert alle Geraete
 device_persistence_save_all();
 ```
 
-### Memory Manager NG (✅ Implemented)
+### Memory Manager NG
 ```c
 #include "core/memory/memory_manager_ng.h"
 
@@ -188,18 +233,22 @@ buffer_pool_t *pool = foundation_get_mqtt_pool();  // 8x 512B
 | Zigbee Network | `zb_network.c`, `zb_availability.c`, `zb_reporting.c`, `zb_backup.c` |
 | Zigbee OTA | `main/zigbee/zb_ota.c` |
 | Tuya | `main/zigbee/tuya/zb_tuya.c`, `tuya_fingerbot.c`, `tuya_driver_registry.c` |
-| MQTT | `main/mqtt/gateway_mqtt.c`, `main/core/bridge/mqtt_bridge.c` |
-| Events | `main/core/events/event_bus.c` |
-| Device (NG) | `main/core/device/device_registry.c`, `unified_device.c`, `device_persistence.c` |
-| Command Handler | `main/zigbee/zb_command_handler.c` (moved from core/ — AP-7.1) |
 | Zigbee Clusters | `zb_cluster_hvac.c`, `zb_cluster_electrical.c`, `zb_cluster_security.c`, `zb_cluster_closures.c`, `zb_cluster_measurement.c`, `zb_cluster_multistate.c` |
 | Cluster State | `main/zigbee/cluster_state_ng.c` |
+| **ESPHome API** | `main/esphome/esphome_api_server.c`, `esphome_api_handlers.c`, `esphome_api.c` |
+| **ESPHome Entities** | `esphome_entity_sensors.c`, `esphome_entity_controls.c`, `esphome_entity_specialized.c`, `esphome_entities_types.h` |
+| **ESPHome Adapter** | `main/core/adapters/esphome_adapter.c` -- Bridges event bus + device registry to ESPHome entities |
+| ESPHome BLE | `main/esphome/esphome_ble_proxy.c` |
+| ESPHome Crypto | `esphome_noise.c`, `esphome_crypto_constants.h` |
+| MQTT (Secondary) | `main/mqtt/gateway_mqtt.c`, `main/core/bridge/mqtt_bridge.c` |
+| Events | `main/core/events/event_bus.c` |
+| Device (NG) | `main/core/device/device_registry.c`, `unified_device.c`, `device_persistence.c` |
+| Command Handler | `main/zigbee/zb_command_handler.c` |
 | Memory | `main/core/memory/memory_manager_ng.c`, `adaptive_memory.c` |
-| Discovery | `main/core/discovery/ha_discovery_ng.c`, `ha_bridge_discovery.c` |
+| Discovery | `main/core/discovery/ha_discovery_ng.c` (disabled when ESPHome primary) |
 | Converter | `main/zigbee/converter/*.c` (27 definitions) |
-| Adapters | `main/core/adapters/mqtt_adapter.c`, `zigbee_adapter.c`, `ble_adapter.c` |
+| Adapters | `main/core/adapters/esphome_adapter.c`, `mqtt_adapter.c`, `zigbee_adapter.c`, `ble_adapter.c` |
 | BLE | `main/bluetooth/ble_scanner.c`, `ble_manager.c` |
-| ESPHome | `main/esphome/esphome_api_server.c`, `esphome_ble_proxy.c` |
 | OTA | `main/ota/ota_handler.c`, `mqtt_ota.c`, `http_ota.c` |
 | WiFi | `main/wifi/wifi_manager.c`, `wifi_captive_portal.c` |
 | Monitoring | `main/core/monitoring/system_monitor.c`, `crash_reporter.c`, `perf_metrics.c` |
@@ -244,23 +293,28 @@ event_publish(EVT_DEVICE_STATE_CHANGED, &evt, sizeof(evt));
 // Device Access (NG primary)
 device_t *dev = device_registry_get_by_short_addr(short_addr);
 device_t *dev = device_registry_get(ieee_addr);
+
+// ESPHome Entity Registration (esphome_adapter.c)
+// Capabilities -> entity types, device_id links to sub-device
+esphome_adapter_register_device(dev);  // auto-maps capabilities to entities
 ```
 
 ## NG Architecture Status
 
 | Komponente | Aufrufe | Status |
 |------------|---------|--------|
-| Memory Manager NG | 315 | ✅ 100% |
-| Event Bus | 209 (108 publish, 48 subscribe, 53 unsubscribe) | ✅ |
-| Device Registry NG | 342 | ✅ Primary |
-| Device Sync Layer | **ELIMINIERT** | ✅ ~379 LOC gelöscht, alle Caller direkt auf device_registry |
-| Buffer Pools | 66 | ✅ |
-| Direct MQTT in zigbee/ | 0 publish, 2 verbleibend (command_handler, fingerbot) | ✅ 6/8 Topic-Includes entfernt (AP-7.2) |
-| Legacy zb_device_handler.c | **ELIMINIERT** | ✅ ~1.750 LOC gelöscht, Multistate extrahiert |
-| Legacy zb_device_get() | 0 | ✅ Vollständig migriert |
-| Legacy NVS (zb_devices) | auto-erased on boot | ✅ NG `devices` namespace primary |
-| C23 Standard | gnu23, `<stdbool.h>` aus 111 Dateien entfernt | ✅ bool/true/false built-in (AP-7.5) |
-| Event Ownership | 51 Structs annotiert | ✅ BORROW/TRANSFER Doku |
+| Memory Manager NG | 315 | done, 100% |
+| Event Bus | 209 (108 publish, 48 subscribe, 53 unsubscribe) | done |
+| Device Registry NG | 342 | done, Primary |
+| ESPHome Adapter | -- | done, Primary HA integration |
+| ESPHome Sub-Devices | -- | done, device_id in all 15 entity types |
+| Buffer Pools | 66 | done |
+| Direct MQTT in zigbee/ | 0 publish | done, migrated |
+| Legacy zb_device_handler.c | ELIMINIERT | done, ~1.750 LOC geloescht |
+| Legacy zb_device_get() | 0 | done, vollstaendig migriert |
+| Legacy NVS (zb_devices) | auto-erased on boot | done, NG `devices` namespace primary |
+| C23 Standard | gnu23 | done, bool/true/false built-in |
+| MQTT Discovery | conditional | done, disabled when CONFIG_ESPHOME_PRIMARY_INTEGRATION=y |
 
 ## Roadmap
 
@@ -269,25 +323,32 @@ device_t *dev = device_registry_get(ieee_addr);
 - [x] Unified Device Model (device_t)
 - [x] Device Registry with PSRAM
 - [x] Memory Manager NG + Adaptive Memory
-- [x] HA Discovery NG (capability-based)
-- [x] Device Sync Layer (zb_device_t ↔ device_t)
+- [x] HA Discovery NG (capability-based, conditional on MQTT primary)
 - [x] Cluster State NG (cJSON-based)
 - [x] Device Persistence NG (auto-clear invalid, power_info)
 - [x] Buffer Pool Helpers (pool_json_print/free)
-- [x] MQTT Event Handler (mqtt_event_handler.c)
-- [x] Zigbee→Event migration (0 direct MQTT in zigbee/)
+- [x] Zigbee->Event migration (0 direct MQTT in zigbee/)
 - [x] MQTT LWT (offline state on unclean disconnect)
-- [x] Discovery cache invalidation on reconnect
 - [x] ESP-IDF v6.0 Platform (Picolibc im Compat-Modus, PSA selektiv)
-- [x] C23 Standard aktivieren (gnu23 C-only Generator Expression + static_assert)
-- [x] Thread Safety: MQTT Latency Race, BLE GATT Race (23/23), Registry Iterator Deadlock (6/6)
-- [x] Event Ownership Dokumentation (51 Structs BORROW/TRANSFER)
-- [x] Dead Code Entfernung (~795 LOC aus zb_device_handler.c)
-- [x] Legacy External Calls migriert (0 externe Aufrufe an zb_device_handler.c)
-- [x] Layer-Violations: EVT_BRIDGE_PUBLISH, Adapter-Interface vtable + Registry
-- [x] Legacy zb_device_handler.c vollständig eliminiert (~1.750 LOC gelöscht + 335 LOC Multistate extrahiert)
-- [x] Legacy NVS Namespace konsolidiert (auto-erase on boot, NG primary)
-- [x] Picolibc Newlib-Kompatibilitätsmodus: MUSS aktiv bleiben (Zigbee `__getreent`-Abhängigkeit)
+- [x] C23 Standard (gnu23)
+- [x] Legacy zb_device_handler.c eliminiert
+
+### ESPHome Native API (Primary Integration)
+- [x] ESPHome API Server (port 6053, Noise encryption)
+- [x] ESPHome Adapter (event bus -> ESPHome entities)
+- [x] Sub-device support (device_id in all 15 entity types)
+- [x] Sensor entities (temperature, humidity, pressure, battery, power, energy, voltage, current)
+- [x] Binary sensor entities (motion, contact, vibration, water_leak, smoke)
+- [x] Light entities (brightness, color_temp, RGB)
+- [x] Switch entities (on/off)
+- [x] Cover entities (position, tilt)
+- [x] Fan entities (speed, oscillation)
+- [x] Climate entities (mode, target temp)
+- [x] Lock entities (lock/unlock/open)
+- [x] CONFIG_ESPHOME_PRIMARY_INTEGRATION Kconfig option
+- [x] MQTT discovery/state disabled when ESPHome primary
+- [x] ESPHome device info sync (manufacturer, model from interview)
+- [ ] ESPHome OTA for Zigbee sub-devices
 
 ### Zigbee Features
 - [x] Coordinator with auto-network formation
@@ -301,7 +362,7 @@ device_t *dev = device_registry_get(ieee_addr);
 
 ### Connectivity
 - [x] BLE Scanner (BLE 5.0 extended, Xiaomi, passive)
-- [x] ESPHome API Server (Noise encryption, BLE Proxy)
+- [x] ESPHome BLE Proxy
 - [x] OTA Updates (MQTT/HTTP/ESPHome/Zigbee)
 - [x] WiFi Manager (5GHz auto, captive portal)
 - [x] WiFi/Zigbee/BLE Coexistence
@@ -312,22 +373,7 @@ device_t *dev = device_registry_get(ieee_addr);
 - [x] LED Status Manager (RGB patterns)
 - [x] Performance Metrics + Latency Measurement
 
-### Remaining (siehe docs/ACTION_PLAN.md AP-7)
-- [x] Thread Safety: MQTT latency race ✅, BLE GATT race ✅, Registry iterator deadlock ✅
-- [x] Layer-Violations eliminiert (EVT_BRIDGE_PUBLISH, Adapter-Interface)
-- [x] Legacy: zb_device_handler.c eliminiert (~1.750 LOC gelöscht)
-- [x] Legacy NVS Namespace konsolidiert (auto-erase, NG primary)
-- [x] Picolibc: Compat-Modus permanent (Zigbee-Dep), dokumentiert
-- [x] Code Safety: strncpy null-termination (7 Stellen), atoi→strtol (2 Stellen)
-- [x] AP-7.3: device_sync.c eliminiert (~379 LOC, 48 Callers → device_registry direkt)
-- [x] AP-7.4: Dead Code entfernt (~380 LOC aus zigbee_adapter, cluster_state_ng, zb_touchlink, zb_multi_pan, zb_device_handler_types.h)
-- [x] AP-7.5: C23 ehrlich machen (`<stdbool.h>` aus 111 Dateien entfernt, 0 verbleibend)
-- [x] AP-7.6: sdkconfig.defaults bereinigt (9 stale Comments, ESP32-only Config entfernt)
-- [x] AP-7.8: Stale comments + TODO audit (13 Dateien, 20 TODOs als echt verifiziert)
-- [x] AP-7.1: command_handler.c → zigbee/zb_command_handler.c (Layer-Violation behoben)
-- [x] AP-7.2: MQTT-Topic-Wissen aus zigbee/ entfernt (6 Dateien, 2 neue Events: AVAILABILITY_CHANGED, TOPICS_CLEAR)
-- [x] AP-7.9: Availability-Tracker parallel Device-Array eliminiert (~2KB static RAM frei, avail_meta in device_t)
-- [x] AP-7.11: zb_device_handler_types.h gesplittet (1051→223 LOC, Cluster-Types in eigene Headers)
+### Remaining
 - [ ] CI/CD Pipeline (Build + Lint + Format)
 - [ ] Web Dashboard (HTTP status page)
 - [ ] Expand converter library
