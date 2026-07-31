@@ -1,6 +1,20 @@
 # Development Guide
 
-Guide for developers contributing to or extending the ESP32-C5 Unified Gateway (Zigbee2MQTT + Bluetooth + ESPHome API).
+Guide for developers contributing to or extending the ESP32-C5 gateway.
+
+> ⚠️ Last reviewed 2026-07-31. Toolchain is ESP-IDF **v6.0.2**. Bluetooth is
+> disabled (`CONFIG_BT_ENABLED=n`) and `main/bluetooth/` is not compiled.
+> The project structure section below predates `main/mmwave/`, the runtime
+> converter database (`zb_converter_loader.c` + `data/`), the quirk engine, and
+> the host tools under `tools/`. See `CLAUDE.md` for the current picture.
+>
+> One build gotcha worth knowing before you change any Kconfig value:
+> `CMakeLists.txt` feeds **two** files into `SDKCONFIG_DEFAULTS` —
+> `sdkconfig.defaults` and then `sdkconfig.local`, where the latter wins and is
+> gitignored. Editing `sdkconfig.defaults` alone does nothing once a `sdkconfig`
+> exists; delete `sdkconfig` (back it up — `sdkconfig.local` holds credentials)
+> and rebuild, then verify `build/config/sdkconfig.h`. `idf.py reconfigure` does
+> not reliably regenerate it.
 
 ## Table of Contents
 

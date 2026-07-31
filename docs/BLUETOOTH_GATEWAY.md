@@ -2,8 +2,23 @@
 
 Complete guide to the Bluetooth LE Gateway functionality of the ESP32-C5 Unified Gateway.
 
-> **Status**: ✅ Phase 10-14 Complete
-> **Requires**: `CONFIG_BT_SCANNER_ENABLED=y`
+> 🔴 **INACTIVE as of 2026-07-31.** Bluetooth is switched off project-wide
+> (`CONFIG_BT_ENABLED=n`): the ESP32-C5 could not hold stable GATT connections
+> under WiFi + Zigbee coexistence load, and disabling the stack frees roughly
+> 30KB of internal RAM. The source tree under `main/bluetooth/` is intact but
+> `BT_SRCS` in `main/CMakeLists.txt` is only added when `CONFIG_BT_ENABLED` is
+> set, so none of it is compiled. The ESPHome BLE Proxy is inactive as well —
+> `esphome_api_handlers.c` reports `bluetooth_proxy_feature_flags = 0` and omits
+> the Bluetooth MAC, so Home Assistant will not offer this device as a proxy.
+>
+> To bring this back: set `CONFIG_BT_ENABLED=y` and restore the NimBLE block in
+> `sdkconfig.defaults` (see git history of that file), then delete `sdkconfig`
+> and rebuild. Expect the original stability problem to still be there.
+>
+> Everything below describes code that currently does not run.
+
+> **Status**: Implemented (Phase 10-14), then disabled
+> **Requires**: `CONFIG_BT_ENABLED=y` **and** `CONFIG_BT_SCANNER_ENABLED=y`
 
 ## Table of Contents
 

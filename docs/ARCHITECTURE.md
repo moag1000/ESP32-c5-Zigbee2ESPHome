@@ -1,6 +1,25 @@
 # Architecture Documentation
 
-This document provides a comprehensive overview of the ESP32-C5 Unified Gateway (Zigbee2MQTT + Bluetooth + ESPHome API) architecture, including system design, module structure, data flow, and key design decisions.
+> ⚠️ **Partially outdated (last reviewed 2026-07-31).** This document still
+> carries the fork state from 2026-02-19. Two structural changes are missing:
+> 1. **Bluetooth is disabled** (`CONFIG_BT_ENABLED=n`). `BT_SRCS` in
+>    `main/CMakeLists.txt` is only added when BT is enabled, so the entire
+>    `main/bluetooth/` tree and `esphome_ble_proxy.c` are not compiled. Every
+>    BLE task, queue and data path described below is inactive.
+> 2. **Converters moved from compile time to runtime.** Device definitions live
+>    in a JSON database in LittleFS (`/littlefs/converters`, `index.json` v2),
+>    loaded by `zb_converter_loader.c`. Only three converters remain in C.
+>    Note that `zb_converter_find()` therefore performs file I/O — it must not
+>    be called while holding `s_mutex` in `zb_interview.c`.
+>
+> Also newer than this document: `main/mmwave/` (S3KM1110 presence sensor),
+> `esphome_services.c`, `esphome_ota.c` and `zb_quirk_engine.c`.
+>
+> `CLAUDE.md` in the repository root is the current source of truth.
+
+This document provides a comprehensive overview of the ESP32-C5 gateway
+architecture, including system design, module structure, data flow, and key
+design decisions.
 
 ## Table of Contents
 

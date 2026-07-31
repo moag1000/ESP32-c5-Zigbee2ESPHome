@@ -1,8 +1,19 @@
 # ESP32-C5 Unified Gateway - Architecture Overview
 
+> ⚠️ **Partially outdated (last reviewed 2026-07-31).** Two things changed since
+> this was written and are not reflected below:
+> 1. **Bluetooth is disabled** (`CONFIG_BT_ENABLED=n`) — every BLE path shown
+>    here is dead code that is not compiled.
+> 2. **Converters are no longer compiled in.** Device definitions are loaded at
+>    runtime from a JSON database in LittleFS (`/littlefs/converters`,
+>    `index.json` v2). Only `conv_generic.c`, `conv_tuya_bridge.c` and
+>    `conv_tuya_fingerbot.c` remain in C.
+>
+> `CLAUDE.md` in the repository root is the current source of truth.
+
 > **Detailed Documentation**: For comprehensive architecture details including FreeRTOS task structure, memory layout, synchronization points, and component details, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-High-level architecture overview for the ESP32-C5 Unified Gateway (Zigbee2MQTT + Bluetooth + ESPHome API).
+High-level architecture overview for the ESP32-C5 gateway (Zigbee + ESPHome Native API + MQTT).
 
 ## System Overview
 

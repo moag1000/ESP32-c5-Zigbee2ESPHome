@@ -1,18 +1,26 @@
-# ESP32-C5 Unified Gateway (Zigbee2MQTT + Bluetooth + ESPHome API)
+# ESP32-C5 Zigbee Gateway (ESPHome Native API + MQTT)
 
 > ⚠️ **EXPERIMENTAL PROJECT**: This is a hobbyist/learning project. Espressif **recommends dual-SoC solutions** (e.g., ESP32-S3 + ESP32-H2) for production Zigbee gateways due to better reliability and lower packet loss on single-RF-path systems.
 >
 > **Best for**: Learning, experimentation, proof-of-concept
 > **Not recommended for**: Production deployments, mission-critical applications
 
-A high-performance **Zigbee Coordinator**, **Bluetooth LE Gateway**, and **ESPHome-compatible** bridge for Home Assistant integration, built on the ESP32-C5 SoC.
+> 🔴 **Bluetooth is disabled** (`CONFIG_BT_ENABLED=n`, as of 2026-07-31). The
+> ESP32-C5 could not hold stable GATT connections under WiFi + Zigbee
+> coexistence load. The BLE source tree is still present but is not compiled;
+> turning it back on means re-enabling `CONFIG_BT_ENABLED` and restoring the
+> NimBLE block in `sdkconfig.defaults`. Every BLE section below describes code
+> that currently does not run.
+
+A **Zigbee Coordinator** with an **ESPHome Native API** bridge for Home Assistant,
+built on the ESP32-C5 SoC.
 
 ## Overview
 
-This project implements a **unified gateway** using the ESP32-C5 microcontroller with three wireless protocols:
+This project implements a Zigbee gateway on the ESP32-C5 microcontroller:
 - **Zigbee 3.0**: Coordinator for Zigbee devices (lights, sensors, switches)
-- **Bluetooth LE**: Passive scanning & active proxy for BLE devices (beacons, sensors)
-- **WiFi 6**: Dual-band connectivity with MQTT bridge + ESPHome Native API
+- **WiFi 6**: Dual-band connectivity with ESPHome Native API (primary) + MQTT bridge (secondary)
+- **Bluetooth LE**: implemented but **currently disabled** — see the banner above
 
 ### Key Features
 
@@ -22,17 +30,32 @@ This project implements a **unified gateway** using the ESP32-C5 microcontroller
 - **Home Assistant Discovery**: Automatic device discovery via MQTT
 - **ZCL Cluster Support**: On/Off, Level, Color, Temperature, Humidity, Occupancy
 
-#### Bluetooth Gateway 🔵 NEW
+#### Bluetooth Gateway — DISABLED
+Implemented but not compiled (`CONFIG_BT_ENABLED=n`). Kept for reference:
 - **BLE Passive Scanner**: Beacon tracking, presence detection (iBeacon, Eddystone)
 - **BLE Active Proxy**: GATT connections to BLE sensors (Xiaomi, Govee)
 - **Device Tracking**: RSSI-based presence detection for 50+ BLE devices
 - **Supported Devices**: Xiaomi LYWSD03MMC, Govee H5075, iBeacons, BLE trackers
 
-#### ESPHome Integration 🔵 NEW
-- **ESPHome Native API**: Full compatibility with Home Assistant ESPHome
+#### ESPHome Integration (primary HA path)
+- **ESPHome Native API**: Full compatibility with Home Assistant ESPHome, port 6053, Noise encryption
 - **Auto-Discovery**: Appears as ESPHome device in Home Assistant
-- **Entity Support**: Sensors, Binary Sensors, Switches, Device Trackers
-- **Service Calls**: Control gateway and devices via ESPHome services
+- **Sub-Devices**: Zigbee devices appear as sub-devices of the gateway (ESPHome 2025.7.0+)
+- **Entity Support**: Sensors, Binary Sensors, Switches, Lights, Covers, Fans, Climate, Locks
+- **ESPHome OTA**: firmware updates over the ESPHome protocol on port 3232
+- **Service Calls**: framework is in place, but only `test_service` is registered so far
+
+#### Converter Database
+- Device definitions are **loaded at runtime** from a JSON database in LittleFS,
+  not compiled into the firmware
+- Transpiled from zigbee-herdsman-converters and zha-device-handlers by the host
+  tools in `tools/`
+- The database can be replaced at runtime over MQTT
+  (`zigbee2mqtt/bridge/request/converter_db/update`)
+
+#### mmWave Presence
+- S3KM1110 24GHz FMCW radar over UART, 16 distance gates (~70cm each)
+- Enabled with `CONFIG_MMWAVE_SENSOR_ENABLE`
 
 #### System Features
 - **WiFi Connectivity**: Dual-band WiFi 6 (2.4GHz + 5GHz, 5GHz preferred via `CONFIG_WIFI_PREFER_5GHZ`)
@@ -46,12 +69,12 @@ This project implements a **unified gateway** using the ESP32-C5 microcontroller
 ### ESP32-C5 Specifications
 - **SoC**: ESP32-C5 (RISC-V @ 240MHz, single-core)
 - **RAM**: 384KB SRAM + 8MB PSRAM
-- **Flash**: 16MB (required for OTA support + Bluetooth)
+- **Flash**: 16MB (required for OTA plus the LittleFS converter database)
 - **Wireless**:
   - WiFi 6 (2.4/5GHz dual-band)
   - Zigbee 3.0 (IEEE 802.15.4 @ 2.4GHz)
-  - Bluetooth 5.0 LE (2.4GHz)
-- **Coexistence**: Hardware support for simultaneous WiFi/BT/Zigbee operation
+  - Bluetooth 5.0 LE (2.4GHz) — present in silicon, disabled in firmware
+- **Coexistence**: Hardware support for simultaneous WiFi/Zigbee operation
 
 ### Development Board
 - ESP32-C5-DevKitC-1 or compatible
@@ -62,14 +85,14 @@ This project implements a **unified gateway** using the ESP32-C5 microcontroller
 
 ### ESP-IDF
 
-- **Version**: ESP-IDF v6.0 (Picolibc, C23, PSA Crypto)
+- **Version**: ESP-IDF v6.0.2 (Picolibc, C23, PSA Crypto)
 - **Installation**: [ESP-IDF Getting Started Guide](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/)
 
 ```bash
-# Clone ESP-IDF v6.0
+# Clone ESP-IDF v6.0.2
 mkdir -p ~/esp
 cd ~/esp
-git clone -b v6.0 --recursive https://github.com/espressif/esp-idf.git esp-idf-v6
+git clone -b v6.0.2 --recursive https://github.com/espressif/esp-idf.git esp-idf-v6
 cd esp-idf-v6
 
 # Install ESP-IDF
@@ -78,6 +101,12 @@ cd esp-idf-v6
 # Set up environment (add to ~/.bashrc or ~/.zshrc)
 alias get_idf='source $HOME/esp/esp-idf-v6/export.sh'
 ```
+
+The Python virtualenv that `install.sh` creates is named after the **host**
+Python version (e.g. `idf6.0_py3.14_env`). Upgrading the system Python
+invalidates it: `export.sh` still exits 0, but `idf.py` is then not on the PATH
+and the log says `ESP-IDF Python virtual environment ... not found`. Re-run
+`./install.sh esp32c5` to fix it.
 
 ### ESP-Zigbee-SDK
 - **Repository**: [ESP-Zigbee-SDK](https://github.com/espressif/esp-zigbee-sdk)

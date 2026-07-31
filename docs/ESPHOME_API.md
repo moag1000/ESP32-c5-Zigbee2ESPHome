@@ -1,9 +1,22 @@
 # ESPHome Native API Guide
 
-Complete guide to ESPHome Native API integration for the ESP32-C5 Unified Gateway.
+Complete guide to ESPHome Native API integration for the ESP32-C5 gateway.
 
-> **Status**: ✅ Phase 10-14 Complete
+> **Status**: active — this is the **primary** Home Assistant integration
 > **Requires**: `CONFIG_ESPHOME_API_ENABLE=y`
+>
+> ⚠️ Last reviewed 2026-07-31; the body below is still the fork state from
+> 2026-02-19 and is missing three things:
+> - **BLE Proxy sections do not apply.** Bluetooth is disabled
+>   (`CONFIG_BT_ENABLED=n`), so `bluetooth_proxy_feature_flags` is reported as
+>   `0` and the Bluetooth MAC (field 18) is omitted from `DeviceInfoResponse`.
+>   Home Assistant will not offer this device as a Bluetooth proxy.
+> - **ESPHome OTA** exists: `esphome_ota.c`, ESPHome OTA protocol on port 3232,
+>   started from `esphome_adapter_gateway.c`. Covers the gateway firmware
+>   itself, not Zigbee sub-device OTA.
+> - **Service calls**: `esphome_services.c` provides the registration and
+>   dispatch framework, but only `test_service` is actually registered. There
+>   are no `permit_join` / `remove` / `reconfigure` services yet.
 
 ## Table of Contents
 

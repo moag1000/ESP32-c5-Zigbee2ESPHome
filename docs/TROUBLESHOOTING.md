@@ -1,6 +1,36 @@
 # Troubleshooting Guide
 
-This guide helps diagnose and resolve common issues with the ESP32-C5 Unified Gateway (Zigbee2MQTT + Bluetooth + ESPHome API).
+This guide helps diagnose and resolve common issues with the ESP32-C5 gateway.
+
+> ⚠️ Last reviewed 2026-07-31. BLE troubleshooting sections no longer apply —
+> Bluetooth is disabled (`CONFIG_BT_ENABLED=n`) and not compiled.
+
+## Issues found since this guide was written
+
+**`idf.py: command not found` right after a successful `export.sh`.**
+`export.sh` exits 0 but the export log says
+`ERROR: ESP-IDF Python virtual environment ... not found`. The virtualenv is
+named after the host Python version (`idf6.0_py3.14_env`), so a system Python
+upgrade orphans it. Fix: `~/esp/esp-idf-v6/install.sh esp32c5`.
+
+**A Kconfig change in `sdkconfig.defaults` has no effect.**
+`sdkconfig.local` is applied *after* `sdkconfig.defaults` and overrides it, and
+the generated `sdkconfig` is only rebuilt when it is missing or after
+`idf.py set-target`. Delete `sdkconfig` (back it up first) and rebuild, then
+confirm the result in `build/config/sdkconfig.h`.
+
+**Crash or watchdog during device interview.**
+`zb_converter_find()` reads the converter database from LittleFS. Calling it
+while `s_mutex` is held in `zb_interview.c` keeps the lock long enough to break
+FreeRTOS priority inheritance on the single-core C5. Converter lookup for sleepy
+devices belongs in `interview_complete()`, not in the timeout path.
+
+**Devices come back from NVS without a converter.**
+`device_persistence_load_all()` runs before converters are registered, so
+restored devices start with `converter == NULL`. The rebind loop in `main.c`
+(~line 509) fixes this up: exact manufacturer+model match, then
+`conv_generic_for_capabilities()`, then no converter at all — in which case the
+device only gets entities derived from its capabilities.
 
 ## Table of Contents
 

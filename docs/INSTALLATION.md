@@ -1,6 +1,19 @@
 # Installation Guide
 
-This guide walks you through setting up the development environment, building the firmware, and flashing it to your ESP32-C5 device for the Unified Gateway (Zigbee2MQTT + Bluetooth + ESPHome API).
+This guide walks you through setting up the development environment, building the firmware, and flashing it to your ESP32-C5 device.
+
+> **Toolchain as of 2026-07-31: ESP-IDF v6.0.2.** If a version below says v6.0,
+> read v6.0.2.
+>
+> The virtualenv that `install.sh` creates is named after the **host** Python
+> version (currently `idf6.0_py3.14_env`). Upgrading the system Python
+> invalidates it. The failure is confusing: `export.sh` still exits 0, but
+> `idf.py` is then not on the PATH, and the export log contains
+> `ERROR: ESP-IDF Python virtual environment ... not found`. Fix it by re-running
+> `./install.sh esp32c5` — that pulls roughly 3.4GB into `~/.espressif`.
+>
+> Bluetooth is disabled in this firmware (`CONFIG_BT_ENABLED=n`); any BLE setup
+> step below can be skipped.
 
 ## Table of Contents
 

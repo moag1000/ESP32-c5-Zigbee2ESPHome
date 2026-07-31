@@ -1,6 +1,25 @@
 # Configuration Guide
 
-This guide covers all configuration options for the ESP32-C5 Unified Gateway (Zigbee2MQTT + Bluetooth + ESPHome API), including compile-time (Kconfig), runtime (NVS), and MQTT-based configuration.
+This guide covers configuration options for the ESP32-C5 gateway, including compile-time (Kconfig), runtime (NVS), and MQTT-based configuration.
+
+> ⚠️ Last reviewed 2026-07-31.
+>
+> **How the config chain actually resolves.** `CMakeLists.txt` sets
+> `SDKCONFIG_DEFAULTS` to **two** files: `sdkconfig.defaults`, then
+> `sdkconfig.local`. The local file overrides the defaults and is gitignored
+> (it holds WiFi and MQTT credentials in plaintext — do not commit it). Editing
+> `sdkconfig.defaults` has no effect once a generated `sdkconfig` exists: delete
+> `sdkconfig` and rebuild, then check `build/config/sdkconfig.h`.
+> `idf.py reconfigure` does not reliably regenerate it.
+>
+> **All `CONFIG_BT_*` and `CONFIG_BLE_*` options below are inert.** Bluetooth is
+> disabled project-wide (`CONFIG_BT_ENABLED=n`) and `CONFIG_BT_SCANNER_ENABLED`
+> now carries `depends on BT_ENABLED`, so it can no longer be switched on by
+> itself from `sdkconfig.local`.
+>
+> Missing from this document: `CONFIG_MMWAVE_SENSOR_ENABLE` and the related
+> `MMWAVE_GPIO_TX` / `MMWAVE_GPIO_RX` / `MMWAVE_DEFAULT_MAX_GATE` /
+> `MMWAVE_DEFAULT_ABSENCE_DELAY` options.
 
 ## Table of Contents
 

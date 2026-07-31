@@ -1,10 +1,49 @@
 # CLAUDE.md - ESP32-C5 Zigbee HA Native (ESPHome Primary)
 
+> Stand: 2026-07-31. BLE ist projektweit deaktiviert, Converter kommen zur
+> Laufzeit aus einer LittleFS-DB. Beides steht unten im Detail -- aeltere
+> Dokumente unter `docs/` sind teils noch auf dem Fork-Stand von 2026-02-19.
+
 ## Vision
 **Hybrid ESPHome Native API + MQTT Gateway** auf ESP32-C5 single-core RISC-V.
 ESPHome Native API ist die PRIMARY Home Assistant Integration (Port 6053, Noise encryption).
 MQTT ist sekundaer: Bridge-Management, Debug-Logs, Fallback.
 Memory-optimiert, saubere Architektur, keine Code-Duplikation.
+
+## BLE: deaktiviert
+
+`CONFIG_BT_ENABLED=n` in `sdkconfig.defaults`. Der C5 haelt unter
+WiFi+Zigbee-Koexistenzlast keine stabilen GATT-Verbindungen; das Abschalten
+gibt rund 30KB internes RAM fuer Zigbee und WiFi frei.
+
+- Der komplette NimBLE-Block ist aus `sdkconfig.defaults` entfernt
+- `BT_SCANNER_ENABLED` hat `depends on BT_ENABLED` -- ein lokaler Override in
+  `sdkconfig.local` kann BLE-App-Code nicht mehr ohne Controller aktivieren
+- `BT_SRCS` in `main/CMakeLists.txt` wird nur bei aktivem BT eingebunden;
+  der BLE-Quellcode bleibt vollstaendig im Baum, wird aber nicht kompiliert
+- `main/bluetooth/ble_stubs.c` liefert die No-Op-Symbole. Signaturen muessen
+  exakt zu `esphome_ble_proxy.h` passen (3-Param-Handler
+  `uint8_t client_id, const uint8_t *payload, size_t len`)
+- `esphome_api_handlers.c` meldet `bluetooth_proxy_feature_flags = 0` und laesst
+  Feld 18 (BT-MAC) weg
+- Damit ist auch der ESPHome BLE Proxy inaktiv
+
+Pruefen, ob es wirklich aus ist: keine `CONFIG_BT_*`-Defines in
+`build/config/sdkconfig.h`, 0 Treffer fuer `bt/host/nimble` in
+`build/compile_commands.json`.
+
+## Konfigurations-Kette
+
+`CMakeLists.txt` setzt `SDKCONFIG_DEFAULTS` auf **zwei** Dateien:
+`sdkconfig.defaults`, danach `sdkconfig.local`. Die lokale Datei ueberschreibt
+die Defaults und ist gitignored (enthaelt WLAN-/MQTT-Zugangsdaten im Klartext --
+nicht committen).
+
+`sdkconfig.defaults` zu aendern reicht nicht: das erzeugte `sdkconfig` entsteht
+nur bei fehlendem `sdkconfig` oder `idf.py set-target` neu. Vorgehen: `sdkconfig`
+sichern und loeschen, `build/` weg, neu bauen -- danach immer
+`build/config/sdkconfig.h` gegenpruefen. `idf.py reconfigure` regeneriert sie
+nicht zuverlaessig.
 
 ## Hybrid Architecture
 
@@ -83,8 +122,6 @@ Sub-device info is provided in `DeviceInfoResponse` via `esphome_api_handlers.c`
 | Memory Manager NG | ~2KB | done |
 | Cluster State NG | ~2KB | done |
 | Device Persistence | ~1KB | done |
-| BLE Scanner | ~40KB | done |
-| ESPHome BLE Proxy | ~5KB | done |
 | OTA Updates (MQTT/HTTP/ESPHome/Zigbee) | ~5KB | done |
 | Zigbee Groups | ~2KB | done |
 | Zigbee Scenes | ~2KB | done |
@@ -92,22 +129,40 @@ Sub-device info is provided in `DeviceInfoResponse` via `esphome_api_handlers.c`
 | Zigbee Touchlink | ~2KB | done |
 | Network Topology/Heal | ~3KB | done |
 | Zigbee Availability Tracker | ~2KB | done |
-| WiFi/Zigbee/BLE Coexistence | ~1KB | done |
+| WiFi/Zigbee Coexistence | ~1KB | done |
 | System Monitor + Crash Reporter | ~2KB | done |
 | LED Status Manager | ~1KB | done |
+| mmWave Presence Sensor (S3KM1110) | ~1KB | done |
+| ESPHome Service Calls | ~1KB | Framework da, nur `test_service` registriert |
+| BLE Scanner | -- | **deaktiviert** (Code im Baum, nicht kompiliert) |
+| ESPHome BLE Proxy | -- | **deaktiviert** |
 
-**Hardware:** 384KB SRAM, 8MB PSRAM -> ~40KB internal free after full init (WiFi+Zigbee+ESPHome)
+**Hardware:** 384KB SRAM, 8MB PSRAM. Der Wert "~40KB internal free after full
+init" stammt aus der Zeit mit aktivem BLE; ohne BLE sollten rund 30KB mehr frei
+sein, das ist aber seit der Abschaltung **nicht auf Hardware nachgemessen**.
 
 ## ESP-IDF
 
 | Version | Pfad | Beschreibung |
 |---------|------|--------------|
-| **v6.0** | `~/esp/esp-idf-v6` | Picolibc, MbedTLS v4.x |
+| **v6.0.2** | `~/esp/esp-idf-v6` | Tag-Checkout (detached HEAD), Picolibc, MbedTLS v4.x |
 
 ### Setup
 ```bash
 source ~/esp/esp-idf-v6/export.sh
 ```
+
+Der venv liegt unter `~/.espressif/python_env/idf6.0_py3.14_env` und traegt die
+**Host-Python-Version im Namen** -- nach einem Python-Upgrade ist der alte venv
+unbrauchbar. Symptom: `export.sh` laeuft mit rc=0 durch, danach
+`command not found: idf.py`, im Log
+`ERROR: ESP-IDF Python virtual environment ... not found`.
+Reparatur: `~/esp/esp-idf-v6/install.sh esp32c5` (zieht ~3.4GB).
+
+### Managed Components (Stand 2026-07-31)
+`esp-zigbee-lib` 1.6.8, `esp-zboss-lib` 1.6.4, `led_strip` 3.0.3,
+`mdns` 1.11.3, `mqtt` 1.1.0, `littlefs` 1.22.3, `cjson` 1.7.19~2.
+Aktualisieren mit `idf.py update-dependencies`.
 
 ### Merkmale
 - **Picolibc** statt Newlib (Newlib-Kompatibilitaetsmodus aktiv)
@@ -148,6 +203,39 @@ Alle Cluster-Handler sind in eigene Dateien migriert:
 - `zb_cluster_security.c` (Door Lock + IAS Zone)
 - `zb_cluster_closures.c` (Window Covering)
 - `zb_cluster_multistate.c` (Multistate Input/Output/Value)
+
+### Converter: Laufzeit-DB statt einkompilierter Definitionen
+
+Die frueheren 27 einkompilierten Converter-Definitionen gibt es nicht mehr. In C
+liegen nur noch drei: `conv_generic.c`, `conv_tuya_bridge.c`,
+`conv_tuya_fingerbot.c`. Alles andere kommt zur Laufzeit aus einer JSON-DB in
+LittleFS.
+
+- Mountpoint `/littlefs`, DB unter `/littlefs/converters`, Einstieg `index.json`
+  (Format v2 mit `manufacturers`- und `files`-Objekten)
+- Loader: `main/zigbee/converter/zb_converter_loader.c`
+- Partition: `spiffs` ab 0x921000, 0x6DF000 gross (siehe `partitions.csv`)
+- Quelldaten im Repo unter `data/`: 447 Hersteller-JSONs, `converters_merged/`
+  (162), `converters_zhaquirks/` (554), gepacktes `converters.bin` (6.9MB)
+- Host-Tools in `tools/`: `z2m_converter_extract.py`, `zhaquirks_transpiler.py`,
+  `merge_converter_dbs.py`, `validate_converter_db.py`, `upload_converters.py`.
+  `tools/zhc/` und `tools/zhaquirks/` sind die eingecheckten Upstream-Quellen.
+- DB-Update zur Laufzeit per MQTT:
+  `zigbee2mqtt/bridge/request/converter_db/update` ->
+  `handle_converter_db_update()` in `bridge_request_handler.c`
+
+**Zwei Fallstricke:**
+
+1. Der Rebind beim Boot passiert in `main.c` (~Zeile 509), nicht in
+   `device_persistence.c`. `device_persistence_load_all()` laeuft, bevor die
+   Converter registriert sind -- NG-Devices haben danach `converter == NULL`.
+   Fallback-Kette: exakter Hersteller+Modell-Treffer ->
+   `conv_generic_for_capabilities()` -> gar kein Converter (Entities dann nur
+   aus Capabilities).
+2. `zb_converter_find()` macht LittleFS-File-I/O und darf in `zb_interview.c`
+   **nicht** unter gehaltenem `s_mutex` laufen -- haelt die Sperre zu lange und
+   zerlegt die FreeRTOS-Priority-Inheritance auf dem single-core C5 (siehe
+   Kommentar bei `zb_interview.c:1746`).
 
 ### Event Bus
 ```c
@@ -238,17 +326,23 @@ buffer_pool_t *pool = foundation_get_mqtt_pool();  // 8x 512B
 | **ESPHome API** | `main/esphome/esphome_api_server.c`, `esphome_api_handlers.c`, `esphome_api.c` |
 | **ESPHome Entities** | `esphome_entity_sensors.c`, `esphome_entity_controls.c`, `esphome_entity_specialized.c`, `esphome_entities_types.h` |
 | **ESPHome Adapter** | `main/core/adapters/esphome_adapter.c` -- Bridges event bus + device registry to ESPHome entities |
-| ESPHome BLE | `main/esphome/esphome_ble_proxy.c` |
+| ESPHome Services | `main/esphome/esphome_services.c` (Framework; nur `test_service`) |
+| ESPHome OTA | `main/esphome/esphome_ota.c` (Port 3232, gestartet aus `esphome_adapter_gateway.c`) |
+| ESPHome Device Registry | `main/esphome/esphome_device_registry.c` |
+| ESPHome BLE | `main/esphome/esphome_ble_proxy.c` (**inaktiv**, BT aus) |
 | ESPHome Crypto | `esphome_noise.c`, `esphome_crypto_constants.h` |
+| mmWave | `main/mmwave/mmwave_sensor.c` (S3KM1110, UART, 16 Gates) |
 | MQTT (Secondary) | `main/mqtt/gateway_mqtt.c`, `main/core/bridge/mqtt_bridge.c` |
 | Events | `main/core/events/event_bus.c` |
 | Device (NG) | `main/core/device/device_registry.c`, `unified_device.c`, `device_persistence.c` |
 | Command Handler | `main/zigbee/zb_command_handler.c` |
 | Memory | `main/core/memory/memory_manager_ng.c`, `adaptive_memory.c` |
 | Discovery | `main/core/discovery/ha_discovery_ng.c` (disabled when ESPHome primary) |
-| Converter | `main/zigbee/converter/*.c` (27 definitions) |
+| Converter (C) | `main/zigbee/converter/converters/` -- nur noch `conv_generic.c`, `conv_tuya_bridge.c`, `conv_tuya_fingerbot.c` |
+| Converter (Laufzeit-DB) | `zb_converter_loader.c`, `zb_converter_registry.c`, `zb_converter_fn_registry.c` |
+| Quirks | `zb_quirk_engine.c` (Transform-Pipeline + Init-Sequenzen), `zb_custom_quirk.c` |
 | Adapters | `main/core/adapters/esphome_adapter.c`, `mqtt_adapter.c`, `zigbee_adapter.c`, `ble_adapter.c` |
-| BLE | `main/bluetooth/ble_scanner.c`, `ble_manager.c` |
+| BLE | `main/bluetooth/` (**nicht kompiliert**, `BT_SRCS` haengt an `CONFIG_BT_ENABLED`); aktiv ist nur `ble_stubs.c` |
 | OTA | `main/ota/ota_handler.c`, `mqtt_ota.c`, `http_ota.c` |
 | WiFi | `main/wifi/wifi_manager.c`, `wifi_captive_portal.c` |
 | Monitoring | `main/core/monitoring/system_monitor.c`, `crash_reporter.c`, `perf_metrics.c` |
@@ -361,11 +455,21 @@ esphome_adapter_register_device(dev);  // auto-maps capabilities to entities
 - [x] Tuya driver framework + Fingerbot
 
 ### Connectivity
-- [x] BLE Scanner (BLE 5.0 extended, Xiaomi, passive)
-- [x] ESPHome BLE Proxy
 - [x] OTA Updates (MQTT/HTTP/ESPHome/Zigbee)
 - [x] WiFi Manager (5GHz auto, captive portal)
-- [x] WiFi/Zigbee/BLE Coexistence
+- [x] WiFi/Zigbee Coexistence
+- [~] BLE Scanner (BLE 5.0 extended, Xiaomi, passive) -- Code fertig, aber
+      **abgeschaltet**: keine stabilen GATT-Verbindungen auf dem C5
+- [~] ESPHome BLE Proxy -- dito, inaktiv
+
+### Converter & Quirks
+- [x] Laufzeit-Converter-DB in LittleFS (index.json v2)
+- [x] z2m- und zhaquirks-Transpiler (Host-Tools unter `tools/`)
+- [x] Quirk-Engine (Transform-Pipeline, Init-Sequenzen)
+- [x] Custom-Quirk-Upload + DB-Update per MQTT
+
+### Sensorik
+- [x] mmWave-Praesenzsensor S3KM1110 (UART, 16 Gates)
 
 ### Monitoring
 - [x] System Monitor (heap, CPU, tasks)
@@ -376,4 +480,11 @@ esphome_adapter_register_device(dev);  // auto-maps capabilities to entities
 ### Remaining
 - [ ] CI/CD Pipeline (Build + Lint + Format)
 - [ ] Web Dashboard (HTTP status page)
-- [ ] Expand converter library
+- [ ] Echte ESPHome-Services (permit_join, remove, reconfigure, ...) -- das
+      Framework in `esphome_services.c` steht, registriert ist nur `test_service`
+- [ ] ESPHome OTA fuer Zigbee-Sub-Devices (`esphome_ota.c` deckt bisher nur das
+      Gateway selbst ab, Port 3232)
+- [ ] Bootloader-Groesse: 0x5700 von 0x6000 belegt, nur ~2.3KB frei
+- [ ] Freien internen RAM ohne BLE auf Hardware nachmessen
+- [ ] `docs/` auf den aktuellen Stand ziehen -- grosse Teile sind noch der
+      Fork-Stand vom 2026-02-19 und beschreiben BLE als aktiv
