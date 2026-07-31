@@ -9,6 +9,7 @@
 #include "../test_framework.h"
 #include "utils/version.h"
 #include "esp_log.h"
+#include <stdio.h>   /* sscanf, snprintf */
 #include <string.h>
 
 static const char *TAG = "TEST_VER";

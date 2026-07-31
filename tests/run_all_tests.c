@@ -18,15 +18,38 @@
 
 static const char *TAG = "TEST_RUNNER";
 
-/* External test suite runners */
+/* External test suite runners.
+ *
+ * Each suite is opt-in via a TEST_SUITE_* define set in main/CMakeLists.txt,
+ * because a suite can only be linked once the modules it exercises are in
+ * SRCS. Enabling one here without adding its sources gives an undefined
+ * reference at link time, not a compile error, so the two must stay in step.
+ *
+ * See README_TESTS.md for the current state of each suite. */
+#ifdef TEST_SUITE_MEMORY_MANAGER
 extern test_stats_t run_memory_manager_tests(void);
+#endif
+#ifdef TEST_SUITE_CONFIG_MANAGER
 extern test_stats_t run_config_manager_tests(void);
+#endif
+#ifdef TEST_SUITE_JSON_UTILS
 extern test_stats_t run_json_utils_tests(void);
+#endif
+#ifdef TEST_SUITE_VERSION
 extern test_stats_t run_version_tests(void);
+#endif
+#ifdef TEST_SUITE_MQTT_TOPICS
 extern test_stats_t run_mqtt_topics_tests(void);
+#endif
+#ifdef TEST_SUITE_WIFI_MQTT
 extern test_stats_t run_wifi_mqtt_integration_tests(void);
+#endif
+#ifdef TEST_SUITE_ZIGBEE_BRIDGE
 extern test_stats_t run_zigbee_mqtt_bridge_tests(void);
+#endif
+#ifdef TEST_SUITE_OTA
 extern test_stats_t run_ota_tests(void);
+#endif
 
 /**
  * @brief Print test banner
@@ -88,66 +111,48 @@ static void test_runner_task(void *pvParameters)
      * ======================================== */
     print_banner("UNIT TESTS");
 
-    /* Memory Manager Tests */
-    test_reset_stats();
-    suite_stats = run_memory_manager_tests();
-    print_suite_result("Memory Manager", suite_stats);
-    combine_stats(&total_stats, suite_stats);
-    vTaskDelay(pdMS_TO_TICKS(100));
+#define RUN_SUITE(fn, label)                       \
+    do {                                           \
+        test_reset_stats();                        \
+        suite_stats = fn();                        \
+        print_suite_result((label), suite_stats);  \
+        combine_stats(&total_stats, suite_stats);  \
+        vTaskDelay(pdMS_TO_TICKS(100));            \
+    } while (0)
 
-    /* Config Manager Tests */
-    test_reset_stats();
-    suite_stats = run_config_manager_tests();
-    print_suite_result("Config Manager", suite_stats);
-    combine_stats(&total_stats, suite_stats);
-    vTaskDelay(pdMS_TO_TICKS(100));
-
-    /* JSON Utils Tests */
-    test_reset_stats();
-    suite_stats = run_json_utils_tests();
-    print_suite_result("JSON Utilities", suite_stats);
-    combine_stats(&total_stats, suite_stats);
-    vTaskDelay(pdMS_TO_TICKS(100));
-
-    /* Version Tests */
-    test_reset_stats();
-    suite_stats = run_version_tests();
-    print_suite_result("Version Management", suite_stats);
-    combine_stats(&total_stats, suite_stats);
-    vTaskDelay(pdMS_TO_TICKS(100));
-
-    /* MQTT Topics Tests */
-    test_reset_stats();
-    suite_stats = run_mqtt_topics_tests();
-    print_suite_result("MQTT Topics", suite_stats);
-    combine_stats(&total_stats, suite_stats);
-    vTaskDelay(pdMS_TO_TICKS(100));
+#ifdef TEST_SUITE_MEMORY_MANAGER
+    RUN_SUITE(run_memory_manager_tests, "Memory Manager");
+#endif
+#ifdef TEST_SUITE_CONFIG_MANAGER
+    RUN_SUITE(run_config_manager_tests, "Config Manager");
+#endif
+#ifdef TEST_SUITE_JSON_UTILS
+    RUN_SUITE(run_json_utils_tests, "JSON Utilities");
+#endif
+#ifdef TEST_SUITE_VERSION
+    RUN_SUITE(run_version_tests, "Version Management");
+#endif
+#ifdef TEST_SUITE_MQTT_TOPICS
+    RUN_SUITE(run_mqtt_topics_tests, "MQTT Topics");
+#endif
 
     /* ========================================
      * INTEGRATION TESTS
      * ======================================== */
+#if defined(TEST_SUITE_WIFI_MQTT) || defined(TEST_SUITE_ZIGBEE_BRIDGE) || \
+    defined(TEST_SUITE_OTA)
     print_banner("INTEGRATION TESTS");
+#endif
 
-    /* WiFi + MQTT Integration Tests */
-    test_reset_stats();
-    suite_stats = run_wifi_mqtt_integration_tests();
-    print_suite_result("WiFi + MQTT Integration", suite_stats);
-    combine_stats(&total_stats, suite_stats);
-    vTaskDelay(pdMS_TO_TICKS(100));
-
-    /* Zigbee-MQTT Bridge Tests */
-    test_reset_stats();
-    suite_stats = run_zigbee_mqtt_bridge_tests();
-    print_suite_result("Zigbee-MQTT Bridge", suite_stats);
-    combine_stats(&total_stats, suite_stats);
-    vTaskDelay(pdMS_TO_TICKS(100));
-
-    /* OTA Tests */
-    test_reset_stats();
-    suite_stats = run_ota_tests();
-    print_suite_result("OTA Updates", suite_stats);
-    combine_stats(&total_stats, suite_stats);
-    vTaskDelay(pdMS_TO_TICKS(100));
+#ifdef TEST_SUITE_WIFI_MQTT
+    RUN_SUITE(run_wifi_mqtt_integration_tests, "WiFi + MQTT Integration");
+#endif
+#ifdef TEST_SUITE_ZIGBEE_BRIDGE
+    RUN_SUITE(run_zigbee_mqtt_bridge_tests, "Zigbee-MQTT Bridge");
+#endif
+#ifdef TEST_SUITE_OTA
+    RUN_SUITE(run_ota_tests, "OTA Updates");
+#endif
 
     /* ========================================
      * FINAL SUMMARY
