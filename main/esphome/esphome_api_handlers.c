@@ -786,7 +786,8 @@ static esp_err_t handle_device_info_request(esphome_client_t *client, const esph
     /* Field 13: friendly_name */
     esphome_encode_string(&buf, 13, state->config.friendly_name);
 
-    /* Field 15: bluetooth_proxy_feature_flags (all supported features) */
+    /* Field 15: bluetooth_proxy_feature_flags */
+#if CONFIG_BT_ENABLED
     esphome_encode_uint32(&buf, 15,
         ESPHOME_BLE_PROXY_FEATURE_PASSIVE_SCAN |
         ESPHOME_BLE_PROXY_FEATURE_ACTIVE_SCAN |
@@ -795,7 +796,11 @@ static esp_err_t handle_device_info_request(esphome_client_t *client, const esph
         ESPHOME_BLE_PROXY_FEATURE_CACHE_CLEARING |
         ESPHOME_BLE_PROXY_FEATURE_RAW_ADVERTISEMENTS |
         ESPHOME_BLE_PROXY_FEATURE_SCANNER_STATE);
+#else
+    esphome_encode_uint32(&buf, 15, 0);  /* BLE disabled on ESP32-C5 */
+#endif
 
+#if CONFIG_BT_ENABLED
     /* Field 18: bluetooth_mac_address - derive from WiFi MAC with offset */
     {
         uint8_t wifi_mac[6];
@@ -807,6 +812,7 @@ static esp_err_t handle_device_info_request(esphome_client_t *client, const esph
                  wifi_mac[3], wifi_mac[4], ble_last);
         esphome_encode_string(&buf, 18, ble_mac);
     }
+#endif
 
     /* Field 20: repeated DeviceInfo (Zigbee sub-devices) */
     {

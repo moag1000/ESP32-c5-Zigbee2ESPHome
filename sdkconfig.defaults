@@ -235,65 +235,15 @@ CONFIG_ESPHOME_NOISE_REQUIRE_PSK=y
 
 #
 # Bluetooth / NimBLE Configuration
-# ENABLED for tri-radio testing (WiFi + Zigbee + BLE)
-# MINIMAL config to reduce internal RAM usage - BLE controller needs internal RAM
+# DISABLED: ESP32-C5 cannot maintain stable GATT connections for BLE proxy.
+# Disabling BLE frees ~30KB internal RAM for Zigbee+WiFi stability.
 #
-CONFIG_BT_ENABLED=y
-CONFIG_BT_SCANNER_ENABLED=y
-CONFIG_BT_ACTIVE_SCAN_ENABLED=y
-CONFIG_BT_NIMBLE_ENABLED=y
-CONFIG_BT_SCAN_INTERVAL=3000
-
-# Roles - only observer for BLE scanning/proxy
-CONFIG_BT_NIMBLE_ROLE_CENTRAL=y
-CONFIG_BT_NIMBLE_ROLE_OBSERVER=y
-CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=n
-CONFIG_BT_NIMBLE_ROLE_BROADCASTER=n
-
-# BLE 4.x only - disable BLE 5.0 features for compatibility
-CONFIG_BT_NIMBLE_50_FEATURE_SUPPORT=n
-CONFIG_BT_NIMBLE_EXT_ADV=n
-CONFIG_BT_NIMBLE_ENABLE_PERIODIC_ADV=n
-CONFIG_BT_NIMBLE_LL_CFG_FEAT_LE_2M_PHY=n
-CONFIG_BT_NIMBLE_LL_CFG_FEAT_LE_CODED_PHY=n
-
-# Minimal connections and bonds
-CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
-CONFIG_BT_NIMBLE_MAX_BONDS=5
-
-# Use PSRAM for NimBLE host (controller still needs internal RAM)
-CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
-
-# Reduced buffer sizes to save internal RAM
-CONFIG_BT_NIMBLE_MSYS_1_BLOCK_COUNT=4
-CONFIG_BT_NIMBLE_MSYS_1_BLOCK_SIZE=128
-CONFIG_BT_NIMBLE_MSYS_2_BLOCK_COUNT=8
-CONFIG_BT_NIMBLE_MSYS_2_BLOCK_SIZE=256
-CONFIG_BT_NIMBLE_TRANSPORT_ACL_FROM_LL_COUNT=4
-CONFIG_BT_NIMBLE_TRANSPORT_ACL_SIZE=200
-CONFIG_BT_NIMBLE_TRANSPORT_EVT_COUNT=4
-CONFIG_BT_NIMBLE_TRANSPORT_EVT_DISCARD_COUNT=2
-
-# Controller buffer settings (aggressively reduced for minimal internal RAM)
-CONFIG_BT_LE_ACL_BUF_COUNT=4
-CONFIG_BT_LE_ACL_BUF_SIZE=255
-CONFIG_BT_LE_HCI_EVT_BUF_SIZE=70
-CONFIG_BT_LE_HCI_EVT_HI_BUF_COUNT=4
-CONFIG_BT_LE_HCI_EVT_LO_BUF_COUNT=2
-
-# Pre-allocated memory counts - set to 0 for dynamic allocation (saves internal RAM)
-# Memory will be allocated on-demand when advertising/connecting starts
-CONFIG_BT_LE_EXT_ADV_RESERVED_MEMORY_COUNT=0
-CONFIG_BT_LE_CONN_RESERVED_MEMORY_COUNT=0
-
-# App-level BLE Scanner config (disable extended features to save RAM)
-CONFIG_BT_EXTENDED_ADV_ENABLED=n
-CONFIG_BT_2M_PHY_ENABLED=n
-CONFIG_BT_CODED_PHY_ENABLED=n
+CONFIG_BT_ENABLED=n
+CONFIG_BT_SCANNER_ENABLED=n
 
 #
-# WiFi/BT/Zigbee Coexistence - REQUIRED for tri-radio operation
-# ESP32-C5 shares a single radio for WiFi/BT/Zigbee - coexistence arbitrates access
+# WiFi/Zigbee Coexistence
+# ESP32-C5 shares a single radio for WiFi/Zigbee - coexistence arbitrates access
 #
 CONFIG_ESP_COEX_SW_COEXIST_ENABLE=y
 # CRITICAL: Disable coex power management - causes WiFi starvation and MQTT timeouts

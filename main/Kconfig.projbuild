@@ -484,6 +484,7 @@ menu "ESP32-C5 Zigbee2MQTT Gateway Configuration"
     menu "Bluetooth Configuration"
         config BT_SCANNER_ENABLED
             bool "Enable BLE Scanner"
+            depends on BT_ENABLED
             default y
             help
                 Enable Bluetooth Low Energy passive scanner for detecting

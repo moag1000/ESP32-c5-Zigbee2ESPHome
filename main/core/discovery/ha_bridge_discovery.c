@@ -1127,7 +1127,7 @@ cleanup:
 }
 #endif /* CONFIG_BT_SCANNER_ENABLED */
 
-#if CONFIG_ESPHOME_API_ENABLE
+#if CONFIG_ESPHOME_API_ENABLE && CONFIG_BT_SCANNER_ENABLED
 /**
  * @brief Publish ble_proxy_connections sensor discovery
  */
@@ -1165,7 +1165,9 @@ static esp_err_t publish_sensor_ble_proxy_adverts(void)
 cleanup:
     return ESP_ERR_NO_MEM;
 }
+#endif /* CONFIG_ESPHOME_API_ENABLE && CONFIG_BT_SCANNER_ENABLED */
 
+#if CONFIG_ESPHOME_API_ENABLE
 /**
  * @brief Publish esphome_status sensor discovery
  */
@@ -1381,6 +1383,7 @@ esp_err_t ha_bridge_discovery_publish_all(void)
 
     /* ESPHome diagnostic sensors */
 #if CONFIG_ESPHOME_API_ENABLE
+#if CONFIG_BT_SCANNER_ENABLED
     vTaskDelay(pdMS_TO_TICKS(HA_DISCOVERY_PUBLISH_DELAY_MS));
     tmp_ret = publish_sensor_ble_proxy_connections();
     if (tmp_ret != ESP_OK) ret = tmp_ret;
@@ -1388,6 +1391,7 @@ esp_err_t ha_bridge_discovery_publish_all(void)
     vTaskDelay(pdMS_TO_TICKS(HA_DISCOVERY_PUBLISH_DELAY_MS));
     tmp_ret = publish_sensor_ble_proxy_adverts();
     if (tmp_ret != ESP_OK) ret = tmp_ret;
+#endif
 
     vTaskDelay(pdMS_TO_TICKS(HA_DISCOVERY_PUBLISH_DELAY_MS));
     tmp_ret = publish_sensor_esphome_status();
@@ -1454,8 +1458,10 @@ esp_err_t ha_bridge_discovery_remove(void)
         {"switch", "ble_scanner"},
 #endif
 #if CONFIG_ESPHOME_API_ENABLE
+#if CONFIG_BT_SCANNER_ENABLED
         {"sensor", "ble_proxy_connections"},
         {"sensor", "ble_proxy_adverts"},
+#endif
         {"sensor", "esphome_status"},
         {"sensor", "esphome_clients"},
 #endif
@@ -1558,8 +1564,10 @@ esp_err_t ha_bridge_publish_state(void)
 #if CONFIG_ESPHOME_API_ENABLE
     cJSON_AddStringToObject(json, "esphome_status", state.esphome_status);
     cJSON_AddNumberToObject(json, "esphome_clients", state.esphome_clients);
+#if CONFIG_BT_SCANNER_ENABLED
     cJSON_AddNumberToObject(json, "ble_proxy_adverts", state.ble_proxy_adverts);
     cJSON_AddNumberToObject(json, "ble_proxy_connections", state.ble_proxy_connections);
+#endif
 #endif
 
     /* Serialize and publish */
