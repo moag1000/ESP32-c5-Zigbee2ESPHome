@@ -724,8 +724,49 @@ void app_main(void)
                     vTaskDelay(pdMS_TO_TICKS(1000));
                     wifi_manager_connect(wifi_config.ssid, wifi_config.password);
                 } else {
-                    ESP_LOGE(TAG_WIFI, "Failed to connect to WiFi after %d attempts", max_wifi_retries);
-                    ESP_LOGW(TAG_WIFI, "Continuing with background retry - network may be unavailable");
+                    ESP_LOGW(TAG_WIFI, "No connection after %d fast attempts", max_wifi_retries);
+                }
+            }
+        }
+
+        /* Grace period before falling back to the captive portal.
+         *
+         * The three attempts above cover roughly 37 seconds. That is not
+         * enough for every access point: this gateway has been observed
+         * failing the initial attempts against a WPA2/WPA3 mesh and then
+         * associating fine on a later background retry, staying up for hours.
+         *
+         * Starting the portal is expensive and disruptive — it disables
+         * auto-reconnect, takes ESPHome down and puts the radio into AP mode
+         * for CONFIG_WIFI_CAPTIVE_PORTAL_TIMEOUT_SEC. Doing that to a gateway
+         * whose credentials are perfectly good costs minutes of downtime on
+         * every boot. The portal exists for unknown or wrong credentials, not
+         * for a slow AP.
+         *
+         * So: keep auto-reconnect running and give it a real window. If it
+         * connects, the portal is never started. */
+        if (!wifi_connected) {
+            const int grace_sec = CONFIG_WIFI_CONNECT_GRACE_SEC;
+            if (grace_sec > 0) {
+                ESP_LOGW(TAG_WIFI, "Waiting up to %ds for background reconnect "
+                                   "before starting the captive portal", grace_sec);
+                EventBits_t bits = xEventGroupWaitBits(wifi_event_group, BIT0,
+                                                       pdFALSE, pdTRUE,
+                                                       pdMS_TO_TICKS(grace_sec * 1000));
+                if (bits & BIT0) {
+                    char ip_str[WIFI_IP_STRING_LEN];
+                    wifi_manager_get_ip(ip_str, sizeof(ip_str));
+                    ESP_LOGI(TAG_WIFI, "WiFi connected on background retry! IP: %s", ip_str);
+                    xEventGroupSetBits(s_connection_event_group, WIFI_CONNECTED_BIT);
+                    wifi_connected = true;
+#if CONFIG_GW_LED_ENABLED
+                    led_status_manager_set_condition(LED_COND_WIFI_CONNECTING, false);
+                    led_status_manager_set_condition(LED_COND_WIFI_CONNECTED, true);
+                    led_status_manager_set_condition(LED_COND_BOOT_COMPLETE, true);
+#endif
+                } else {
+                    ESP_LOGE(TAG_WIFI, "Still no WiFi after %ds - network appears unavailable",
+                             grace_sec);
                 }
             }
         }

@@ -25,6 +25,31 @@ menu "ESP32-C5 Zigbee2MQTT Gateway Configuration"
             help
                 WiFi scan method: 0=FAST, 1=ALL_CHANNEL.
 
+        config WIFI_CONNECT_GRACE_SEC
+            int "Grace period before captive portal (seconds)"
+            default 300
+            range 0 900
+            help
+                After the initial connection attempts fail, keep the normal
+                background reconnect running for this long before falling back
+                to the captive portal.
+
+                The captive portal is disruptive: it disables auto-reconnect,
+                stops ESPHome and puts the radio into AP mode. That is the
+                right response to unknown or wrong credentials, and the wrong
+                response to an access point that simply needs longer — which
+                does happen, e.g. with WPA2/WPA3 mesh setups where the first
+                association attempts are refused and a later one succeeds.
+
+                The default is sized to let the reconnect backoff schedule run
+                to completion: wifi_manager retries up to 10 times with
+                exponential backoff (1, 2, 4, 8, 16, then 30s), and each failed
+                association itself takes ~13s, which adds up to roughly four to
+                five minutes. A shorter window cuts the retries off partway and
+                starts the portal while the radio would still have been trying.
+
+                Set to 0 to start the portal immediately, as before.
+
         config WIFI_COUNTRY_CODE
             string "WiFi Country Code (regulatory domain)"
             default "DE"
