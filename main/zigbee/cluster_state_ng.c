@@ -14,6 +14,7 @@
 #include "zb_constants.h"
 #include "core/device/device_registry.h"
 #include "core/events/event_bus.h"
+#include "core/events/event_data.h"
 #include <string.h>
 #include <math.h>
 
@@ -74,16 +75,34 @@ esp_err_t cluster_state_publish_change(device_id_t id)
         return ESP_ERR_NOT_FOUND;
     }
 
-    cJSON *state = device_registry_get_state(id);
-
-    /* Publish event with device ID and current state */
-    struct {
-        device_id_t device_id;
-        cJSON *json_state;
-    } evt = {
-        .device_id = id,
-        .json_state = state
+    /* Publish the documented payload type. Two things must not be done here:
+     *
+     * 1. Do NOT publish an ad-hoc struct. Subscribers cast the payload to
+     *    evt_device_state_t (24 bytes on RV32); event_publish() allocates
+     *    exactly data_size bytes, so a smaller struct makes the handler read
+     *    json_state from past the end of the allocation.
+     *
+     * 2. Do NOT put the registry-owned cJSON pointer in the event. Dispatch is
+     *    asynchronous, and the next report can cJSON_Delete() that object via
+     *    device_registry_set_state() before the handler runs.
+     *
+     * json_state stays NULL; handlers read the current state from
+     * device_registry_get_state() themselves, the same way ble_adapter.c,
+     * mqtt_bridge.c and device_state_publisher.c already do. */
+    /* proto is a union — only read the Zigbee arm for Zigbee devices. */
+    evt_device_state_t evt = {
+        .ieee_addr  = id,
+        .short_addr = 0,
+        .endpoint   = 0,
+        .cluster_id = 0,
+        .attr_id    = 0,
+        .json_state = NULL,
     };
+
+    if (dev->protocol == DEV_PROTOCOL_ZIGBEE) {
+        evt.short_addr = dev->proto.zigbee.short_addr;
+        evt.endpoint   = dev->proto.zigbee.endpoint;
+    }
 
     return event_publish(EVT_DEVICE_STATE_CHANGED, &evt, sizeof(evt));
 }
