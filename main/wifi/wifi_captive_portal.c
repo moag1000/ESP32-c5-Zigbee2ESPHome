@@ -169,7 +169,19 @@ static void dns_redirect_task(void *arg)
     struct sockaddr_in client_addr;
     socklen_t client_len;
 
-    while (s_state == CAPTIVE_PORTAL_ACTIVE || s_state == CAPTIVE_PORTAL_TESTING) {
+    /* Run until someone actually asks us to stop.
+     *
+     * This used to be `s_state == ACTIVE || s_state == TESTING`, but
+     * start_dns_redirect() is called while the state is still STARTING —
+     * ACTIVE is only set afterwards. The task therefore evaluated the
+     * condition as false on its very first iteration and exited immediately,
+     * roughly 6ms after logging "DNS redirect server started". The portal AP
+     * came up but nothing redirected DNS, so phones never auto-opened the
+     * config page and the address had to be typed in by hand.
+     *
+     * Phrasing it as a stop condition makes the task independent of the
+     * startup ordering. */
+    while (s_state != CAPTIVE_PORTAL_STOPPING && s_state != CAPTIVE_PORTAL_INACTIVE) {
         /* Check for stop notification (non-blocking)
          * v6.0 compatible: xTaskNotifyWait replaces deprecated ulTaskNotifyTake */
         uint32_t notification_value;
@@ -668,6 +680,14 @@ static esp_err_t start_http_server(void)
     config.stack_size = CAPTIVE_PORTAL_HTTP_STACK_SIZE;
     config.max_uri_handlers = 8;
     config.lru_purge_enable = true;
+
+    /* HTTPD_DEFAULT_CONFIG() asks for 7 open sockets. With
+     * CONFIG_LWIP_MAX_SOCKETS=8 and 3 sockets taken by the server itself, the
+     * ceiling is 5 — httpd_start() rejected the config with
+     * ESP_ERR_INVALID_ARG, so the captive portal never came up. That is
+     * exactly the situation where it is needed: it only runs when WiFi failed.
+     * Four concurrent connections is plenty for a one-page config form. */
+    config.max_open_sockets = 4;
 
     esp_err_t ret = httpd_start(&s_httpd, &config);
     if (ret != ESP_OK) {

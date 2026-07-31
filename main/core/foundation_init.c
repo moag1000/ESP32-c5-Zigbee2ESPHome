@@ -304,7 +304,9 @@ esp_err_t foundation_init(void)
     /* Register all adapters with the unified registry */
     adapter_registry_register("zigbee", &zigbee_adapter_ops);
     adapter_registry_register("mqtt", &mqtt_adapter_ops);
+#if CONFIG_BT_ENABLED
     adapter_registry_register("ble", &ble_adapter_ops);
+#endif
     adapter_registry_register("esphome", &esphome_adapter_ops);
 
     /* Initialize all registered adapters */

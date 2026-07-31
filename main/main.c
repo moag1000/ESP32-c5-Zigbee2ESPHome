@@ -148,9 +148,18 @@ static void print_system_info(void)
     ESP_LOGI(TAG_MAIN, "========================================");
     ESP_LOGI(TAG_MAIN, "Chip: %s", CONFIG_IDF_TARGET);
     ESP_LOGI(TAG_MAIN, "Cores: %d", chip_info.cores);
-    ESP_LOGI(TAG_MAIN, "Features: WiFi%s%s",
+    /* Report what this firmware actually runs, not what the silicon offers.
+     * The chip always reports BLE; the firmware may well have it disabled. */
+    ESP_LOGI(TAG_MAIN, "Silicon: WiFi%s%s",
              (chip_info.features & CHIP_FEATURE_BT) ? "/BT" : "",
              (chip_info.features & CHIP_FEATURE_BLE) ? "/BLE" : "");
+    ESP_LOGI(TAG_MAIN, "Radios enabled: WiFi/Zigbee%s",
+#if CONFIG_BT_ENABLED
+             "/BLE"
+#else
+             " (BLE disabled)"
+#endif
+    );
 
     /* Get flash size */
     uint32_t flash_size;

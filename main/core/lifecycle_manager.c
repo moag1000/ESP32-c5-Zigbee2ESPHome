@@ -76,12 +76,19 @@ static const lifecycle_service_t s_phase_services[6][SERVICE_COUNT] = {
         SERVICE_COUNT
     },
 
-    /* NORMAL - all services */
+    /* NORMAL - all services.
+     * The BLE services are only listed when BT is actually compiled in.
+     * Listing them unconditionally made the lifecycle manager request services
+     * whose start cases do not exist, so every boot logged
+     * "E LIFECYCLE: Failed to start ble_scanner: ESP_ERR_NOT_SUPPORTED" —
+     * error-level noise that hides real failures. */
     [LIFECYCLE_PHASE_NORMAL] = {
+#if CONFIG_BT_SCANNER_ENABLED
         SERVICE_BLE_SCANNER,
         SERVICE_BLE_GATT,
-        SERVICE_ESPHOME_API,
         SERVICE_ESPHOME_BLE_PROXY,
+#endif
+        SERVICE_ESPHOME_API,
         SERVICE_HA_DISCOVERY,
         SERVICE_STATE_PERSISTENCE,
         SERVICE_SYSTEM_MONITOR,
