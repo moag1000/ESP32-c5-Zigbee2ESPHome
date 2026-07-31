@@ -709,20 +709,26 @@ void app_main(void)
             } else {
                 wifi_retry_count++;
                 if (wifi_retry_count < max_wifi_retries) {
-                    ESP_LOGW(TAG_WIFI, "WiFi connection timeout (attempt %d/%d) - retrying...",
+                    /* Just keep waiting — do NOT drive the connection from here.
+                     *
+                     * This used to disconnect, sleep 1s and call
+                     * wifi_manager_connect() again. But wifi_manager runs its
+                     * own reconnect timer with exponential backoff, so two
+                     * places were driving the same connection at once. The
+                     * disconnect is asynchronous and one second is not always
+                     * enough, so esp_wifi_set_config() landed on a station that
+                     * was already associating:
+                     *
+                     *   E wifi:sta is connecting, cannot set config
+                     *   E WIFI_MGR: Failed to set WiFi config: ESP_ERR_WIFI_STATE
+                     *
+                     * The retry then did nothing except abort whatever progress
+                     * the reconnect timer had made — plausibly a good part of
+                     * why association took minutes. Ownership now sits in one
+                     * place: wifi_manager reconnects, boot only waits. */
+                    ESP_LOGW(TAG_WIFI, "Still waiting for WiFi (window %d/%d) — "
+                                       "wifi_manager keeps retrying in the background",
                              wifi_retry_count, max_wifi_retries);
-
-#ifdef CONFIG_WIFI_PREFER_5GHZ
-                    /* Already using AUTO mode with 5GHz RSSI preference.
-                     * Log retry but no band change needed. */
-                    if (wifi_retry_count == 1) {
-                        ESP_LOGW(TAG_WIFI, "WiFi connection timeout - retrying with AUTO band mode");
-                    }
-#endif
-                    /* Disconnect and reconnect to force fresh DHCP attempt */
-                    wifi_manager_disconnect();
-                    vTaskDelay(pdMS_TO_TICKS(1000));
-                    wifi_manager_connect(wifi_config.ssid, wifi_config.password);
                 } else {
                     ESP_LOGW(TAG_WIFI, "No connection after %d fast attempts", max_wifi_retries);
                 }
