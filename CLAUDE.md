@@ -32,6 +32,49 @@ Pruefen, ob es wirklich aus ist: keine `CONFIG_BT_*`-Defines in
 `build/config/sdkconfig.h`, 0 Treffer fuer `bt/host/nimble` in
 `build/compile_commands.json`.
 
+## Nicht verdrahteter Code (gemessen 2026-08-01)
+
+Zwoelf Uebersetzungseinheiten werden kompiliert, tragen aber **kein einziges
+Symbol** zum fertigen Image bei -- der Linker verwirft sie per `--gc-sections`
+vollstaendig. Zusammen rund **10.560 Zeilen**.
+
+| Modul | LOC | Warum tot |
+|-------|-----|-----------|
+| `zigbee/zb_ota.c` | 1982 | nie initialisiert; die Event-Konsumenten in `mqtt_event_handler.c` existieren, der Produzent laeuft nie |
+| `zigbee/zb_scenes.c` | 1545 | keine externen Referenzen |
+| `zigbee/zb_router.c` | 1119 | Router-Modus; Geraet laeuft als Coordinator (erwartet) |
+| `zigbee/zb_touchlink.c` | 1070 | nie initialisiert |
+| `zigbee/cluster_state_ng.c` | 1000 | **kein einziger Aufruf von `cluster_state_*` im Projekt** |
+| `core/coex_manager.c` | 787 | nie initialisiert (`COEX_MANAGER_CONCEPT.md` nennt es selbst Draft) |
+| `core/monitoring/event_trace.c` | 752 | nie initialisiert |
+| `core/adapters/ble_adapter.c` | 749 | BLE ist aus (erwartet) |
+| `mqtt/batch_publisher.c` | 555 | nie initialisiert |
+| `core/memory_pool.c` | 462 | nie initialisiert |
+| `core/monitoring/memory_dashboard.c` | 369 | nie initialisiert |
+| `core/monitoring/adaptive_memory.c` | 172 | nie initialisiert |
+
+Zwei davon sind konfigurationsbedingt korrekt tot (`ble_adapter`, `zb_router`).
+Die uebrigen rund **8.700 Zeilen** sind fertig gebaute Features, die nie
+angeschlossen wurden.
+
+**Wichtig fuer die Fehlersuche:** Bugs in diesen Dateien koennen kein
+Laufzeitverhalten erklaeren. `cluster_state_ng.c` ist der auffaelligste Fall --
+`CLAUDE.md` beschrieb es lange als zentralen State-Mechanismus, obwohl es nie
+aufgerufen wird. Der State-Weg, der tatsaechlich laeuft, geht ueber
+`device_registry_set_state()` / `_merge_state()` und den Event-Bus.
+
+### Den Befund reproduzieren
+
+```bash
+grep -oE "libmain\.a\([a-z_0-9]+\.c\.obj\)" build/esp32_c5_zigbee2mqtt.map \
+  | sed 's/.*(\(.*\))/\1/' | sort -u > /tmp/kept.txt
+# gegen die aktuell kompilierten Quellen aus build/compile_commands.json vergleichen
+```
+
+Die Map ist die verlaessliche Quelle. Textsuche nach `<modul>_init` taeuscht in
+beide Richtungen: Referenzen aus ebenfalls totem Code zaehlen mit, und
+Substring-Treffer wie `evt_zb_ota_progress_t` sehen aus wie Aufrufe.
+
 ## Konfigurations-Kette
 
 `CMakeLists.txt` setzt `SDKCONFIG_DEFAULTS` auf **zwei** Dateien:
@@ -120,13 +163,14 @@ Sub-device info is provided in `DeviceInfoResponse` via `esphome_api_handlers.c`
 | Event Bus | ~2KB | done |
 | Device Registry | ~8KB | done |
 | Memory Manager NG | ~2KB | done |
-| Cluster State NG | ~2KB | done |
+| Cluster State NG | -- | **nicht verdrahtet** -- kein Aufrufer, wird wegoptimiert |
 | Device Persistence | ~1KB | done |
-| OTA Updates (MQTT/HTTP/ESPHome/Zigbee) | ~5KB | done |
+| OTA Updates (MQTT/HTTP/ESPHome) | ~5KB | done |
+| Zigbee-OTA (`zb_ota.c`) | -- | **nicht verdrahtet** -- nie initialisiert |
 | Zigbee Groups | ~2KB | done |
-| Zigbee Scenes | ~2KB | done |
+| Zigbee Scenes | -- | **nicht verdrahtet** -- keine externen Referenzen |
 | Zigbee Direct Binding | ~2KB | done |
-| Zigbee Touchlink | ~2KB | done |
+| Zigbee Touchlink | -- | **nicht verdrahtet** -- nie initialisiert |
 | Network Topology/Heal | ~3KB | done |
 | Zigbee Availability Tracker | ~2KB | done |
 | WiFi/Zigbee Coexistence | ~1KB | done |
@@ -269,7 +313,12 @@ if (dev->capabilities & DEV_CAP_ON_OFF) { ... }
 const void *conv = device_registry_get_converter(dev->id);
 ```
 
-### Cluster State NG
+### Cluster State NG -- NICHT VERDRAHTET
+
+> Stand 2026-08-01: `cluster_state_ng.c` wird von **keiner** Stelle im Projekt
+> aufgerufen und komplett wegoptimiert. Die folgende Beschreibung dokumentiert,
+> was das Modul kann, nicht was laeuft. Der tatsaechliche State-Weg geht ueber
+> `device_registry_set_state()` / `_merge_state()` und den Event-Bus.
 ```c
 #include "zigbee/cluster_state_ng.h"
 
@@ -418,7 +467,7 @@ esphome_adapter_register_device(dev);  // auto-maps capabilities to entities
 - [x] Device Registry with PSRAM
 - [x] Memory Manager NG + Adaptive Memory
 - [x] HA Discovery NG (capability-based, conditional on MQTT primary)
-- [x] Cluster State NG (cJSON-based)
+- [~] Cluster State NG (cJSON-based) -- fertig, aber nirgends aufgerufen
 - [x] Device Persistence NG (auto-clear invalid, power_info)
 - [x] Buffer Pool Helpers (pool_json_print/free)
 - [x] Zigbee->Event migration (0 direct MQTT in zigbee/)
@@ -448,14 +497,16 @@ esphome_adapter_register_device(dev);  // auto-maps capabilities to entities
 - [x] Coordinator with auto-network formation
 - [x] Device Interview + Converter binding
 - [x] Availability Tracker (power-aware timeouts)
-- [x] Groups, Scenes, Direct Binding
-- [x] Touchlink (Hue device takeover)
+- [x] Groups, Direct Binding
+- [~] Scenes -- `zb_scenes.c` fertig, aber keine externen Referenzen
+- [~] Touchlink (Hue device takeover) -- fertig, aber nie initialisiert
 - [x] Network Topology + Heal
-- [x] Zigbee OTA
+- [~] Zigbee OTA -- siehe oben, nie initialisiert
 - [x] Tuya driver framework + Fingerbot
 
 ### Connectivity
-- [x] OTA Updates (MQTT/HTTP/ESPHome/Zigbee)
+- [x] OTA Updates (MQTT/HTTP/ESPHome)
+- [~] Zigbee-OTA -- `zb_ota.c` fertig, aber nie initialisiert
 - [x] WiFi Manager (5GHz auto, captive portal)
 - [x] WiFi/Zigbee Coexistence
 - [~] BLE Scanner (BLE 5.0 extended, Xiaomi, passive) -- Code fertig, aber
