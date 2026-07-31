@@ -8,6 +8,7 @@
 
 #include "wifi_manager.h"
 #include "wifi_config.h"
+#include "core/memory/memory_manager_ng.h"
 #include <string.h>
 #include <time.h>
 #include "freertos/FreeRTOS.h"
@@ -636,6 +637,59 @@ static void ip_event_handler(void *arg, esp_event_base_t event_base,
  *
  * Uses goto cleanup pattern for proper resource cleanup on failure.
  */
+#if CONFIG_WIFI_SCAN_ON_BOOT
+/**
+ * @brief Log every AP the radio can currently see
+ *
+ * Diagnostic aid for "it will not connect" cases. Association failures alone
+ * cannot distinguish between a wrong password, an AP on a channel this
+ * regulatory domain forbids, and an AP that is simply not visible — a scan
+ * can. Costs a couple of seconds of boot time, hence opt-in.
+ */
+static void log_visible_aps(void)
+{
+    wifi_scan_config_t scan_cfg = { .show_hidden = false };
+
+    ESP_LOGI(TAG, "Scanning for access points...");
+    esp_err_t ret = esp_wifi_scan_start(&scan_cfg, true);  /* blocking */
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Scan failed: %s", esp_err_to_name(ret));
+        return;
+    }
+
+    uint16_t count = 0;
+    esp_wifi_scan_get_ap_num(&count);
+    if (count == 0) {
+        ESP_LOGW(TAG, "Scan found no access points at all");
+        return;
+    }
+
+    /* PSRAM: a full record set is a few KB and must not land on the stack. */
+    wifi_ap_record_t *records =
+        mem_alloc(sizeof(wifi_ap_record_t) * count, MEM_CAP_PSRAM);
+    if (records == NULL) {
+        ESP_LOGW(TAG, "Scan found %u APs but the record buffer did not fit", count);
+        esp_wifi_clear_ap_list();
+        return;
+    }
+
+    uint16_t got = count;
+    if (esp_wifi_scan_get_ap_records(&got, records) == ESP_OK) {
+        ESP_LOGI(TAG, "Visible access points (%u):", got);
+        for (uint16_t i = 0; i < got; i++) {
+            const wifi_ap_record_t *ap = &records[i];
+            ESP_LOGI(TAG, "  ch%-3d %4d dBm  auth=%d  %s%s",
+                     ap->primary, ap->rssi, (int)ap->authmode,
+                     (const char *)ap->ssid,
+                     ap->primary >= WIFI_MGR_5GHZ_CHANNEL_MIN ? "  [5GHz]" : "");
+        }
+    }
+
+    mem_ng_free(records);
+    esp_wifi_clear_ap_list();
+}
+#endif /* CONFIG_WIFI_SCAN_ON_BOOT */
+
 esp_err_t wifi_manager_init(void)
 {
     esp_err_t ret = ESP_OK;
@@ -741,6 +795,30 @@ esp_err_t wifi_manager_init(void)
         goto cleanup;
     }
     wifi_started = true;
+
+    /* Set the regulatory domain explicitly.
+     *
+     * Without this call ESP-IDF stays on country "01" (world safe mode), which
+     * permits 2.4GHz channels 1-11 and no 5GHz channels at all. On a dual-band
+     * part that silently rules out the entire 5GHz band — which is the band we
+     * actually want, since 2.4GHz collides with Zigbee. */
+    esp_err_t cc_ret = esp_wifi_set_country_code(CONFIG_WIFI_COUNTRY_CODE, true);
+    if (cc_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to set country code '%s': %s",
+                 CONFIG_WIFI_COUNTRY_CODE, esp_err_to_name(cc_ret));
+    } else {
+        /* esp_wifi_get_country_code() writes 3 bytes: two country characters
+         * plus an environment character (' ', 'I' or 'O'). It does NOT
+         * null-terminate, so the buffer needs a fourth byte of its own. */
+        char cc[4] = {0};
+        if (esp_wifi_get_country_code(cc) == ESP_OK) {
+            ESP_LOGI(TAG, "Regulatory domain: %.2s (env '%c')", cc, cc[2]);
+        }
+    }
+
+#if CONFIG_WIFI_SCAN_ON_BOOT
+    log_visible_aps();
+#endif
 
 #ifdef CONFIG_WIFI_PREFER_5GHZ
     /* Use AUTO band mode with rssi_5g_adjustment to prefer 5GHz.

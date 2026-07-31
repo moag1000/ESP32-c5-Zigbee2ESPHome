@@ -25,6 +25,30 @@ menu "ESP32-C5 Zigbee2MQTT Gateway Configuration"
             help
                 WiFi scan method: 0=FAST, 1=ALL_CHANNEL.
 
+        config WIFI_COUNTRY_CODE
+            string "WiFi Country Code (regulatory domain)"
+            default "DE"
+            help
+                Two-letter regulatory domain, e.g. DE, AT, CH, US.
+
+                This matters more than it looks. If it is never set, ESP-IDF
+                stays on country "01" (world safe mode), which allows 2.4GHz
+                channels 1-11 and NO 5GHz channels. On a dual-band part that
+                quietly makes the whole 5GHz band unusable — including the band
+                you want, since 2.4GHz overlaps Zigbee.
+
+        config WIFI_SCAN_ON_BOOT
+            bool "Log visible access points at boot"
+            default n
+            help
+                Runs one blocking scan during WiFi init and logs every AP with
+                channel, RSSI and auth mode.
+
+                Useful when the gateway will not associate: a scan tells you
+                whether the AP is visible at all and on which channel, which an
+                association failure on its own does not. Costs a few seconds of
+                boot time, so leave it off in normal operation.
+
         config WIFI_PREFER_5GHZ
             bool "Prefer 5GHz Band"
             default y
