@@ -158,8 +158,24 @@ device_t *device_registry_add(device_id_t id, device_protocol_t proto);
  * @param[in] id Device identifier
  * @return Pointer to device, or NULL if not found
  *
- * @note The returned pointer is valid until the device is removed.
- *       Do not free the pointer.
+ * @note Do not free the pointer — it points into the registry's device array.
+ *
+ * @warning The mutex is only held for the lookup itself, not for your use of
+ *          the result. The pointer stays valid memory (the array is allocated
+ *          once and never freed), but the *contents* are not yours:
+ *
+ *          - device_registry_remove() zeroes the slot. Called from
+ *            zb_leave_helper.c on the Zigbee task.
+ *          - the slot is later reused for a different device, at which point
+ *            your pointer silently refers to that other device instead.
+ *
+ *          Holding one of these across a blocking call, an event dispatch or a
+ *          task switch is therefore unsafe. Either use it immediately, or
+ *          re-fetch by ID after any blocking operation. Snapshot IDs with
+ *          device_registry_snapshot_ids() when you need to walk the registry.
+ *
+ *          The proper fix is a handle-based API that returns values instead of
+ *          interior pointers; that is not done yet — there are ~127 call sites.
  */
 device_t *device_registry_get(device_id_t id);
 
@@ -238,8 +254,31 @@ esp_err_t device_registry_remove(device_id_t id);
  *
  * @note Do NOT free or delete the returned cJSON object. It is owned
  *       by the registry.
+ *
+ * @warning The returned pointer is only safe while no other task can replace
+ *          or remove this device's state. device_registry_set_state() and
+ *          device_registry_remove() both call cJSON_Delete() on the old
+ *          object, which turns any pointer another task is still holding into
+ *          a dangling one.
+ *
+ *          Only use this from the same task that owns state updates (the
+ *          Zigbee task). From event handlers, the ESPHome server or MQTT
+ *          callbacks, use device_registry_state_dup() instead.
  */
 cJSON *device_registry_get_state(device_id_t id);
+
+/**
+ * @brief Get an owned copy of a device's state JSON
+ *
+ * Duplicates the state while the registry mutex is held, so the caller ends up
+ * with an object nobody else can free underneath them. This is the safe
+ * variant for cross-task readers.
+ *
+ * @param[in] id Device identifier
+ * @return Newly allocated cJSON object, or NULL if the device has no state.
+ *         The caller owns it and must cJSON_Delete() it.
+ */
+cJSON *device_registry_state_dup(device_id_t id);
 
 /**
  * @brief Set device state JSON (takes ownership)
@@ -315,7 +354,9 @@ esp_err_t device_registry_merge_state(device_id_t id, cJSON *partial);
  * @param[in,out] ctx User context passed to callback
  *
  * @note Holds mutex for entire iteration. Keep callbacks fast.
- * @note Do not call other registry functions from callback (deadlock).
+ * @note The registry mutex is recursive, so calling other registry functions
+ *       from the callback is safe. Taking a DIFFERENT module's mutex from in
+ *       here is not — that is a real lock-order inversion.
  */
 void device_registry_iterate(device_iterator_fn fn, void *ctx);
 
@@ -335,7 +376,9 @@ void device_registry_iterate(device_iterator_fn fn, void *ctx);
  * @return Number of Zigbee devices iterated
  *
  * @note Holds mutex for entire iteration. Keep callbacks fast.
- * @note Do not call other registry functions from callback (deadlock).
+ * @note The registry mutex is recursive, so calling other registry functions
+ *       from the callback is safe. Taking a DIFFERENT module's mutex from in
+ *       here is not — that is a real lock-order inversion.
  */
 size_t device_registry_iterate_zigbee(device_iterator_fn fn, void *ctx);
 
@@ -369,6 +412,47 @@ size_t device_registry_iterate_zigbee(device_iterator_fn fn, void *ctx);
  *      - ESP_ERR_TIMEOUT if mutex acquisition fails
  */
 esp_err_t device_registry_collect_ids(device_id_t *ids, size_t max_ids, size_t *count);
+
+/**
+ * @brief Take a heap snapshot of all active device IDs
+ *
+ * Convenience wrapper around device_registry_collect_ids() that allocates the
+ * ID buffer from PSRAM instead of the caller's stack. A full ID array is 512
+ * bytes, which is a lot to put on a 4KB task stack.
+ *
+ * This is the correct way to walk the registry when the loop body does
+ * blocking work (NVS, MQTT, LittleFS). Do NOT use
+ * device_registry_count() together with device_registry_get_by_index():
+ * the count is read without the mutex and each get_by_index() takes it
+ * separately, so a concurrent add or remove shifts the dense indices and the
+ * loop silently skips or repeats devices.
+ *
+ * Devices may still disappear between the snapshot and the lookup — that is
+ * expected. device_registry_get() then returns NULL and the entry is skipped.
+ *
+ * @param[out] out_count Number of IDs in the returned array
+ * @return Array of device IDs, or NULL on allocation failure or empty registry.
+ *         Release with device_registry_release_ids().
+ *
+ * Typical usage:
+ * @code
+ *   size_t n = 0;
+ *   device_id_t *ids = device_registry_snapshot_ids(&n);
+ *   for (size_t i = 0; i < n; i++) {
+ *       device_t *dev = device_registry_get(ids[i]);
+ *       if (!dev) continue;
+ *       // blocking work is fine here
+ *   }
+ *   device_registry_release_ids(ids);
+ * @endcode
+ */
+device_id_t *device_registry_snapshot_ids(size_t *out_count);
+
+/**
+ * @brief Release an ID array returned by device_registry_snapshot_ids()
+ * @param[in] ids Array to free (NULL is allowed)
+ */
+void device_registry_release_ids(device_id_t *ids);
 
 /**
  * @brief Get number of devices in registry

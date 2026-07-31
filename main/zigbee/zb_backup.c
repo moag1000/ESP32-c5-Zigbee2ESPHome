@@ -1200,13 +1200,15 @@ static esp_err_t collect_devices(zb_backup_device_t *devices, uint16_t *count)
 
     *count = 0;
 
-    /* Iterate devices by index (avoids stack allocation) */
-    size_t dev_count = device_registry_count();
+    /* Snapshot the IDs, then look each one up. The ID array lives in PSRAM so
+     * this stays off the task stack. */
+    size_t dev_count = 0;
+    device_id_t *dev_ids = device_registry_snapshot_ids(&dev_count);
 
     for (size_t i = 0; i < dev_count && *count < ZB_BACKUP_MAX_DEVICES; i++) {
-        device_t *dev = device_registry_get_by_index(i);
-        if (dev == NULL) {
-            continue;
+        device_t *dev = device_registry_get(dev_ids[i]);
+        if (dev == NULL || dev->protocol != DEV_PROTOCOL_ZIGBEE) {
+            continue;  /* gone since the snapshot, or not a Zigbee device */
         }
 
         zb_backup_device_t *bkp_dev = &devices[*count];
@@ -1229,6 +1231,7 @@ static esp_err_t collect_devices(zb_backup_device_t *devices, uint16_t *count)
         (*count)++;
     }
 
+    device_registry_release_ids(dev_ids);
     return ESP_OK;
 }
 

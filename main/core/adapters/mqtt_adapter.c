@@ -252,9 +252,10 @@ static void republish_all_device_states(void)
             continue;
         }
 
-        cJSON *state = device_registry_get_state(dev->id);
+        cJSON *state = device_registry_state_dup(dev->id);
         if (state) {
             publish_device_state(dev, state);
+            cJSON_Delete(state);
         }
 
         bool online = (dev->availability == DEV_AVAIL_ONLINE);
@@ -309,9 +310,10 @@ static void handle_device_state_changed(event_type_t type, void *data, size_t da
      * The converter already merges state into device_registry before publishing
      * the event, so the registry always has the latest state.
      */
-    cJSON *state = device_registry_get_state(evt->ieee_addr);
+    cJSON *state = device_registry_state_dup(evt->ieee_addr);
     if (state) {
         publish_device_state(dev, state);
+        cJSON_Delete(state);
     } else {
         ESP_LOGD(TAG, "No state in registry for device 0x%016llX",
                  (unsigned long long)evt->ieee_addr);
@@ -354,9 +356,10 @@ static void handle_device_joined(event_type_t type, void *data, size_t data_size
     publish_device_availability(dev, true);
 
     /* Optionally publish initial state if available */
-    cJSON *state = device_registry_get_state(evt->ieee_addr);
+    cJSON *state = device_registry_state_dup(evt->ieee_addr);
     if (state) {
         publish_device_state(dev, state);
+        cJSON_Delete(state);
     }
 }
 

@@ -222,7 +222,9 @@ static void mqtt_message_callback(const char *topic, const char *data, size_t da
  *
  * @param portal_active true when portal is starting, false when stopping
  */
+#if CONFIG_BT_SCANNER_ENABLED
 static bool s_portal_stopped_ble = false;
+#endif
 static bool s_portal_stopped_esphome = false;
 
 static void portal_subsystem_callback(bool portal_active)
@@ -461,16 +463,20 @@ void app_main(void)
     /* Restore persisted Tuya driver bindings for all devices loaded from NVS.
      * This must happen AFTER drivers are registered and devices are loaded. */
     {
-        size_t dev_count = device_registry_count();
+        /* tuya_driver_restore_for_device() reads NVS, so snapshot the IDs
+         * rather than walking dense indices while devices can come and go. */
+        size_t dev_count = 0;
+        device_id_t *dev_ids = device_registry_snapshot_ids(&dev_count);
         int restored = 0;
         for (size_t i = 0; i < dev_count; i++) {
-            device_t *dev = device_registry_get_by_index(i);
+            device_t *dev = device_registry_get(dev_ids[i]);
             if (dev != NULL && dev->protocol == DEV_PROTOCOL_ZIGBEE) {
                 if (tuya_driver_restore_for_device(dev->id, dev->proto.zigbee.short_addr) == ESP_OK) {
                     restored++;
                 }
             }
         }
+        device_registry_release_ids(dev_ids);
         if (restored > 0) {
             ESP_LOGI(TAG_MAIN, "Restored %d Tuya driver binding(s) from NVS", restored);
         }
@@ -514,10 +520,14 @@ void app_main(void)
          * 1. Exact manufacturer+model match (zb_converter_find)
          * 2. Generic capability-based converter (conv_generic_for_capabilities)
          * 3. No converter — device gets entities from caps only (register_from_caps) */
-        size_t dev_count = device_registry_count();
+        /* zb_converter_find() reads the converter DB from LittleFS, so this
+         * loop must not run with the registry mutex held. Snapshot the IDs
+         * (PSRAM, not stack) and look each one up individually. */
+        size_t dev_count = 0;
+        device_id_t *dev_ids = device_registry_snapshot_ids(&dev_count);
         size_t bound = 0, generic_bound = 0, no_conv = 0;
         for (size_t i = 0; i < dev_count; i++) {
-            device_t *dev = device_registry_get_by_index(i);
+            device_t *dev = device_registry_get(dev_ids[i]);
             if (dev == NULL || !dev->in_use ||
                 dev->protocol != DEV_PROTOCOL_ZIGBEE ||
                 dev->proto.zigbee.converter != NULL) {
@@ -575,6 +585,7 @@ void app_main(void)
                          (unsigned long)dev->capabilities);
             }
         }
+        device_registry_release_ids(dev_ids);
         ESP_LOGI(TAG_MAIN, "Converter re-bind: %zu exact, %zu generic, %zu unmatched (of %zu devices)",
                  bound - generic_bound, generic_bound, no_conv, dev_count);
     } else {

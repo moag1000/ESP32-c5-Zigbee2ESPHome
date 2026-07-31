@@ -1835,15 +1835,16 @@ static void handle_device_state_changed(event_type_t type, void *data,
         state = cJSON_Parse(evt->json_state);
     }
 
-    /* Fall back to registry state if not in event */
+    /* Fall back to registry state if not in event.
+     *
+     * This handler runs on the event dispatcher task while the Zigbee task can
+     * be replacing the very same state object, so take an owned copy rather
+     * than the registry's live pointer — device_registry_set_state() would
+     * cJSON_Delete() it out from under us. The copy is freed by the common
+     * path below. */
     if (!state) {
-        state = device_registry_get_state(evt->ieee_addr);
-        if (state) {
-            /* Registry state is not owned by us, don't delete it */
-            update_entity_states(dev, state);
-            esphome_adapter_diagnostics_update(dev);
-            return;
-        } else {
+        state = device_registry_state_dup(evt->ieee_addr);
+        if (!state) {
             ESP_LOGW(TAG, "No state in registry for 0x%016llX",
                      (unsigned long long)evt->ieee_addr);
         }
@@ -2078,9 +2079,10 @@ static bool sync_device_iterator(device_t *dev, void *ctx)
     /* Get current state and update entities.
      * If no state in registry, pass an empty object so the fallback
      * logic in update_entity_states() still sets defaults. */
-    cJSON *state = device_registry_get_state(dev->id);
+    cJSON *state = device_registry_state_dup(dev->id);
     if (state) {
         update_entity_states(dev, state);
+        cJSON_Delete(state);
     } else {
         cJSON *empty = cJSON_CreateObject();
         if (empty) {
@@ -2288,9 +2290,10 @@ esp_err_t esphome_adapter_sync_device(device_id_t id)
 
     /* Update states.  If no state in registry, pass an empty object so the
      * fallback logic in update_entity_states() still sets defaults. */
-    cJSON *state = device_registry_get_state(id);
+    cJSON *state = device_registry_state_dup(id);
     if (state) {
         update_entity_states(dev, state);
+        cJSON_Delete(state);
     } else {
         cJSON *empty = cJSON_CreateObject();
         if (empty) {

@@ -391,14 +391,16 @@ size_t zb_diagnostics_get_network_map(zb_device_diagnostics_t *devices,
         return 0;
     }
 
-    /* Iterate devices by index (avoids stack allocation) */
-    size_t device_count = device_registry_count();
+    /* Snapshot the IDs, then look each one up. The ID array lives in PSRAM so
+     * this stays off the task stack. */
+    size_t device_count = 0;
+    device_id_t *dev_ids = device_registry_snapshot_ids(&device_count);
     size_t copied = 0;
 
     for (size_t i = 0; i < device_count && copied < max_count; i++) {
-        device_t *dev = device_registry_get_by_index(i);
-        if (dev == NULL) {
-            continue;
+        device_t *dev = device_registry_get(dev_ids[i]);
+        if (dev == NULL || dev->protocol != DEV_PROTOCOL_ZIGBEE) {
+            continue;  /* gone since the snapshot, or not a Zigbee device */
         }
 
         zb_device_diagnostics_t *dev_diag = &devices[copied];
@@ -415,6 +417,7 @@ size_t zb_diagnostics_get_network_map(zb_device_diagnostics_t *devices,
         copied++;
     }
 
+    device_registry_release_ids(dev_ids);
     return copied;
 }
 

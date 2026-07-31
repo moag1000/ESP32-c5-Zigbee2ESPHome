@@ -238,12 +238,15 @@ esp_err_t zb_topology_scan(zb_topology_scan_cb_t callback)
     s_pending_lqi[0].waiting = false;
     s_pending_lqi_count = 1;
 
-    /* Add routers to scan list (iterate using NG device registry) */
-    size_t device_count = device_registry_count();
+    /* Add routers to scan list. Snapshot the IDs first: we already hold
+     * s_mutex here, so we must not use device_registry_iterate*(), which would
+     * hold the registry mutex at the same time. */
+    size_t device_count = 0;
+    device_id_t *dev_ids = device_registry_snapshot_ids(&device_count);
     for (size_t i = 0; i < device_count && s_pending_lqi_count < ZB_TOPOLOGY_MAX_NODES; i++) {
-        device_t *dev = device_registry_get_by_index(i);
-        if (dev == NULL) {
-            continue;
+        device_t *dev = device_registry_get(dev_ids[i]);
+        if (dev == NULL || dev->protocol != DEV_PROTOCOL_ZIGBEE) {
+            continue;  /* gone since the snapshot, or not a Zigbee device */
         }
         /* Check if device is a router (has routing capability) */
         zb_topo_node_t *node = topology_find_node(dev->proto.zigbee.short_addr);
@@ -254,6 +257,7 @@ esp_err_t zb_topology_scan(zb_topology_scan_cb_t callback)
             s_pending_lqi_count++;
         }
     }
+    device_registry_release_ids(dev_ids);
 
     ESP_LOGI(TAG, "Scanning %d devices for neighbors", s_pending_lqi_count);
 

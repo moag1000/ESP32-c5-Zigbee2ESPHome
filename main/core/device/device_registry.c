@@ -52,6 +52,9 @@ static bool s_initialized = false;
 /** @brief Current device count */
 static size_t s_device_count = 0;
 
+/* Round-robin cursor for slot allocation, see find_free_slot() */
+static uint16_t s_alloc_cursor = 0;
+
 /** @brief Memory used tracking */
 static size_t s_memory_used = 0;
 
@@ -169,14 +172,25 @@ static void hash_remove(device_id_t id)
  * ============================================================================ */
 
 /**
- * @brief Find free slot in device array
+ * @brief Find free slot in device array (round-robin)
+ *
+ * Starts the search after the slot handed out last time instead of restarting
+ * at 0. Scanning from 0 meant that a device leaving slot 3 handed that exact
+ * slot to the next device that joined, so any device_t* another task was still
+ * holding silently started pointing at a different device. Cycling through the
+ * array first makes that window as wide as the table allows.
+ *
+ * This narrows the race, it does not remove it — see the pointer lifetime note
+ * in device_registry.h.
  *
  * @return Index of free slot, or DEVICE_REGISTRY_MAX_DEVICES if full
  */
 static uint16_t find_free_slot(void)
 {
-    for (uint16_t i = 0; i < DEVICE_REGISTRY_MAX_DEVICES; i++) {
+    for (uint16_t n = 0; n < DEVICE_REGISTRY_MAX_DEVICES; n++) {
+        uint16_t i = (uint16_t)((s_alloc_cursor + n) % DEVICE_REGISTRY_MAX_DEVICES);
         if (!s_devices[i].in_use) {
+            s_alloc_cursor = (uint16_t)((i + 1) % DEVICE_REGISTRY_MAX_DEVICES);
             return i;
         }
     }
@@ -639,6 +653,33 @@ cJSON *device_registry_get_state(device_id_t id)
     return result;
 }
 
+cJSON *device_registry_state_dup(device_id_t id)
+{
+    if (!s_initialized || id == 0) {
+        return NULL;
+    }
+
+    if (!mutex_acquire()) {
+        return NULL;
+    }
+
+    cJSON *copy = NULL;
+    uint32_t hash_slot;
+
+    /* Duplicate under the mutex: set_state()/remove() cannot delete the
+     * original mid-copy, so the caller gets an object of their own. */
+    if (hash_find_slot(id, &hash_slot)) {
+        uint16_t idx = s_hash_table[hash_slot];
+        if (idx < DEVICE_REGISTRY_MAX_DEVICES && s_devices[idx].in_use &&
+            s_device_states[idx] != NULL) {
+            copy = cJSON_Duplicate(s_device_states[idx], true);
+        }
+    }
+
+    mutex_release();
+    return copy;
+}
+
 esp_err_t device_registry_set_state(device_id_t id, cJSON *state)
 {
     if (!s_initialized) {
@@ -815,6 +856,41 @@ void device_registry_iterate(device_iterator_fn fn, void *ctx)
     }
 
     mutex_release();
+}
+
+device_id_t *device_registry_snapshot_ids(size_t *out_count)
+{
+    if (out_count == NULL) {
+        return NULL;
+    }
+    *out_count = 0;
+
+    if (!s_initialized) {
+        return NULL;
+    }
+
+    device_id_t *ids = (device_id_t *)mem_alloc(
+        sizeof(device_id_t) * DEVICE_REGISTRY_MAX_DEVICES, MEM_CAP_PSRAM);
+    if (ids == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate device ID snapshot");
+        return NULL;
+    }
+
+    size_t n = 0;
+    if (device_registry_collect_ids(ids, DEVICE_REGISTRY_MAX_DEVICES, &n) != ESP_OK || n == 0) {
+        mem_ng_free(ids);
+        return NULL;
+    }
+
+    *out_count = n;
+    return ids;
+}
+
+void device_registry_release_ids(device_id_t *ids)
+{
+    if (ids != NULL) {
+        mem_ng_free(ids);
+    }
 }
 
 esp_err_t device_registry_collect_ids(device_id_t *ids, size_t max_ids, size_t *count)

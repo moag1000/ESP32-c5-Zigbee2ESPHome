@@ -442,18 +442,18 @@ esp_err_t state_persistence_load_and_publish(void)
         return ESP_ERR_INVALID_ARG;
     }
 
-    /* Build a lookup map: iterate all registered devices using the safe
-     * copy-by-index pattern, convert each IEEE address to a hex key, and
-     * check if a matching entry exists in the loaded JSON.  This avoids
-     * the thread-unsafe zb_device_get_by_ieee() which returns a raw pointer
-     * that can become invalid after the device mutex is released. */
+    /* Take a snapshot of the device IDs, then look each one up. The loop body
+     * publishes over MQTT, so it must not run with the registry mutex held —
+     * and it must not use count()+get_by_index() either, because that reads
+     * the count unlocked and re-derives dense indices on every call. */
     size_t published_count = 0;
-    size_t device_count = device_registry_count();
+    size_t device_count = 0;
+    device_id_t *dev_ids = device_registry_snapshot_ids(&device_count);
 
     for (size_t i = 0; i < device_count; i++) {
-        device_t *dev = device_registry_get_by_index(i);
+        device_t *dev = device_registry_get(dev_ids[i]);
         if (dev == NULL) {
-            continue;
+            continue;  /* removed since the snapshot */
         }
 
         /* Convert this device's IEEE address to a hex key */
@@ -558,6 +558,7 @@ esp_err_t state_persistence_load_and_publish(void)
         }
     }
 
+    device_registry_release_ids(dev_ids);
     cJSON_Delete(root);
 
     ESP_LOGI(TAG, "Published cached state for %zu devices", published_count);
