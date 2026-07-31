@@ -124,9 +124,23 @@ CONFIG_WIFI_AUTO_BAND_SWITCH=y
 # Force 5GHz-only mode to completely avoid 2.4GHz/Zigbee interference
 # Set to y if your router supports 5GHz and has stable signal
 CONFIG_WIFI_5GHZ_ONLY=n
-# Disable Protected Management Frames (PMF) to avoid SA Query timeout
-# PMF is part of WPA3 but can be used with WPA2 - causes issues with tri-radio
-CONFIG_WIFI_DISABLE_PMF=y
+# Protected Management Frames / WPA3.
+#
+# This used to be disabled to dodge SA Query timeouts (disconnect reason 209)
+# under tri-radio load. BLE is gone now, so it is WiFi and Zigbee sharing the
+# radio rather than three stacks, and an AP that requires PMF cannot be joined
+# at all without it — the symptom is repeated disconnect reason 2 (AUTH_EXPIRE)
+# and 4 (ASSOC_EXPIRE) while the AP is otherwise found normally.
+#
+# With this off, wifi_manager.c uses WIFI_AUTH_WPA2_WPA3_PSK,
+# WPA3_SAE_PWE_BOTH and pmf_cfg.capable = true, so WPA2-only APs still work.
+# If SA Query timeouts reappear, set this back to y — but then a WPA3/PMF
+# required network is out of reach.
+CONFIG_WIFI_DISABLE_PMF=n
+
+# SAE is what actually implements WPA3-Personal. Without it the settings above
+# are inert: the supplicant simply has no WPA3 handshake compiled in.
+CONFIG_ESP_WIFI_ENABLE_WPA3_SAE=y
 
 # Captive Portal - start AP for WiFi config if connection fails
 CONFIG_WIFI_CAPTIVE_PORTAL_ENABLE=y
