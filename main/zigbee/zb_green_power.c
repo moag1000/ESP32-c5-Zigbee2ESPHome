@@ -1461,11 +1461,24 @@ esp_err_t zb_gp_verify_security(const zb_gp_device_t *device,
         }
     }
 
-    /* TODO: Implement actual MIC verification using AES-CCM
-     * This would require the full frame data and crypto operations */
-    (void)key;  /* Silence unused warning for now */
+    /* MIC verification is NOT implemented. It needs AES-CCM* over the full
+     * frame, which this module does not currently have access to.
+     *
+     * This must not return ESP_OK: for any security level that mandates a MIC,
+     * claiming success here would let a forged Green Power frame through, and
+     * the caller has no way to tell that nothing was checked. Fail closed. */
+    (void)key;
 
-    ESP_LOGD(TAG, "Security verification passed (MIC check not yet implemented)");
+    if (device->security_level >= ZB_GP_SECURITY_LEVEL_FULL_COUNTER_MIC) {
+        ESP_LOGW(TAG, "Rejecting GP frame: MIC verification not implemented "
+                      "(security_level=%d)", (int)device->security_level);
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+
+    /* Below FULL_COUNTER_MIC no MIC is required; the replay check above is
+     * the whole of the contract. */
+    ESP_LOGD(TAG, "GP frame accepted (security_level=%d, no MIC required)",
+             (int)device->security_level);
     return ESP_OK;
 }
 

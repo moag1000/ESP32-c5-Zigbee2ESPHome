@@ -23,7 +23,8 @@
 #include "zb_alarms.h"
 #include "zb_demand_response.h"
 #include "zb_tuya.h"
-#include "zb_green_power.h"
+/* zb_green_power.h intentionally not included — Green Power is opt-in via
+ * CONFIG_ZB_GREEN_POWER_ENABLE and this file never called into it. */
 #include "zigbee/zb_diagnostics.h"
 #include "zigbee/zb_time_server.h"
 #include "zigbee/zb_poll_control.h"
@@ -802,18 +803,18 @@ static esp_err_t configure_coordinator(void)
                                            ESP_ZB_ZCL_CLUSTER_CLIENT_ROLE);
 
     esp_zb_endpoint_config_t ep242_config = {
-        .endpoint = ZB_GP_ENDPOINT,
+        .endpoint = ZB_TUYA_GATEWAY_ENDPOINT,
         .app_profile_id = ESP_ZB_AF_HA_PROFILE_ID,
         .app_device_id = ESP_ZB_HA_HOME_GATEWAY_DEVICE_ID,
         .app_device_version = 0
     };
     esp_zb_ep_list_add_ep(esp_zb_ep_list, ep242_cluster_list, ep242_config);
-    ESP_LOGI(TAG, "Added Tuya endpoint (EP=%d) with cluster 0x%04X", ZB_GP_ENDPOINT, ZB_TUYA_CLUSTER_ID);
+    ESP_LOGI(TAG, "Added Tuya endpoint (EP=%d) with cluster 0x%04X", ZB_TUYA_GATEWAY_ENDPOINT, ZB_TUYA_CLUSTER_ID);
 
     /* Register device */
     esp_zb_device_register(esp_zb_ep_list);
 
-    ESP_LOGI(TAG, "Coordinator endpoints configured (EP=%d, EP=%d)", ZB_COORDINATOR_ENDPOINT, ZB_GP_ENDPOINT);
+    ESP_LOGI(TAG, "Coordinator endpoints configured (EP=%d, EP=%d)", ZB_COORDINATOR_ENDPOINT, ZB_TUYA_GATEWAY_ENDPOINT);
     return ESP_OK;
 }
 

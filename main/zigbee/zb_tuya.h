@@ -67,6 +67,15 @@ extern "C" {
 /** @brief Tuya private cluster ID */
 #define ZB_TUYA_CLUSTER_ID              0xEF00
 
+/**
+ * @brief Endpoint the gateway exposes for Tuya devices (242 / 0xF2)
+ *
+ * Some Tuya devices inspect the source endpoint and only answer on 242.
+ * This is numerically the same as the Zigbee Green Power endpoint, but it is
+ * used here purely for Tuya — do not pull in the Green Power header for it.
+ */
+#define ZB_TUYA_GATEWAY_ENDPOINT        242
+
 /** @brief Maximum number of Tuya devices to track state for */
 #define ZB_TUYA_MAX_DEVICES             10
 

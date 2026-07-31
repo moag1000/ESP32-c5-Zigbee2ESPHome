@@ -21,8 +21,6 @@ set(COMPONENT_SRCS
     "zigbee/zb_topology.c"
     "zigbee/zb_touchlink.c"
     "zigbee/zb_ota.c"
-    "zigbee/zb_multi_pan.c"
-    "zigbee/zb_green_power.c"
     "zigbee/zb_availability.c"
     "zigbee/zb_rejoin_helper.c"
     "zigbee/zb_leave_helper.c"
@@ -216,6 +214,23 @@ endif()
 # mmWave presence sensor (UART-connected S3KM1110)
 if(CONFIG_MMWAVE_SENSOR_ENABLE)
     list(APPEND COMPONENT_SRCS "mmwave/mmwave_sensor.c")
+endif()
+
+# Green Power and Multi-PAN sit in the tree but were never wired up: neither
+# zb_gp_init() nor zb_multi_pan_init() has a caller anywhere. They were compiled
+# and linked regardless, costing flash for nothing. Multi-PAN even had a Kconfig
+# flag already (CONFIG_ZIGBEE_MULTI_PAN_ENABLED, default n) that the build
+# simply ignored.
+#
+# Green Power additionally has no MIC verification (see zb_gp_verify_security);
+# frames at FULL_COUNTER_MIC or above are rejected outright, so enabling this
+# will not give you working secured Green Power devices yet.
+if(CONFIG_ZB_GREEN_POWER_ENABLE)
+    list(APPEND COMPONENT_SRCS "zigbee/zb_green_power.c")
+endif()
+
+if(CONFIG_ZIGBEE_MULTI_PAN_ENABLED)
+    list(APPEND COMPONENT_SRCS "zigbee/zb_multi_pan.c")
 endif()
 
 idf_component_register(

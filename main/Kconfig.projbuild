@@ -919,6 +919,26 @@ menu "ESP32-C5 Zigbee2MQTT Gateway Configuration"
 
     endmenu
 
+    menu "Green Power (EXPERIMENTAL, INCOMPLETE)"
+        config ZB_GREEN_POWER_ENABLE
+            bool "Enable Zigbee Green Power"
+            default n
+            help
+                EXPERIMENTAL and INCOMPLETE. Compiles zb_green_power.c into the
+                firmware.
+
+                Two things are missing, so do not expect working secured Green
+                Power devices:
+                - MIC verification (AES-CCM*) is not implemented. Frames whose
+                  security level is FULL_COUNTER_MIC or higher are rejected.
+                - Key derivation is missing for NWK_KEY_DERIVED_GP_GROUP and
+                  DERIVED_INDIVIDUAL_GPD; both return ESP_ERR_NOT_SUPPORTED.
+
+                Note also that zb_gp_init() currently has no caller, so turning
+                this on adds code to the image without activating anything.
+
+    endmenu
+
     menu "Multi-PAN Configuration (EXPERIMENTAL)"
         config ZIGBEE_MULTI_PAN_ENABLED
             bool "Enable Multi-PAN Support"

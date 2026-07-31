@@ -25,7 +25,9 @@ static const char *TAG = "ADAPTIVE_MEM";
 static memory_status_t s_current_mode = MEMORY_STATUS_NORMAL;
 
 /* Track if we've modified system settings */
+#if CONFIG_BT_SCANNER_ENABLED
 static bool s_ble_interval_modified = false;
+#endif
 static bool s_ha_discovery_paused = false;
 
 /**
