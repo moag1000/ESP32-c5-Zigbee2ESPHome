@@ -435,11 +435,18 @@ esp_err_t zb_interview_start(uint64_t ieee_addr, uint16_t short_addr)
                          inferred, device->model);
             }
         }
-        /* Find converter for this device */
-        const zb_converter_def_t *conv = zb_converter_find(device->manufacturer, device->model);
+        /* zb_converter_find() reads the converter DB from LittleFS and blocks.
+         * Copy the keys out first — a remove from the MQTT or ESPHome task can
+         * invalidate `device` while we are in flash. */
+        char mfr_key[sizeof(device->manufacturer)];
+        char model_key[sizeof(device->model)];
+        snprintf(mfr_key, sizeof(mfr_key), "%s", device->manufacturer);
+        snprintf(model_key, sizeof(model_key), "%s", device->model);
+
+        const zb_converter_def_t *conv = zb_converter_find(mfr_key, model_key);
         if (conv != NULL) {
             ESP_LOGI(TAG, "Skipping ZDO interview for sleepy device %s (using converter clusters)",
-                     device->model);
+                     model_key);
 
             /* Extract clusters from converter's from_zigbee definitions */
             for (uint8_t i = 0; i < conv->from_zigbee_count; i++) {

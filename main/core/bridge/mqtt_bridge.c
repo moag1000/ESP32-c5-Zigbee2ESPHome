@@ -542,6 +542,8 @@ esp_err_t mqtt_bridge_on_device_join(uint16_t short_addr)
      * task removes the device — see the warning on device_registry_get(). */
     const device_id_t dev_id = device->id;
     const uint8_t dev_endpoint = device->proto.zigbee.endpoint;
+    char dev_name[sizeof(device->friendly_name)];
+    snprintf(dev_name, sizeof(dev_name), "%s", device->friendly_name);
 
     /* Publish availability: online via event bus */
     evt_device_state_t avail_evt = {
@@ -573,7 +575,7 @@ esp_err_t mqtt_bridge_on_device_join(uint16_t short_addr)
      * with UNKNOWN device type causes duplicate entities in Home Assistant when
      * the interview later publishes the correct type. See zb_interview.c line ~1273 */
 
-    ESP_LOGI(TAG, "Published join notifications for device: %s", device->friendly_name);
+    ESP_LOGI(TAG, "Published join notifications for device: %s", dev_name);
     return ESP_OK;
 }
 

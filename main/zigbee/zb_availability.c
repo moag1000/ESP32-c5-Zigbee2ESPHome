@@ -562,14 +562,19 @@ esp_err_t zb_availability_publish_state(uint16_t short_addr)
         return ESP_ERR_NOT_FOUND;
     }
 
-    /* Get IEEE address from device */
-    uint64_t ieee_addr = device->id;
+    /* Copy everything needed before publishing: event_publish() can block on
+     * the queue and yield, and a remove from the MQTT or ESPHome task would
+     * invalidate this pointer. */
+    const uint64_t ieee_addr = device->id;
+    const uint8_t endpoint = device->proto.zigbee.endpoint;
+    char friendly_name[sizeof(device->friendly_name)];
+    snprintf(friendly_name, sizeof(friendly_name), "%s", device->friendly_name);
 
     /* Publish via event bus - handler reads state from device_registry */
     evt_device_state_t evt = {
         .ieee_addr = ieee_addr,
         .short_addr = short_addr,
-        .endpoint = device->proto.zigbee.endpoint,
+        .endpoint = endpoint,
         .cluster_id = 0,  /* Availability is not cluster-specific */
         .attr_id = 0,
         .json_state = NULL,
@@ -580,8 +585,7 @@ esp_err_t zb_availability_publish_state(uint16_t short_addr)
         ESP_LOGE(TAG, "Failed to publish availability event for 0x%04X: %s",
                  short_addr, esp_err_to_name(ret));
     } else {
-        ESP_LOGI(TAG, "Published availability event for %s",
-                 device->friendly_name);
+        ESP_LOGI(TAG, "Published availability event for %s", friendly_name);
     }
 
     return ret;
