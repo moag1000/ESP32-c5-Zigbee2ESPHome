@@ -18,6 +18,7 @@
 #include "core/events/event_bus.h"
 #include "core/events/event_data.h"
 #include "esp_log.h"
+#include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "core/gateway_timeouts.h"
@@ -376,8 +377,22 @@ static const zb_converter_def_t *auto_rebind_converter(uint16_t short_addr,
     const zb_converter_def_t *def = NULL;
 
     if (dev->model[0] != '\0') {
-        const zb_converter_def_t *conv = zb_converter_find(
-            dev->manufacturer, dev->model);
+        /* zb_converter_find() reads the converter DB from LittleFS and blocks.
+         * Copy the lookup keys out first, then re-fetch the device afterwards:
+         * the registry pointer is only good until the Zigbee task removes the
+         * device, and this path writes back through it. */
+        char manufacturer[sizeof(dev->manufacturer)];
+        char model[sizeof(dev->model)];
+        snprintf(manufacturer, sizeof(manufacturer), "%s", dev->manufacturer);
+        snprintf(model, sizeof(model), "%s", dev->model);
+
+        const zb_converter_def_t *conv = zb_converter_find(manufacturer, model);
+
+        dev = device_registry_get_by_short_addr(short_addr);
+        if (dev == NULL) {
+            return NULL;  /* gone while we were reading the DB */
+        }
+
         if (conv != NULL) {
             zb_converter_bind(short_addr, conv);
             dev->proto.zigbee.converter = (void *)conv;

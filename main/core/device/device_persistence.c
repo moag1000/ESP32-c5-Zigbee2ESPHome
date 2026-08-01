@@ -633,16 +633,21 @@ esp_err_t device_persistence_save_all(void)
         persisted_device_t persisted;
         device_to_persisted(dev, &persisted);
 
+        /* Everything needed past this point is now copied out. nvs_set_blob()
+         * writes flash and blocks, and the registry pointer is only valid
+         * until the Zigbee task removes the device. */
+        const device_id_t dev_id = dev->id;
+
         char key[8];
         format_device_key(ctx.count, key, sizeof(key));
 
         esp_err_t save_ret = nvs_set_blob(ctx.nvs, key, &persisted, sizeof(persisted_device_t));
         if (save_ret != ESP_OK) {
             ESP_LOGW(TAG, "Failed to save device 0x%016llx at %s: %s",
-                     (unsigned long long)dev->id, key, esp_err_to_name(save_ret));
+                     (unsigned long long)dev_id, key, esp_err_to_name(save_ret));
             ctx.failed++;
         } else {
-            ctx.id_list[ctx.count] = dev->id;
+            ctx.id_list[ctx.count] = dev_id;
             ctx.count++;
             ctx.saved++;
         }

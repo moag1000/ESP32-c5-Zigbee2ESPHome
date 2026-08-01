@@ -537,11 +537,17 @@ esp_err_t mqtt_bridge_on_device_join(uint16_t short_addr)
         return ESP_ERR_NOT_FOUND;
     }
 
+    /* Copy what we need before publishing. event_publish() can block on the
+     * queue and yield, and the registry pointer is only good until the Zigbee
+     * task removes the device — see the warning on device_registry_get(). */
+    const device_id_t dev_id = device->id;
+    const uint8_t dev_endpoint = device->proto.zigbee.endpoint;
+
     /* Publish availability: online via event bus */
     evt_device_state_t avail_evt = {
-        .ieee_addr = device->id,
+        .ieee_addr = dev_id,
         .short_addr = short_addr,
-        .endpoint = device->proto.zigbee.endpoint,
+        .endpoint = dev_endpoint,
         .cluster_id = 0,
         .attr_id = 0,
         .json_state = NULL,
@@ -550,9 +556,9 @@ esp_err_t mqtt_bridge_on_device_join(uint16_t short_addr)
 
     /* Publish initial state via event bus - handler reads from device_registry_get_state() */
     evt_device_state_t state_evt = {
-        .ieee_addr = device->id,
+        .ieee_addr = dev_id,
         .short_addr = short_addr,
-        .endpoint = device->proto.zigbee.endpoint,
+        .endpoint = dev_endpoint,
         .cluster_id = 0,
         .attr_id = 0,
         .json_state = NULL,

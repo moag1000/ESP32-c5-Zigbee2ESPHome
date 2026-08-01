@@ -8,6 +8,7 @@
 
 #include "zb_network.h"
 #include "zb_constants.h"
+#include "core/device/device_registry.h"
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "nvs_flash.h"
@@ -102,6 +103,20 @@ esp_err_t zb_network_get_info(zb_network_info_t *info)
     }
 
     memcpy(info, &s_network_info, sizeof(zb_network_info_t));
+
+    /* Take the device count from the registry rather than the cached counter.
+     *
+     * s_network_info.device_count is only written by zb_network_set_device_count(),
+     * which is called from the join and leave paths. It starts at zero and is
+     * never seeded, so after a reboot it reported 0 devices until something
+     * happened to join or leave — while the registry had already restored the
+     * persisted ones. Two counters for one fact, and they drifted apart:
+     * bridge/info published 0 while bridge/state published the registry value.
+     *
+     * The registry is the single source of truth for how many devices exist,
+     * so derive it here and every consumer of zb_network_get_info() agrees. */
+    info->device_count = (uint8_t)device_registry_count();
+
     return ESP_OK;
 }
 
@@ -243,6 +258,10 @@ esp_err_t zb_network_set_permit_join(bool permit_join)
     return ESP_OK;
 }
 
+/* Superseded: zb_network_get_info() derives device_count from the registry, so
+ * the value written here is overwritten on the next read. Kept because the join
+ * and leave paths still call it and the cached field is harmless, but nothing
+ * should depend on it. Prefer device_registry_count(). */
 esp_err_t zb_network_set_device_count(uint8_t count)
 {
     if (!s_network_initialized) {
