@@ -19,3 +19,12 @@ CONFIG_SPIRAM_SPEED_80M=y
 
 # Keep the C standard identical to the gateway build.
 CONFIG_LIBC_PICOLIBC_NEWLIB_COMPATIBILITY=y
+
+# The Zigbee SDK only exposes its headers when ZB_ENABLED is set — its
+# CMakeLists guards include_dirs on it. zb_diagnostics.c needs those headers
+# (zb_device_handler_types.h includes esp_zigbee_core.h) and calls
+# esp_zb_zcl_read_attr_cmd_req(). Same role as the gateway so the tests build
+# against the same library variant.
+CONFIG_ZB_ENABLED=y
+CONFIG_ZB_ZCZR=y
+CONFIG_ZB_RADIO_NATIVE=y

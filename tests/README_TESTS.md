@@ -24,11 +24,44 @@ in `main/CMakeLists.txt` instead.
 
 ## What is green
 
-| Suite | State |
-|---|---|
-| Version Management | **builds and links** |
+41 tests, all passing on hardware (ESP32-C5, ESP-IDF v6.0.2).
 
-That is genuinely all, and the reason is in the next section.
+| Suite | Tests | Covers |
+|---|---|---|
+| Version Management | 17 | version strings and comparison |
+| Device Registry | 15 | the concurrency-safety contract — snapshot_ids, state_dup ownership, slot recycling |
+| Zigbee Diagnostics | 9 | `zb_diagnostics_get_network_map()` — ID snapshot iteration and the protocol filter |
+
+The registry and diagnostics suites exist specifically to pin down behaviour
+that was changed without runtime cover:
+
+- `state_dup_survives_device_removal` is the regression test for the
+  use-after-free. `device_registry_remove()` calls `cJSON_Delete()` on the
+  state, so a borrowed pointer would be reading freed heap.
+- `freed_slot_not_reused_immediately` fails if slot allocation goes back to
+  scanning from index 0, which handed a removed device's slot straight to the
+  next one that joined.
+- `skips_non_zigbee_devices` fails if the `dev->protocol` check is dropped
+  again. `device_t::proto` is a union, so reading the Zigbee arm for a BLE
+  device reinterprets BLE fields.
+
+### Safety properties of this test app
+
+Two things were deliberate, and both matter if you touch the harness:
+
+- **It shares the gateway's partition layout** (`../partitions.csv`, 16MB).
+  The stock single-app 2MB table would rewrite the partition table with a
+  different geometry and move NVS, `zb_storage` and the LittleFS converter
+  database out from under the gateway. As configured, the test binary just
+  occupies `ota_0`. Verified by flashing the tests and restoring the gateway:
+  both pairings, the Tuya binding and the 5383-device converter DB survived.
+- **It never erases NVS.** `run_all_tests.c` does *not* do the usual
+  "on ESP_ERR_NVS_NO_FREE_PAGES, erase and retry" dance, because on this layout
+  that would wipe the real pairings and WiFi credentials. It warns and
+  continues instead.
+
+Restore the gateway after a test run:
+`idf.py -p <port> flash` from the project root.
 
 ## What is retired
 

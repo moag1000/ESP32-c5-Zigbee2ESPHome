@@ -41,6 +41,9 @@ extern test_stats_t run_version_tests(void);
 #ifdef TEST_SUITE_DEVICE_REGISTRY
 extern test_stats_t run_device_registry_tests(void);
 #endif
+#ifdef TEST_SUITE_ZB_DIAGNOSTICS
+extern test_stats_t run_zb_diagnostics_tests(void);
+#endif
 #ifdef TEST_SUITE_MQTT_TOPICS
 extern test_stats_t run_mqtt_topics_tests(void);
 #endif
@@ -138,6 +141,9 @@ static void test_runner_task(void *pvParameters)
 #ifdef TEST_SUITE_DEVICE_REGISTRY
     RUN_SUITE(run_device_registry_tests, "Device Registry");
 #endif
+#ifdef TEST_SUITE_ZB_DIAGNOSTICS
+    RUN_SUITE(run_zb_diagnostics_tests, "Zigbee Diagnostics");
+#endif
 #ifdef TEST_SUITE_MQTT_TOPICS
     RUN_SUITE(run_mqtt_topics_tests, "MQTT Topics");
 #endif
@@ -206,13 +212,22 @@ void app_main(void)
 {
     ESP_LOGI(TAG, "Initializing test environment...");
 
-    /* Initialize NVS */
+    /* Initialize NVS.
+     *
+     * Deliberately NOT the usual "on NO_FREE_PAGES, erase and retry" dance.
+     * This test binary shares the gateway's flash layout, so nvs_flash_erase()
+     * here would wipe the real NVS partition — device pairings, WiFi
+     * credentials, Tuya bindings, the lot — just because someone ran the tests.
+     * Losing that to a test run is not an acceptable trade.
+     *
+     * If NVS is genuinely unusable, say so and carry on: none of the suites
+     * currently need it, and a test run must never be destructive. */
     esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        ret = nvs_flash_init();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "NVS unavailable (%s) — continuing without it. "
+                      "NOT erasing: this binary shares the gateway's partitions.",
+                 esp_err_to_name(ret));
     }
-    ESP_ERROR_CHECK(ret);
 
     ESP_LOGI(TAG, "Starting test runner...");
 

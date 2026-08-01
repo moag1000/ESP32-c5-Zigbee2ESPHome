@@ -22,6 +22,14 @@ set(TEST_SRCS
     "../../main/core/device/device_registry.c"
     "../../main/core/device/unified_device.c"
     "../../main/core/memory/memory_manager_ng.c"
+
+    # zb_diagnostics needs the event bus, and event_bus.c calls exactly one
+    # perf_metrics symbol. The real perf_metrics.c would pull in task_manager,
+    # gateway_mqtt and mqtt_helpers, so it is stubbed instead.
+    "../unit/test_zb_diagnostics.c"
+    "../../main/zigbee/zb_diagnostics.c"
+    "../../main/core/events/event_bus.c"
+    "../mocks/mock_perf_metrics.c"
 )
 
 idf_component_register(
@@ -33,11 +41,15 @@ idf_component_register(
         "../../main/core"
         "../../main/core/device"
         "../../main/core/memory"
+        "../../main/core/events"
+        "../../main/core/monitoring"
         "../../main/utils"
+        "../../main/zigbee"
     REQUIRES
         nvs_flash
         esp_timer
         espressif__cjson
+        espressif__esp-zigbee-lib
 )
 
 target_compile_options(${COMPONENT_LIB} PRIVATE
@@ -53,4 +65,5 @@ target_compile_definitions(${COMPONENT_LIB} PRIVATE
     # otherwise the build fails at link time with an undefined reference.
     TEST_SUITE_VERSION=1
     TEST_SUITE_DEVICE_REGISTRY=1
+    TEST_SUITE_ZB_DIAGNOSTICS=1
 )

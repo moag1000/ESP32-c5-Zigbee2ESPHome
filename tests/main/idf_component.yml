@@ -7,3 +7,12 @@ dependencies:
 
   espressif/cjson:
     version: "^1.0"
+
+  ## zb_diagnostics.c includes zb_device_handler_types.h, which pulls in
+  ## esp_zigbee_core.h for its types, and calls esp_zb_zcl_read_attr_cmd_req().
+  ## Same versions as the gateway so the tests build against the same SDK.
+  espressif/esp-zigbee-lib:
+    version: "^1.6.8"
+
+  espressif/esp-zboss-lib:
+    version: "^1.6.4"
