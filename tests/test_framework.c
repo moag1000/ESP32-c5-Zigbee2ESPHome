@@ -150,7 +150,7 @@ void test_assert_not_equal_impl(const char *file, int line, int expected, int ac
 /**
  * @brief Assert NULL implementation
  */
-void test_assert_null_impl(const char *file, int line, const char *expr, void *ptr)
+void test_assert_null_impl(const char *file, int line, const char *expr, const void *ptr)
 {
     if (ptr != NULL) {
         ESP_LOGE(TAG, "Assertion failed: %s is not NULL", expr);
@@ -162,7 +162,7 @@ void test_assert_null_impl(const char *file, int line, const char *expr, void *p
 /**
  * @brief Assert NOT NULL implementation
  */
-void test_assert_not_null_impl(const char *file, int line, const char *expr, void *ptr)
+void test_assert_not_null_impl(const char *file, int line, const char *expr, const void *ptr)
 {
     if (ptr == NULL) {
         ESP_LOGE(TAG, "Assertion failed: %s is NULL", expr);

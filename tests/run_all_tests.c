@@ -38,6 +38,9 @@ extern test_stats_t run_json_utils_tests(void);
 #ifdef TEST_SUITE_VERSION
 extern test_stats_t run_version_tests(void);
 #endif
+#ifdef TEST_SUITE_DEVICE_REGISTRY
+extern test_stats_t run_device_registry_tests(void);
+#endif
 #ifdef TEST_SUITE_MQTT_TOPICS
 extern test_stats_t run_mqtt_topics_tests(void);
 #endif
@@ -131,6 +134,9 @@ static void test_runner_task(void *pvParameters)
 #endif
 #ifdef TEST_SUITE_VERSION
     RUN_SUITE(run_version_tests, "Version Management");
+#endif
+#ifdef TEST_SUITE_DEVICE_REGISTRY
+    RUN_SUITE(run_device_registry_tests, "Device Registry");
 #endif
 #ifdef TEST_SUITE_MQTT_TOPICS
     RUN_SUITE(run_mqtt_topics_tests, "MQTT Topics");

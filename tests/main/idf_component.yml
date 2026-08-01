@@ -1,0 +1,9 @@
+## Dependencies for the test application.
+## Kept in step with ../../main/idf_component.yml for the modules under test —
+## device_registry.h includes cJSON.h, which moved out of ESP-IDF core in v6.
+dependencies:
+  idf:
+    version: ">=5.0,<7.0"
+
+  espressif/cjson:
+    version: "^1.0"

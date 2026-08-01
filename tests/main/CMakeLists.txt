@@ -14,6 +14,14 @@ set(TEST_SRCS
     # Self-contained: version.c pulls in nothing but esp_log.
     "../unit/test_version.c"
     "../../main/utils/version.c"
+
+    # device_registry has a shallow dependency chain — memory_manager_ng and
+    # unified_device, both of which only need esp_log/heap/FreeRTOS. No Zigbee
+    # stack is dragged in, which is what makes this one testable at all.
+    "../unit/test_device_registry.c"
+    "../../main/core/device/device_registry.c"
+    "../../main/core/device/unified_device.c"
+    "../../main/core/memory/memory_manager_ng.c"
 )
 
 idf_component_register(
@@ -23,10 +31,13 @@ idf_component_register(
         "../mocks"
         "../../main"
         "../../main/core"
+        "../../main/core/device"
+        "../../main/core/memory"
         "../../main/utils"
     REQUIRES
         nvs_flash
         esp_timer
+        espressif__cjson
 )
 
 target_compile_options(${COMPONENT_LIB} PRIVATE
@@ -41,4 +52,5 @@ target_compile_definitions(${COMPONENT_LIB} PRIVATE
     # Enable a suite only together with its sources in TEST_SRCS above,
     # otherwise the build fails at link time with an undefined reference.
     TEST_SUITE_VERSION=1
+    TEST_SUITE_DEVICE_REGISTRY=1
 )
