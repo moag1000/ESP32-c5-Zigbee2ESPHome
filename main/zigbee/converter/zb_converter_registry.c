@@ -561,13 +561,23 @@ esp_err_t zb_converter_handle_command(uint16_t short_addr, uint8_t endpoint,
      * This allows us to validate commands against device capabilities
      * and update optimistic state if needed.
      */
-    device_t *device = device_registry_get_by_short_addr(short_addr);
-    if (device == NULL) {
-        ESP_LOGW(TAG, "Device 0x%04X not found in device_registry for command", short_addr);
-        /* Continue anyway - the device may not be synced yet */
-    } else {
-        ESP_LOGD(TAG, "Processing command for device 0x%04X (caps=0x%08" PRIx32 ")",
-                 short_addr, device->capabilities);
+    /* Only the id is needed further down, and everything between here and there
+     * can block — the dispatch mutex, then the converter's own tz handlers.
+     * Take the id now rather than holding the registry pointer across all of
+     * that; device_id_valid tracks whether we had a device at all. */
+    device_id_t device_id = 0;
+    bool device_id_valid = false;
+    {
+        device_t *device = device_registry_get_by_short_addr(short_addr);
+        if (device == NULL) {
+            ESP_LOGW(TAG, "Device 0x%04X not found in device_registry for command", short_addr);
+            /* Continue anyway - the device may not be synced yet */
+        } else {
+            device_id = device->id;
+            device_id_valid = true;
+            ESP_LOGD(TAG, "Processing command for device 0x%04X (caps=0x%08" PRIx32 ")",
+                     short_addr, device->capabilities);
+        }
     }
 
     /* Set dispatch context for generic converters (tz_generic_write_attr etc.) */
@@ -612,13 +622,13 @@ esp_err_t zb_converter_handle_command(uint16_t short_addr, uint8_t endpoint,
                  * This allows the device state to reflect the command immediately,
                  * before we receive the actual attribute report from the device.
                  */
-                if (device != NULL) {
+                if (device_id_valid) {
                     cJSON *state_update = cJSON_CreateObject();
                     if (state_update != NULL) {
                         cJSON *value_copy = cJSON_Duplicate(item, true);
                         if (value_copy != NULL) {
                             cJSON_AddItemToObject(state_update, tz->json_key, value_copy);
-                            esp_err_t merge_ret = device_registry_merge_state(device->id, state_update);
+                            esp_err_t merge_ret = device_registry_merge_state(device_id, state_update);
                             if (merge_ret != ESP_OK) {
                                 ESP_LOGW(TAG, "Failed to update optimistic state for '%s': %s",
                                          tz->json_key, esp_err_to_name(merge_ret));

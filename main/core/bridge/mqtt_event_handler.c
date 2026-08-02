@@ -681,9 +681,15 @@ static void publish_tuya_datapoint(const evt_tuya_dp_t *evt)
         return;
     }
 
+    /* Copy the name out before using it: this handler runs on the event
+     * dispatcher task, and a remove from the MQTT or Zigbee task can zero the
+     * registry slot while the string is being read. */
+    char friendly_name[sizeof(dev->friendly_name)];
+    snprintf(friendly_name, sizeof(friendly_name), "%s", dev->friendly_name);
+
     /* Build topic: zigbee2mqtt/<friendly_name> */
     char topic[MQTT_TOPIC_MAX_LEN];
-    esp_err_t ret = mqtt_topic_device_state(dev->friendly_name, topic, sizeof(topic));
+    esp_err_t ret = mqtt_topic_device_state(friendly_name, topic, sizeof(topic));
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Failed to build topic for Tuya publish: %s", esp_err_to_name(ret));
         return;

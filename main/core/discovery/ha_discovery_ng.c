@@ -1644,9 +1644,26 @@ esp_err_t ha_discovery_ng_publish_device(device_id_t id)
         dev->proto.zigbee.converter == NULL) {
         const zb_converter_def_t *conv = NULL;
 
-        /* Strategy 1: Find converter by manufacturer/model (works if persisted) */
+        /* Strategy 1: Find converter by manufacturer/model (works if persisted).
+         *
+         * zb_converter_find() reads the DB from LittleFS and blocks. This
+         * function runs on the event dispatcher / MQTT side, so copy the keys
+         * out and re-fetch afterwards — the Zigbee task or an MQTT remove
+         * request can drop the device while we are in flash, and the branch
+         * below writes back through the pointer. */
         if (dev->manufacturer[0] != '\0') {
-            conv = zb_converter_find(dev->manufacturer, dev->model);
+            char mfr_key[sizeof(dev->manufacturer)];
+            char model_key[sizeof(dev->model)];
+            snprintf(mfr_key, sizeof(mfr_key), "%s", dev->manufacturer);
+            snprintf(model_key, sizeof(model_key), "%s", dev->model);
+
+            conv = zb_converter_find(mfr_key, model_key);
+
+            dev = device_registry_get(id);
+            if (dev == NULL) {
+                ESP_LOGD(TAG, "Device 0x%016" PRIx64 " removed during converter lookup", id);
+                return ESP_ERR_NOT_FOUND;
+            }
         }
 
         /* Strategy 2: Look up from converter registry binding table.

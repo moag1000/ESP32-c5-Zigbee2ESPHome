@@ -1450,11 +1450,25 @@ static void interview_complete(zb_interview_context_t *ctx, zb_interview_status_
                              mfr, salvage_dev->model);
                 }
             }
-            const zb_converter_def_t *conv = zb_converter_find(
-                salvage_dev->manufacturer, salvage_dev->model);
+            /* zb_converter_find() reads the DB from LittleFS and blocks, and
+             * everything below writes back through salvage_dev. Copy the keys,
+             * then re-fetch — a remove from the MQTT or ESPHome task can drop
+             * this device while we are in flash. */
+            char mfr_key[sizeof(salvage_dev->manufacturer)];
+            char model_key[sizeof(salvage_dev->model)];
+            snprintf(mfr_key, sizeof(mfr_key), "%s", salvage_dev->manufacturer);
+            snprintf(model_key, sizeof(model_key), "%s", salvage_dev->model);
+
+            const zb_converter_def_t *conv = zb_converter_find(mfr_key, model_key);
+
+            salvage_dev = device_registry_get_by_short_addr(ctx->short_addr);
+            if (salvage_dev == NULL) {
+                conv = NULL;  /* gone while reading the DB — nothing to salvage */
+            }
+
             if (conv != NULL) {
                 ESP_LOGI(TAG, "Salvaging failed interview for 0x%04X using converter: %s",
-                         ctx->short_addr, salvage_dev->model);
+                         ctx->short_addr, model_key);
 
                 /* Extract clusters from converter definitions */
                 for (uint8_t i = 0; i < conv->from_zigbee_count; i++) {
@@ -1561,8 +1575,21 @@ static void interview_complete(zb_interview_context_t *ctx, zb_interview_status_
 
         /* Try to auto-bind a converter based on manufacturer/model */
         if (ng_dev != NULL && ng_dev->manufacturer[0] != '\0' && ng_dev->model[0] != '\0') {
-            const zb_converter_def_t *conv = zb_converter_find(
-                ng_dev->manufacturer, ng_dev->model);
+            /* Same as the salvage path above: the DB lookup goes to flash and
+             * this branch writes back through ng_dev, so copy the keys and
+             * re-fetch afterwards. */
+            char mfr_key[sizeof(ng_dev->manufacturer)];
+            char model_key[sizeof(ng_dev->model)];
+            snprintf(mfr_key, sizeof(mfr_key), "%s", ng_dev->manufacturer);
+            snprintf(model_key, sizeof(model_key), "%s", ng_dev->model);
+
+            const zb_converter_def_t *conv = zb_converter_find(mfr_key, model_key);
+
+            ng_dev = device_registry_get_by_short_addr(ctx->short_addr);
+            if (ng_dev == NULL) {
+                conv = NULL;  /* removed while we were reading the DB */
+            }
+
             if (conv != NULL) {
                 /* Bind in both the converter registry (by short_addr for fast
                  * runtime lookup) and the device struct (for HA discovery). */
@@ -1579,7 +1606,7 @@ static void interview_complete(zb_interview_context_t *ctx, zb_interview_status_
                 }
 
                 ESP_LOGI(TAG, "Converter auto-bound: %s %s -> %s (caps=0x%08lx)",
-                         ng_dev->manufacturer, ng_dev->model,
+                         mfr_key, model_key,
                          conv->description ? conv->description : conv->model,
                          (unsigned long)ng_dev->capabilities);
             }

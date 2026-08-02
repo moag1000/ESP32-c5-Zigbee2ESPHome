@@ -1382,8 +1382,22 @@ static void handle_basic_cluster_report(uint16_t short_addr, esp_zb_zcl_report_a
                     uint64_t ieee64 = device->id;
                     if (strncmp(device->model, "lumi.", 5) == 0 &&
                         zb_interview_is_active(ieee64)) {
-                        const zb_converter_def_t *conv = zb_converter_find(
-                            device->manufacturer, device->model);
+                        /* The DB lookup goes to LittleFS and blocks, and the
+                         * branch below writes back through `device`. Copy the
+                         * keys, then re-fetch: a remove from the MQTT or
+                         * ESPHome task can drop this device meanwhile. */
+                        char mfr_key[sizeof(device->manufacturer)];
+                        char model_key[sizeof(device->model)];
+                        snprintf(mfr_key, sizeof(mfr_key), "%s", device->manufacturer);
+                        snprintf(model_key, sizeof(model_key), "%s", device->model);
+
+                        const zb_converter_def_t *conv = zb_converter_find(mfr_key, model_key);
+
+                        device = device_registry_get_by_short_addr(short_addr);
+                        if (device == NULL) {
+                            return;  /* gone while we were reading the DB */
+                        }
+
                         if (conv != NULL) {
                             ESP_LOGW(TAG, "Sleepy device 0x%04X detected with active interview - canceling",
                                      short_addr);
