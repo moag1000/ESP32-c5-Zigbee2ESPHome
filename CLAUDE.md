@@ -187,7 +187,7 @@ Sub-device info is provided in `DeviceInfoResponse` via `esphome_api_handlers.c`
 | System Monitor + Crash Reporter | ~2KB | done |
 | LED Status Manager | ~1KB | done |
 | mmWave Presence Sensor (S3KM1110) | ~1KB | done |
-| ESPHome Service Calls | ~1KB | Framework da, nur `test_service` registriert |
+| ESPHome Service Calls | ~1KB | done -- `permit_join`, `remove_device`, `reconfigure_device` |
 | BLE Scanner | -- | **deaktiviert** (Code im Baum, nicht kompiliert) |
 | ESPHome BLE Proxy | -- | **deaktiviert** |
 
@@ -385,7 +385,7 @@ buffer_pool_t *pool = foundation_get_mqtt_pool();  // 8x 512B
 | **ESPHome API** | `main/esphome/esphome_api_server.c`, `esphome_api_handlers.c`, `esphome_api.c` |
 | **ESPHome Entities** | `esphome_entity_sensors.c`, `esphome_entity_controls.c`, `esphome_entity_specialized.c`, `esphome_entities_types.h` |
 | **ESPHome Adapter** | `main/core/adapters/esphome_adapter.c` -- Bridges event bus + device registry to ESPHome entities |
-| ESPHome Services | `main/esphome/esphome_services.c` (Framework; nur `test_service`) |
+| ESPHome Services | `main/esphome/esphome_services.c` (Framework), `esphome_gateway_services.c` (die 3 Gateway-Services) |
 | ESPHome OTA | `main/esphome/esphome_ota.c` (Port 3232, gestartet aus `esphome_adapter_gateway.c`) |
 | ESPHome Device Registry | `main/esphome/esphome_device_registry.c` |
 | ESPHome BLE | `main/esphome/esphome_ble_proxy.c` (**inaktiv**, BT aus) |
@@ -541,8 +541,7 @@ esphome_adapter_register_device(dev);  // auto-maps capabilities to entities
 ### Remaining
 - [ ] CI/CD Pipeline (Build + Lint + Format)
 - [ ] Web Dashboard (HTTP status page)
-- [ ] Echte ESPHome-Services (permit_join, remove, reconfigure, ...) -- das
-      Framework in `esphome_services.c` steht, registriert ist nur `test_service`
+- [x] ESPHome-Services: `permit_join`, `remove_device`, `reconfigure_device`
 - [ ] ESPHome OTA fuer Zigbee-Sub-Devices (`esphome_ota.c` deckt bisher nur das
       Gateway selbst ab, Port 3232)
 - [ ] Bootloader-Groesse: 0x5700 von 0x6000 belegt, nur ~2.3KB frei

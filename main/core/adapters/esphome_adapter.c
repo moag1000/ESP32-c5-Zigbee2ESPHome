@@ -21,6 +21,7 @@
 #include "zigbee/tuya/tuya_device_driver.h"
 #include "zigbee/tuya/tuya_driver_registry.h"
 #include "cJSON.h"
+#include "esphome/esphome_gateway_services.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include <string.h>
@@ -2184,6 +2185,17 @@ esp_err_t esphome_adapter_init(void)
     if (esp_timer_create(&act_timer_args, &s_action_clear_timer) != ESP_OK) {
         ESP_LOGW(TAG, "Failed to create action clear timer");
         s_action_clear_timer = NULL;
+    }
+
+    /* Register the gateway's Home Assistant services here rather than on
+     * client connect. Registration is local bookkeeping — it needs no client —
+     * and doing it at init keeps the service list stable and ready before the
+     * first ListEntities request arrives, instead of tying availability to
+     * connection order. */
+    esp_err_t svc_ret = esphome_gateway_services_register();
+    if (svc_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Gateway services partially unavailable: %s",
+                 esp_err_to_name(svc_ret));
     }
 
     /* Reset statistics */

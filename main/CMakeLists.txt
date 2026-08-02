@@ -116,6 +116,7 @@ set(COMPONENT_SRCS
     "esphome/esphome_entity_controls.c"
     "esphome/esphome_entity_specialized.c"
     "esphome/esphome_services.c"
+    "esphome/esphome_gateway_services.c"
     "esphome/esphome_ota.c"
     "esphome/esphome_noise.c"
     "esphome/esphome_device_registry.c"
