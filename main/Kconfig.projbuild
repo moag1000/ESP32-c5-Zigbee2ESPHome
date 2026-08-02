@@ -502,6 +502,34 @@ menu "ESP32-C5 Zigbee2MQTT Gateway Configuration"
                 Redirect ESP logs to MQTT bridge/logging topic. Warning: increases MQTT traffic.
     endmenu
 
+    menu "Device Registry"
+        config DEVICE_REGISTRY_MAX_DEVICES
+            int "Device registry capacity (entries)"
+            default 64
+            range 16 512
+            help
+                Total entries in the unified device registry.
+
+                IMPORTANT: this is not the number of Zigbee devices. Every
+                ESPHome entity is registered as a virtual device
+                (esphome_device_registry.c), so the registry holds
+
+                    Zigbee devices + BLE devices + one slot per ESPHome entity
+
+                Measured on a gateway with two paired Zigbee devices: 56
+                entries, of which 54 were virtual. Gateway entities alone
+                account for roughly fifteen, and each Zigbee device adds one
+                per exposed value.
+
+                So budget by entities, not by devices. If MAX_ZIGBEE_DEVICES is
+                50 and a device exposes ~20 values, the registry needs to be in
+                the four figures, not 64 — and at that point the per-entity
+                design is worth revisiting rather than the number.
+
+                Each entry costs sizeof(device_t) in PSRAM.
+
+    endmenu
+
     menu "Debug and Logging"
 
         config EVENT_TRACE_ENABLE

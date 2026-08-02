@@ -114,8 +114,14 @@ esp_err_t zb_network_get_info(zb_network_info_t *info)
      * bridge/info published 0 while bridge/state published the registry value.
      *
      * The registry is the single source of truth for how many devices exist,
-     * so derive it here and every consumer of zb_network_get_info() agrees. */
-    info->device_count = (uint8_t)device_registry_count();
+     * so derive it here and every consumer of zb_network_get_info() agrees.
+     *
+     * Only the Zigbee ones count. The registry also holds virtual devices for
+     * the ESPHome gateway entities, and those have no place in a Zigbee
+     * network device count. */
+    device_registry_stats_t reg_stats;
+    device_registry_get_stats(&reg_stats);
+    info->device_count = (uint8_t)reg_stats.zigbee_count;
 
     return ESP_OK;
 }

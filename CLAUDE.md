@@ -85,6 +85,26 @@ Die Map ist die verlaessliche Quelle. Textsuche nach `<modul>_init` taeuscht in
 beide Richtungen: Referenzen aus ebenfalls totem Code zaehlen mit, und
 Substring-Treffer wie `evt_zb_ota_progress_t` sehen aus wie Aufrufe.
 
+## Device-Registry: Kapazitaet zaehlt Entities, nicht Geraete
+
+`esphome_device_registry.c` legt fuer **jede ESPHome-Entity** ein virtuelles
+Geraet in der Registry an. Die Kapazitaet wird also von der Entity-Zahl
+verbraucht, nicht von der Geraetezahl:
+
+    Registry = Zigbee-Geraete + BLE-Geraete + 1 Slot je ESPHome-Entity
+
+Gemessen am laufenden Gateway mit **zwei** gepairten Zigbee-Geraeten: 56 von 64
+Eintraegen belegt, davon 54 virtuell. `CONFIG_MAX_ZIGBEE_DEVICES` steht auf 50 —
+das ist mit dieser Auslegung unerreichbar.
+
+`CONFIG_DEVICE_REGISTRY_MAX_DEVICES` ist jetzt einstellbar (Default 64,
+unveraendert), und `device_registry_add()` warnt ab 80 % Fuellstand statt erst
+zu scheitern, wenn ein echtes Geraet abgewiesen wird.
+
+Der Zaehler in `bridge/state` und `bridge/info` meldet ausschliesslich
+`stats.zigbee_count` — vorher stand dort die Gesamtzahl, weshalb `bridge/state`
+56 gepairte Geraete behauptete waehrend `bridge/devices` zwei auflistete.
+
 ## Konfigurations-Kette
 
 `CMakeLists.txt` setzt `SDKCONFIG_DEFAULTS` auf **zwei** Dateien:

@@ -926,8 +926,16 @@ static void collect_bridge_state(ha_bridge_state_t *state)
     /* Bridge online state */
     state->state = mqtt_client_is_connected() ? "online" : "offline";
 
-    /* Zigbee device count */
-    state->device_count = (uint16_t)device_registry_count();
+    /* Zigbee device count.
+     *
+     * Deliberately NOT device_registry_count(): the registry also holds the
+     * virtual devices that back the ESPHome gateway entities, and on this
+     * gateway they outnumber the real ones by an order of magnitude — 54
+     * virtual against 2 Zigbee. Reporting the total made bridge/state claim 56
+     * paired devices while bridge/devices, which skips virtuals, listed 2. */
+    device_registry_stats_t reg_stats;
+    device_registry_get_stats(&reg_stats);
+    state->device_count = (uint16_t)reg_stats.zigbee_count;
 
     /* Coordinator settings */
     zb_coordinator_settings_t coord_settings;

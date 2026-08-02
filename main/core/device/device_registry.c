@@ -445,8 +445,23 @@ device_t *device_registry_add(device_id_t id, device_protocol_t proto)
     s_device_count++;
     result = dev;
 
-    ESP_LOGI(TAG, "Added device 0x%016llx at index %u (proto=%d, count=%zu)",
-             (unsigned long long)id, free_idx, (int)proto, s_device_count);
+    ESP_LOGI(TAG, "Added device 0x%016llx at index %u (proto=%d, count=%zu/%d)",
+             (unsigned long long)id, free_idx, (int)proto,
+             s_device_count, DEVICE_REGISTRY_MAX_DEVICES);
+
+    /* Warn before the registry fills up rather than only when an add fails.
+     *
+     * Easy to run into without noticing: every ESPHome entity occupies a slot
+     * as a virtual device, so the registry fills from entity count, not from
+     * how many Zigbee devices are paired. A gateway with two devices was
+     * already at 56 of 64. By the time an add fails, a real device has been
+     * turned away. */
+    if (s_device_count * 100 >= (size_t)DEVICE_REGISTRY_MAX_DEVICES * 80) {
+        ESP_LOGW(TAG, "Device registry %zu%% full (%zu/%d) — raise "
+                      "CONFIG_DEVICE_REGISTRY_MAX_DEVICES before it rejects devices",
+                 (s_device_count * 100) / (size_t)DEVICE_REGISTRY_MAX_DEVICES,
+                 s_device_count, DEVICE_REGISTRY_MAX_DEVICES);
+    }
 
 done:
     mutex_release();
