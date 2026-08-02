@@ -44,6 +44,9 @@ extern test_stats_t run_device_registry_tests(void);
 #ifdef TEST_SUITE_ZB_DIAGNOSTICS
 extern test_stats_t run_zb_diagnostics_tests(void);
 #endif
+#ifdef TEST_SUITE_ZB_BACKUP
+extern test_stats_t run_zb_backup_tests(void);
+#endif
 #ifdef TEST_SUITE_MQTT_TOPICS
 extern test_stats_t run_mqtt_topics_tests(void);
 #endif
@@ -143,6 +146,9 @@ static void test_runner_task(void *pvParameters)
 #endif
 #ifdef TEST_SUITE_ZB_DIAGNOSTICS
     RUN_SUITE(run_zb_diagnostics_tests, "Zigbee Diagnostics");
+#endif
+#ifdef TEST_SUITE_ZB_BACKUP
+    RUN_SUITE(run_zb_backup_tests, "Zigbee Backup");
 #endif
 #ifdef TEST_SUITE_MQTT_TOPICS
     RUN_SUITE(run_mqtt_topics_tests, "MQTT Topics");

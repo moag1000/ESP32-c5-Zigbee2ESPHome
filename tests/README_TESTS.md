@@ -24,13 +24,14 @@ in `main/CMakeLists.txt` instead.
 
 ## What is green
 
-41 tests, all passing on hardware (ESP32-C5, ESP-IDF v6.0.2).
+48 tests, all passing on hardware (ESP32-C5, ESP-IDF v6.0.2).
 
 | Suite | Tests | Covers |
 |---|---|---|
 | Version Management | 17 | version strings and comparison |
 | Device Registry | 15 | the concurrency-safety contract — snapshot_ids, state_dup ownership, slot recycling |
 | Zigbee Diagnostics | 9 | `zb_diagnostics_get_network_map()` — ID snapshot iteration and the protocol filter |
+| Zigbee Backup | 7 | `collect_devices()` via `zb_backup_create()` — same iteration and filter |
 
 The registry and diagnostics suites exist specifically to pin down behaviour
 that was changed without runtime cover:
@@ -43,7 +44,22 @@ that was changed without runtime cover:
   next one that joined.
 - `skips_non_zigbee_devices` fails if the `dev->protocol` check is dropped
   again. `device_t::proto` is a union, so reading the Zigbee arm for a BLE
-  device reinterprets BLE fields.
+  device reinterprets BLE fields. Present in both the diagnostics and the
+  backup suite, because both functions had the same defect.
+
+Writing the backup suite turned up a leak: `zb_backup_create()` allocated a
+`zb_backup_t` internally when passed NULL, then neither returned nor freed it
+on the success path. Several KB per call. The NULL branch was dead — no caller
+used it — so it is now rejected with `ESP_ERR_INVALID_ARG`.
+
+### zb_topology is not covered
+
+`zb_topology_scan_start()` got the same iteration and protocol-filter rewrite,
+but its only observable effect is internal scan state, and the function ends by
+calling `esp_zb_zdo_mgmt_lqi_req()` — it needs a running Zigbee stack. Testing
+it would mean adding an accessor to production code purely for the test. The
+logic is character-for-character the same as the two covered copies, so the
+gap is narrow, but it is a gap.
 
 ### Safety properties of this test app
 

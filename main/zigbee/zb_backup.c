@@ -140,19 +140,21 @@ esp_err_t zb_backup_create(zb_backup_type_t backup_type, zb_backup_t *backup)
         return ESP_ERR_INVALID_STATE;
     }
 
+    /* The output pointer is required.
+     *
+     * This used to allocate a zb_backup_t internally when handed NULL, but the
+     * result was never returned to the caller and only freed on the error path
+     * — so a successful call with NULL leaked the whole structure (arrays for
+     * 50 devices, 16 groups and 32 bindings, several KB). Neither in-tree
+     * caller ever passed NULL, so the branch was dead as well as leaky. */
+    if (backup == NULL) {
+        ESP_LOGE(TAG, "zb_backup_create() requires an output buffer");
+        return ESP_ERR_INVALID_ARG;
+    }
+
     ESP_LOGI(TAG, "Creating backup (type: %d)...", backup_type);
 
-    /* Allocate backup structure if not provided */
     zb_backup_t *bkp = backup;
-    bool allocated = false;
-    if (bkp == NULL) {
-        bkp = (zb_backup_t *)mem_ng_calloc(1, sizeof(zb_backup_t), MEM_CAP_PSRAM);
-        if (bkp == NULL) {
-            ESP_LOGE(TAG, "Failed to allocate backup structure");
-            return ESP_ERR_NO_MEM;
-        }
-        allocated = true;
-    }
 
     xSemaphoreTake(s_backup_mutex, GW_TIMEOUT_LONG_TICKS);
 
@@ -215,10 +217,7 @@ esp_err_t zb_backup_create(zb_backup_type_t backup_type, zb_backup_t *backup)
 cleanup:
     xSemaphoreGive(s_backup_mutex);
 
-    if (ret != ESP_OK && allocated) {
-        mem_ng_free(bkp);
-    }
-
+    /* Nothing to free: the buffer belongs to the caller. */
     return ret;
 }
 

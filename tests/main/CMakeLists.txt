@@ -30,6 +30,14 @@ set(TEST_SRCS
     "../../main/zigbee/zb_diagnostics.c"
     "../../main/core/events/event_bus.c"
     "../mocks/mock_perf_metrics.c"
+
+    # zb_backup_create() builds the backup in memory (zb_backup_save() is what
+    # touches files), so the collection logic is testable. Linking it needs
+    # twelve symbols across zb_coordinator, zb_network, zb_groups, zb_binding,
+    # bridge_response and littlefs_mount — all stubbed.
+    "../unit/test_zb_backup.c"
+    "../../main/zigbee/zb_backup.c"
+    "../mocks/mock_zb_backup_deps.c"
 )
 
 idf_component_register(
@@ -43,6 +51,8 @@ idf_component_register(
         "../../main/core/memory"
         "../../main/core/events"
         "../../main/core/monitoring"
+        "../../main/core/bridge"
+        "../../main/mqtt"
         "../../main/utils"
         "../../main/zigbee"
     REQUIRES
@@ -66,4 +76,5 @@ target_compile_definitions(${COMPONENT_LIB} PRIVATE
     TEST_SUITE_VERSION=1
     TEST_SUITE_DEVICE_REGISTRY=1
     TEST_SUITE_ZB_DIAGNOSTICS=1
+    TEST_SUITE_ZB_BACKUP=1
 )
