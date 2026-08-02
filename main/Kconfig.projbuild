@@ -503,6 +503,38 @@ menu "ESP32-C5 Zigbee2MQTT Gateway Configuration"
     endmenu
 
     menu "Debug and Logging"
+
+        config EVENT_TRACE_ENABLE
+            bool "Enable event tracing"
+            default n
+            help
+                Subscribes to every event on the bus, keeps a ring buffer of
+                recent events and can dump them over MQTT.
+
+                Useful for following event flow when something does not arrive
+                where it should. Off by default: it sees the entire event
+                stream, so on a busy gateway it costs CPU and a lot of log
+                volume.
+
+        config MEMORY_DASHBOARD_ENABLE
+            bool "Publish memory statistics over MQTT"
+            default n
+            help
+                Periodically publishes heap, PSRAM and internal-RAM statistics
+                to MQTT for monitoring.
+
+                Skips a cycle while the broker is unreachable, so it is safe to
+                enable on a gateway whose WiFi is unreliable.
+
+        config MEMORY_DASHBOARD_INTERVAL_SEC
+            int "Memory dashboard interval (seconds)"
+            depends on MEMORY_DASHBOARD_ENABLE
+            default 60
+            range 10 3600
+            help
+                How often to publish. Every publish is an MQTT message, so do
+                not set this lower than you actually read.
+
         config ENABLE_VERBOSE_LOGGING
             bool "Enable Verbose Logging"
             default n

@@ -17,6 +17,12 @@
 #include "core/device/device_registry.h"
 #include "core/device/device_persistence.h"
 #include "core/discovery/ha_discovery_ng.h"
+#if CONFIG_EVENT_TRACE_ENABLE
+#include "core/monitoring/event_trace.h"
+#endif
+#if CONFIG_MEMORY_DASHBOARD_ENABLE
+#include "core/monitoring/memory_dashboard.h"
+#endif
 #include "core/adapters/zigbee_adapter.h"
 #include "core/adapters/mqtt_adapter.h"
 #include "core/adapters/ble_adapter.h"
@@ -297,6 +303,28 @@ esp_err_t foundation_init(void)
 
     /* 6. HA Discovery NG - Subscribe to device events */
     INIT_OPTIONAL_COMPONENT(ha_discovery_ng_init, FOUNDATION_COMP_HA_DISCOVERY, "ha_discovery_ng");
+
+#if CONFIG_EVENT_TRACE_ENABLE
+    /* 6a. Event trace — subscribes to every event and keeps a ring buffer.
+     * Off by default: it sees the full event stream, so it costs CPU and log
+     * volume on a busy gateway. Built and never wired until now. */
+    INIT_OPTIONAL_COMPONENT(event_trace_init, FOUNDATION_COMP_EVENT_TRACE, "event_trace");
+#endif
+
+#if CONFIG_MEMORY_DASHBOARD_ENABLE
+    /* 6b. Memory dashboard — periodic memory statistics over MQTT.
+     * Safe to start here: it checks mqtt_client_is_connected() itself and
+     * simply skips a cycle while the broker is unreachable. */
+    INIT_OPTIONAL_COMPONENT(memory_dashboard_init, FOUNDATION_COMP_MEMORY_DASHBOARD,
+                            "memory_dashboard");
+    if ((s_state.init_mask & FOUNDATION_COMP_MEMORY_DASHBOARD) != 0) {
+        esp_err_t dash_ret =
+            memory_dashboard_start(CONFIG_MEMORY_DASHBOARD_INTERVAL_SEC * 1000);
+        if (dash_ret != ESP_OK) {
+            ESP_LOGW(TAG, "memory_dashboard_start failed: %s", esp_err_to_name(dash_ret));
+        }
+    }
+#endif
 
     /* Phase 3: Adapters via Adapter Registry (init only, don't start yet) */
     ESP_LOGI(TAG, "--- Phase 3: Adapters ---");

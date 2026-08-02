@@ -46,16 +46,22 @@ vollstaendig. Zusammen rund **10.560 Zeilen**.
 | `zigbee/zb_touchlink.c` | 1070 | nie initialisiert |
 | `zigbee/cluster_state_ng.c` | 1000 | **kein einziger Aufruf von `cluster_state_*` im Projekt** |
 | `core/coex_manager.c` | 787 | nie initialisiert (`COEX_MANAGER_CONCEPT.md` nennt es selbst Draft) |
-| `core/monitoring/event_trace.c` | 752 | nie initialisiert |
+| `core/monitoring/event_trace.c` | 752 | **verdrahtet 2026-08-02** — `CONFIG_EVENT_TRACE_ENABLE`, default n |
 | `core/adapters/ble_adapter.c` | 749 | BLE ist aus (erwartet) |
 | `mqtt/batch_publisher.c` | 555 | nie initialisiert |
 | `core/memory_pool.c` | 462 | nie initialisiert |
-| `core/monitoring/memory_dashboard.c` | 369 | nie initialisiert |
+| `core/monitoring/memory_dashboard.c` | 369 | **verdrahtet 2026-08-02** — `CONFIG_MEMORY_DASHBOARD_ENABLE`, default n |
 | `core/monitoring/adaptive_memory.c` | 172 | nie initialisiert |
 
 Zwei davon sind konfigurationsbedingt korrekt tot (`ble_adapter`, `zb_router`).
-Die uebrigen rund **8.700 Zeilen** sind fertig gebaute Features, die nie
-angeschlossen wurden.
+Zwei sind seit 2026-08-02 verdrahtet (`event_trace`, `memory_dashboard`, beide
+opt-in per Kconfig, default aus). Bleiben rund **7.600 Zeilen** fertig gebauter
+Features, die nie angeschlossen wurden.
+
+Verdrahten heisst hier: Kconfig-Flag (default n), `_init()` in
+`foundation_init.c` unter `INIT_OPTIONAL_COMPONENT`, und die Quelle in
+`main/CMakeLists.txt` an dasselbe Flag haengen, damit sie bei ausgeschaltetem
+Feature gar nicht erst kompiliert wird.
 
 **Wichtig fuer die Fehlersuche:** Bugs in diesen Dateien koennen kein
 Laufzeitverhalten erklaeren. `cluster_state_ng.c` ist der auffaelligste Fall --

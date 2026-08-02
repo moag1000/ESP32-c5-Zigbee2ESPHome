@@ -57,6 +57,8 @@ typedef enum {
     FOUNDATION_COMP_MQTT_ADAPTER     = (1 << 7),  /**< MQTT adapter */
     FOUNDATION_COMP_BLE_ADAPTER      = (1 << 8),  /**< BLE adapter */
     FOUNDATION_COMP_ESPHOME_ADAPTER  = (1 << 9),  /**< ESPHome adapter (optional) */
+    FOUNDATION_COMP_EVENT_TRACE      = (1 << 10), /**< Event tracing (optional, debug) */
+    FOUNDATION_COMP_MEMORY_DASHBOARD = (1 << 11), /**< Memory dashboard (optional) */
 } foundation_component_t;
 
 /**

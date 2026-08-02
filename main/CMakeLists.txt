@@ -69,8 +69,6 @@ set(COMPONENT_SRCS
     "core/monitoring/memory_manager.c"
     "core/monitoring/task_manager.c"
     "core/monitoring/crash_reporter.c"
-    "core/monitoring/memory_dashboard.c"
-    "core/monitoring/event_trace.c"
     "core/monitoring/perf_metrics.c"
     "core/monitoring/adaptive_memory.c"
     "core/memory_pool.c"
@@ -227,6 +225,16 @@ endif()
 # will not give you working secured Green Power devices yet.
 if(CONFIG_ZB_GREEN_POWER_ENABLE)
     list(APPEND COMPONENT_SRCS "zigbee/zb_green_power.c")
+endif()
+
+# Observability modules: complete but never wired up until now, so both are
+# opt-in and default to off.
+if(CONFIG_EVENT_TRACE_ENABLE)
+    list(APPEND COMPONENT_SRCS "core/monitoring/event_trace.c")
+endif()
+
+if(CONFIG_MEMORY_DASHBOARD_ENABLE)
+    list(APPEND COMPONENT_SRCS "core/monitoring/memory_dashboard.c")
 endif()
 
 if(CONFIG_ZIGBEE_MULTI_PAN_ENABLED)
