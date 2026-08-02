@@ -70,7 +70,6 @@ set(COMPONENT_SRCS
     "core/monitoring/task_manager.c"
     "core/monitoring/crash_reporter.c"
     "core/monitoring/perf_metrics.c"
-    "core/monitoring/adaptive_memory.c"
     "core/memory_pool.c"
     "core/memory/memory_manager_ng.c"
     "core/memory/module_manager.c"
@@ -81,7 +80,6 @@ set(COMPONENT_SRCS
     "core/memory/buffer_pool_helpers.c"
     "core/bridge/mqtt_event_handler.c"
     "core/coex_manager.c"
-    "mqtt/batch_publisher.c"
     "core/events/event_bus.c"
     "core/device_state_publisher.c"
     "zigbee/zb_command_handler.c"
@@ -231,6 +229,14 @@ endif()
 # opt-in and default to off.
 if(CONFIG_EVENT_TRACE_ENABLE)
     list(APPEND COMPONENT_SRCS "core/monitoring/event_trace.c")
+endif()
+
+if(CONFIG_ADAPTIVE_MEMORY_ENABLE)
+    list(APPEND COMPONENT_SRCS "core/monitoring/adaptive_memory.c")
+endif()
+
+if(CONFIG_BATCH_PUBLISHER_ENABLE)
+    list(APPEND COMPONENT_SRCS "mqtt/batch_publisher.c")
 endif()
 
 if(CONFIG_MEMORY_DASHBOARD_ENABLE)

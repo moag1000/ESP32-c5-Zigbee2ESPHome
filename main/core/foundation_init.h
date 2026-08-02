@@ -59,6 +59,7 @@ typedef enum {
     FOUNDATION_COMP_ESPHOME_ADAPTER  = (1 << 9),  /**< ESPHome adapter (optional) */
     FOUNDATION_COMP_EVENT_TRACE      = (1 << 10), /**< Event tracing (optional, debug) */
     FOUNDATION_COMP_MEMORY_DASHBOARD = (1 << 11), /**< Memory dashboard (optional) */
+    FOUNDATION_COMP_BATCH_PUBLISHER  = (1 << 12), /**< Batch MQTT publisher (optional) */
 } foundation_component_t;
 
 /**

@@ -8,6 +8,9 @@
 
 #include "system_monitor.h"
 #include "memory_manager.h"
+#if CONFIG_ADAPTIVE_MEMORY_ENABLE
+#include "adaptive_memory.h"
+#endif
 #include "task_manager.h"
 #include "core/events/event_bus.h"
 #include "core/events/event_data.h"
@@ -198,6 +201,23 @@ esp_err_t system_monitor_init(bool enable_mqtt_publish)
         ESP_LOGE(TAG, "Failed to initialize memory manager: %s", esp_err_to_name(ret));
         return ret;
     }
+
+#if CONFIG_ADAPTIVE_MEMORY_ENABLE
+    /* Hook the adaptive response in right here: the memory manager's status
+     * callback slot was never claimed by anyone, which is why adaptive_memory
+     * has sat unused since it was written. Registration has to follow
+     * memory_manager_init(). */
+    esp_err_t adapt_ret = adaptive_memory_init();
+    if (adapt_ret == ESP_OK) {
+        adapt_ret = memory_manager_register_callback(adaptive_memory_on_status_change);
+    }
+    if (adapt_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Adaptive memory response unavailable: %s",
+                 esp_err_to_name(adapt_ret));
+    } else {
+        ESP_LOGI(TAG, "Adaptive memory response active");
+    }
+#endif
 
     /* Initialize task manager */
     ret = task_manager_init();

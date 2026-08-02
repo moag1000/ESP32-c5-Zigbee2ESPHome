@@ -19,6 +19,9 @@
 #include "core/memory/memory_manager_ng.h"
 #include "mqtt/gateway_mqtt.h"
 #include "mqtt/mqtt_topics.h"
+#if CONFIG_BATCH_PUBLISHER_ENABLE
+#include "mqtt/batch_publisher.h"
+#endif
 #include "cJSON.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -26,6 +29,10 @@
 #include <stdlib.h>
 
 #include "adapter_interface.h"
+
+/* Publishes directly, or via batch_publisher while a bulk operation runs. */
+static esp_err_t adapter_publish(const char *topic, const char *payload,
+                                 int qos, bool retain);
 
 static const char *TAG = "MQTT_ADAPTER";
 
@@ -148,7 +155,7 @@ static esp_err_t publish_device_state(const device_t *dev, cJSON *state_json)
     int64_t publish_start_us = esp_timer_get_time();
 
     /* Publish with retain */
-    ret = mqtt_client_publish(topic, json_str, strlen(json_str), 1, true);
+    ret = adapter_publish(topic, json_str, 1, true);
 
     /* Release buffer appropriately */
     if (used_pool) {
@@ -209,7 +216,7 @@ static esp_err_t publish_device_availability(const device_t *dev, bool online)
 
     /* Availability payloads are small, use static strings (no allocation needed) */
     const char *payload = online ? "{\"state\":\"online\"}" : "{\"state\":\"offline\"}";
-    ret = mqtt_client_publish(topic, payload, strlen(payload), 1, true);
+    ret = adapter_publish(topic, payload, 1, true);
 
     /* Record MQTT publish performance metrics */
     int64_t publish_end_us = esp_timer_get_time();
@@ -235,9 +242,39 @@ static esp_err_t publish_device_availability(const device_t *dev, bool online)
  * Uses collect-then-iterate pattern to avoid holding registry mutex
  * during MQTT publishing (deadlock risk per AP-1.3).
  */
+/* Bulk mode.
+ *
+ * Only the republish below sets this. It is the one place that produces a
+ * burst of MQTT messages — one state plus one availability per device, all at
+ * once, right after a reconnect — which is exactly the case batch_publisher
+ * was written for. Everything else publishes single messages in response to a
+ * single event and gains nothing from batching, so it keeps going out directly.
+ */
+#if CONFIG_BATCH_PUBLISHER_ENABLE
+static bool s_bulk_publish = false;
+#endif
+
+/**
+ * @brief Publish, batched while a bulk operation is in progress
+ */
+static esp_err_t adapter_publish(const char *topic, const char *payload,
+                                 int qos, bool retain)
+{
+#if CONFIG_BATCH_PUBLISHER_ENABLE
+    if (s_bulk_publish) {
+        return batch_publisher_queue(topic, payload, qos, retain);
+    }
+#endif
+    return mqtt_client_publish(topic, payload, strlen(payload), qos, retain);
+}
+
 static void republish_all_device_states(void)
 {
     ESP_LOGI(TAG, "Republishing all device states...");
+
+#if CONFIG_BATCH_PUBLISHER_ENABLE
+    s_bulk_publish = true;
+#endif
 
     device_id_t ids[DEVICE_REGISTRY_MAX_DEVICES];
     size_t count;
@@ -261,6 +298,14 @@ static void republish_all_device_states(void)
         bool online = (dev->availability == DEV_AVAIL_ONLINE);
         publish_device_availability(dev, online);
     }
+
+#if CONFIG_BATCH_PUBLISHER_ENABLE
+    s_bulk_publish = false;
+    esp_err_t flush_ret = batch_publisher_flush();
+    if (flush_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Batch flush after republish failed: %s", esp_err_to_name(flush_ret));
+    }
+#endif
 
     ESP_LOGI(TAG, "Device state republish complete (%zu devices)", count);
 }

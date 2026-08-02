@@ -516,6 +516,36 @@ menu "ESP32-C5 Zigbee2MQTT Gateway Configuration"
                 stream, so on a busy gateway it costs CPU and a lot of log
                 volume.
 
+        config ADAPTIVE_MEMORY_ENABLE
+            bool "React automatically to memory pressure"
+            default n
+            help
+                Registers a callback with the memory manager and reacts to
+                status changes:
+
+                  WARNING  - runs memory_manager_optimize()
+                  CRITICAL - runs the aggressive variant and pauses HA
+                             discovery to stop new allocations
+
+                The module also throttles the BLE scan, but that part is
+                compiled out while Bluetooth is disabled.
+
+                Off by default because it changes runtime behaviour under
+                pressure — exactly when the system is least predictable.
+
+        config BATCH_PUBLISHER_ENABLE
+            bool "Batch bulk MQTT publishes"
+            default n
+            help
+                Queues MQTT messages and sends them in batches instead of one
+                by one. Applied to the bulk republish that runs on MQTT
+                reconnect, which is the case it was written for.
+
+                Worth enabling with a large device count. With only a handful
+                of devices the republish is a few messages and batching buys
+                nothing, so it stays off by default rather than adding a
+                barely-exercised path to the publish chain.
+
         config MEMORY_DASHBOARD_ENABLE
             bool "Publish memory statistics over MQTT"
             default n

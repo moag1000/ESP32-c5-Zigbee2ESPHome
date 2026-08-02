@@ -17,6 +17,9 @@
 #include "core/device/device_registry.h"
 #include "core/device/device_persistence.h"
 #include "core/discovery/ha_discovery_ng.h"
+#if CONFIG_BATCH_PUBLISHER_ENABLE
+#include "mqtt/batch_publisher.h"
+#endif
 #if CONFIG_EVENT_TRACE_ENABLE
 #include "core/monitoring/event_trace.h"
 #endif
@@ -303,6 +306,12 @@ esp_err_t foundation_init(void)
 
     /* 6. HA Discovery NG - Subscribe to device events */
     INIT_OPTIONAL_COMPONENT(ha_discovery_ng_init, FOUNDATION_COMP_HA_DISCOVERY, "ha_discovery_ng");
+
+#if CONFIG_BATCH_PUBLISHER_ENABLE
+    /* 6z. Batch publisher — used by the MQTT adapter's bulk republish. */
+    INIT_OPTIONAL_COMPONENT(batch_publisher_init, FOUNDATION_COMP_BATCH_PUBLISHER,
+                            "batch_publisher");
+#endif
 
 #if CONFIG_EVENT_TRACE_ENABLE
     /* 6a. Event trace — subscribes to every event and keeps a ring buffer.

@@ -48,15 +48,19 @@ vollstaendig. Zusammen rund **10.560 Zeilen**.
 | `core/coex_manager.c` | 787 | nie initialisiert (`COEX_MANAGER_CONCEPT.md` nennt es selbst Draft) |
 | `core/monitoring/event_trace.c` | 752 | **verdrahtet 2026-08-02** — `CONFIG_EVENT_TRACE_ENABLE`, default n |
 | `core/adapters/ble_adapter.c` | 749 | BLE ist aus (erwartet) |
-| `mqtt/batch_publisher.c` | 555 | nie initialisiert |
+| `mqtt/batch_publisher.c` | 555 | **verdrahtet 2026-08-02** — `CONFIG_BATCH_PUBLISHER_ENABLE`, default n |
 | `core/memory_pool.c` | 462 | nie initialisiert |
 | `core/monitoring/memory_dashboard.c` | 369 | **verdrahtet 2026-08-02** — `CONFIG_MEMORY_DASHBOARD_ENABLE`, default n |
-| `core/monitoring/adaptive_memory.c` | 172 | nie initialisiert |
+| `core/monitoring/adaptive_memory.c` | 172 | **verdrahtet 2026-08-02** — `CONFIG_ADAPTIVE_MEMORY_ENABLE`, default n |
 
 Zwei davon sind konfigurationsbedingt korrekt tot (`ble_adapter`, `zb_router`).
-Zwei sind seit 2026-08-02 verdrahtet (`event_trace`, `memory_dashboard`, beide
-opt-in per Kconfig, default aus). Bleiben rund **7.600 Zeilen** fertig gebauter
-Features, die nie angeschlossen wurden.
+Vier sind seit 2026-08-02 verdrahtet (`event_trace`, `memory_dashboard`,
+`batch_publisher`, `adaptive_memory` — alle opt-in per Kconfig, default aus).
+Bleiben rund **6.900 Zeilen** fertig gebauter Features, die nie angeschlossen
+wurden: `zb_ota` (3 TODOs, halbfertig), `zb_scenes`, `zb_touchlink`,
+`coex_manager` (laut eigener Doku Draft), `memory_pool` (generische API, kein
+Singleton) und `cluster_state_ng` (funktional durch `device_registry` ersetzt —
+eher ein Loesch- als ein Anschlusskandidat).
 
 Verdrahten heisst hier: Kconfig-Flag (default n), `_init()` in
 `foundation_init.c` unter `INIT_OPTIONAL_COMPONENT`, und die Quelle in
