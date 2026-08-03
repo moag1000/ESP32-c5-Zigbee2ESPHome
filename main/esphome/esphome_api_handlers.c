@@ -1778,11 +1778,23 @@ static esp_err_t handle_execute_service(esphome_client_t *client, const esphome_
             case 1: /* key */
                 esphome_decode_fixed32(&buf, &key);
                 break;
+            /* Argument fields.
+             *
+             * Past the limit the value still has to be consumed. Skipping the
+             * decode as well would leave the read position in the middle of a
+             * field, so the next esphome_decode_tag() would read payload bytes
+             * as a tag and the rest of the message would be parsed as
+             * nonsense. The decoders are bounds-checked, so this is a
+             * correctness problem rather than a memory-safety one — but a
+             * caller can trigger it simply by sending more than
+             * ESPHOME_MAX_SERVICE_ARGS arguments. */
             case 2: /* bool_arg */
                 if (arg_count < ESPHOME_MAX_SERVICE_ARGS) {
                     args[arg_count].type = ESPHOME_SERVICE_ARG_BOOL;
                     esphome_decode_bool(&buf, &args[arg_count].bool_value);
                     arg_count++;
+                } else {
+                    esphome_skip_field(&buf, wire_type);
                 }
                 break;
             case 3: /* int_arg */
@@ -1792,6 +1804,8 @@ static esp_err_t handle_execute_service(esphome_client_t *client, const esphome_
                     esphome_decode_uint32(&buf, &int_val);
                     args[arg_count].int_value = (int32_t)int_val;
                     arg_count++;
+                } else {
+                    esphome_skip_field(&buf, wire_type);
                 }
                 break;
             case 4: /* float_arg */
@@ -1799,6 +1813,8 @@ static esp_err_t handle_execute_service(esphome_client_t *client, const esphome_
                     args[arg_count].type = ESPHOME_SERVICE_ARG_FLOAT;
                     esphome_decode_float(&buf, &args[arg_count].float_value);
                     arg_count++;
+                } else {
+                    esphome_skip_field(&buf, wire_type);
                 }
                 break;
             case 5: /* string_arg */
@@ -1807,6 +1823,8 @@ static esp_err_t handle_execute_service(esphome_client_t *client, const esphome_
                     esphome_decode_string(&buf, args[arg_count].string_value,
                                           sizeof(args[arg_count].string_value));
                     arg_count++;
+                } else {
+                    esphome_skip_field(&buf, wire_type);
                 }
                 break;
             default:

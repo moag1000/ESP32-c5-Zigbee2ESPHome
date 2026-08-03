@@ -24,6 +24,7 @@
 #include "core/memory/memory_manager_ng.h"
 #include "cJSON.h"
 #include "esp_log.h"
+#include <stdio.h>
 #include <string.h>
 
 static const char *TAG = "TEST_REG";
@@ -327,6 +328,57 @@ static void test_duplicate_add_returns_existing(void)
 }
 
 /* ============================================================================
+ * find_by_id — reachable from Home Assistant via remove_device
+ * ============================================================================ */
+
+static void test_find_by_friendly_name(void)
+{
+    reset_registry();
+    device_t *dev = device_registry_add(ID_A, DEV_PROTOCOL_ZIGBEE);
+    TEST_ASSERT_NOT_NULL(dev);
+    snprintf(dev->friendly_name, sizeof(dev->friendly_name), "Vibration Sensor");
+
+    TEST_ASSERT_TRUE(device_registry_find_by_id("Vibration Sensor") == dev);
+}
+
+static void test_find_by_exact_ieee_string(void)
+{
+    reset_registry();
+    device_t *dev = device_registry_add(ID_A, DEV_PROTOCOL_ZIGBEE);
+    TEST_ASSERT_NOT_NULL(dev);
+
+    /* ID_A is 0x00158D0000000001 — "0x" plus exactly 16 hex digits. */
+    TEST_ASSERT_TRUE(device_registry_find_by_id("0x00158d0000000001") == dev);
+}
+
+/**
+ * Trailing characters must not resolve. The check used to be a length
+ * minimum, so anything appended to a valid address still found the device —
+ * and remove_device acts on whatever comes back.
+ */
+static void test_find_rejects_trailing_garbage(void)
+{
+    reset_registry();
+    TEST_ASSERT_NOT_NULL(device_registry_add(ID_A, DEV_PROTOCOL_ZIGBEE));
+
+    TEST_ASSERT_NULL(device_registry_find_by_id("0x00158d0000000001_typo"));
+    TEST_ASSERT_NULL(device_registry_find_by_id("0x00158d0000000001AB"));
+}
+
+static void test_find_rejects_malformed_input(void)
+{
+    reset_registry();
+    TEST_ASSERT_NOT_NULL(device_registry_add(ID_A, DEV_PROTOCOL_ZIGBEE));
+
+    TEST_ASSERT_NULL(device_registry_find_by_id(NULL));
+    TEST_ASSERT_NULL(device_registry_find_by_id(""));
+    TEST_ASSERT_NULL(device_registry_find_by_id("0x00158d"));           /* too short */
+    TEST_ASSERT_NULL(device_registry_find_by_id("00158d0000000001xx")); /* no 0x     */
+    TEST_ASSERT_NULL(device_registry_find_by_id("0xzzzzzzzzzzzzzzzz")); /* not hex   */
+    TEST_ASSERT_NULL(device_registry_find_by_id("0x0000000000000000")); /* id 0      */
+}
+
+/* ============================================================================
  * Suite
  * ============================================================================ */
 
@@ -349,6 +401,11 @@ static const test_case_t device_registry_tests[] = {
     {"freed_slot_not_reused_immediately",     test_freed_slot_is_not_reused_immediately},
     {"consecutive_adds_distinct_slots",       test_consecutive_adds_get_distinct_slots},
     {"duplicate_add_returns_existing",        test_duplicate_add_returns_existing},
+
+    {"find_by_friendly_name",                 test_find_by_friendly_name},
+    {"find_by_exact_ieee_string",             test_find_by_exact_ieee_string},
+    {"find_rejects_trailing_garbage",         test_find_rejects_trailing_garbage},
+    {"find_rejects_malformed_input",          test_find_rejects_malformed_input},
 };
 
 test_stats_t run_device_registry_tests(void)

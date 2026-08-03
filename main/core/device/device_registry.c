@@ -528,11 +528,21 @@ device_t *device_registry_find_by_id(const char *id_str)
         return dev;
     }
 
-    /* 2. Try as IEEE address string (0x00124b001234abcd) */
+    /* 2. Try as IEEE address string: exactly "0x" plus 16 hex digits.
+     *
+     * Length is checked for equality, not ">= 18", and the parse has to
+     * consume the whole string. Accepting a prefix meant that
+     * "0x00124b001234abcd" followed by anything at all still resolved to that
+     * device, so a mistyped name could act on a real one. This is reachable
+     * from Home Assistant through remove_device and reconfigure_device, where
+     * hitting the wrong device is the expensive kind of mistake. */
     size_t len = strlen(id_str);
-    if (len >= 18 && id_str[0] == '0' && id_str[1] == 'x') {
-        device_id_t id = strtoull(id_str + 2, NULL, 16);
-        return device_registry_get(id);
+    if (len == 18 && id_str[0] == '0' && id_str[1] == 'x') {
+        char *endptr = NULL;
+        device_id_t id = strtoull(id_str + 2, &endptr, 16);
+        if (endptr != NULL && *endptr == '\0' && id != 0) {
+            return device_registry_get(id);
+        }
     }
 
     return NULL;
