@@ -38,6 +38,12 @@ set(TEST_SRCS
     "../unit/test_zb_backup.c"
     "../../main/zigbee/zb_backup.c"
     "../mocks/mock_zb_backup_deps.c"
+
+    # esphome_protocol.c includes nothing but its own header and esp_log.h —
+    # the cheapest module in esphome/ to cover, and the one where wrong message
+    # type IDs actually caused a Home Assistant disconnect loop.
+    "../unit/test_esphome_protocol.c"
+    "../../main/esphome/esphome_protocol.c"
 )
 
 idf_component_register(
@@ -55,6 +61,7 @@ idf_component_register(
         "../../main/mqtt"
         "../../main/utils"
         "../../main/zigbee"
+        "../../main/esphome"
     REQUIRES
         nvs_flash
         esp_timer
@@ -77,4 +84,5 @@ target_compile_definitions(${COMPONENT_LIB} PRIVATE
     TEST_SUITE_DEVICE_REGISTRY=1
     TEST_SUITE_ZB_DIAGNOSTICS=1
     TEST_SUITE_ZB_BACKUP=1
+    TEST_SUITE_ESPHOME_PROTOCOL=1
 )

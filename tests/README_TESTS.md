@@ -24,7 +24,18 @@ in `main/CMakeLists.txt` instead.
 
 ## What is green
 
-48 tests, all passing on hardware (ESP32-C5, ESP-IDF v6.0.2).
+61 tests, all passing on hardware (ESP32-C5, ESP-IDF v6.0.2).
+
+Run them with one command — it builds, flashes, runs, reports and puts the
+gateway firmware back, even if the tests fail or you interrupt it:
+
+```bash
+scripts/test.sh                  # autodetects the port
+scripts/test.sh /dev/cu.usbmodemXXXX
+scripts/test.sh --no-restore     # leave the test app on the board
+```
+
+Exit status is the test result, so it works in a pipeline.
 
 | Suite | Tests | Covers |
 |---|---|---|
@@ -32,6 +43,7 @@ in `main/CMakeLists.txt` instead.
 | Device Registry | 15 | the concurrency-safety contract — snapshot_ids, state_dup ownership, slot recycling |
 | Zigbee Diagnostics | 9 | `zb_diagnostics_get_network_map()` — ID snapshot iteration and the protocol filter |
 | Zigbee Backup | 7 | `collect_devices()` via `zb_backup_create()` — same iteration and filter |
+| ESPHome Protocol | 13 | protobuf encode/decode round-trips, and the message type IDs |
 
 The registry and diagnostics suites exist specifically to pin down behaviour
 that was changed without runtime cover:
@@ -61,6 +73,11 @@ it would mean adding an accessor to production code purely for the test. The
 logic is character-for-character the same as the two covered copies, so the
 gap is narrow, but it is a gap.
 
+The protocol suite pins the message type IDs by hand-written number rather
+than by reading the enum — a test that reads the constant it checks proves
+nothing. Wrong IDs previously put Home Assistant into a disconnect loop
+(errno 104), and the values come from aioesphomeapi's api.proto.
+
 ### Safety properties of this test app
 
 Two things were deliberate, and both matter if you touch the harness:
@@ -76,7 +93,7 @@ Two things were deliberate, and both matter if you touch the harness:
   that would wipe the real pairings and WiFi credentials. It warns and
   continues instead.
 
-Restore the gateway after a test run:
+`scripts/test.sh` restores the gateway automatically. Doing it by hand:
 `idf.py -p <port> flash` from the project root.
 
 ## What is retired
