@@ -483,14 +483,26 @@ esp_err_t esphome_api_init(const esphome_api_config_t *config)
         return ret;
     }
 
-    /* Initialize ESPHome device registry integration (best-effort)
-     * This bridges ESPHome entities to the unified device_registry */
+#if CONFIG_ESPHOME_ENTITY_REGISTRY_MIRROR
+    /* Mirror ESPHome entities into the unified device_registry.
+     *
+     * This is what makes entity states show up as MQTT topics, but it costs one
+     * registry slot per entity — measured at 54 of 64 slots on a gateway with
+     * two paired Zigbee devices. Every other caller of this module is already
+     * guarded by esphome_device_registry_is_initialized(), so skipping the init
+     * is all that is needed to turn the whole mirror off.
+     *
+     * See CONFIG_ESPHOME_ENTITY_REGISTRY_MIRROR for the trade-off. */
     ret = esphome_device_registry_init();
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Device registry integration not available: %s",
                  esp_err_to_name(ret));
         /* Continue without device registry integration - not critical */
     }
+#else
+    ESP_LOGI(TAG, "ESPHome entity mirror disabled — entity states are not "
+                  "written to the device registry or published over MQTT");
+#endif
 
     /* Register state change callback for broadcasting to clients */
     esphome_entities_set_state_callback(esphome_api_state_change_callback);
@@ -719,7 +731,9 @@ esp_err_t esphome_api_deinit(void)
     s_api.server_task = NULL;
 
     /* Deinitialize device registry integration */
+#if CONFIG_ESPHOME_ENTITY_REGISTRY_MIRROR
     esphome_device_registry_deinit();
+#endif
 
     /* Deinitialize entity manager */
     esphome_entities_deinit();

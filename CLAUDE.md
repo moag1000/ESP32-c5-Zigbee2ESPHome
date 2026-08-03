@@ -97,9 +97,21 @@ Gemessen am laufenden Gateway mit **zwei** gepairten Zigbee-Geraeten: 56 von 64
 Eintraegen belegt, davon 54 virtuell. `CONFIG_MAX_ZIGBEE_DEVICES` steht auf 50 —
 das ist mit dieser Auslegung unerreichbar.
 
-`CONFIG_DEVICE_REGISTRY_MAX_DEVICES` ist jetzt einstellbar (Default 64,
-unveraendert), und `device_registry_add()` warnt ab 80 % Fuellstand statt erst
-zu scheitern, wenn ein echtes Geraet abgewiesen wird.
+`CONFIG_DEVICE_REGISTRY_MAX_DEVICES` ist einstellbar (Default 64, unveraendert),
+und `device_registry_add()` warnt ab 80 % Fuellstand statt erst zu scheitern,
+wenn ein echtes Geraet abgewiesen wird.
+
+`CONFIG_ESPHOME_ENTITY_REGISTRY_MIRROR` (Default y) schaltet den Spiegel ab.
+Aus heisst: keine Slots mehr fuer Entities, dafuer keine per-Entity-MQTT-Topics.
+Home Assistant merkt davon nichts -- es liest Entities ueber die ESPHome-API,
+nicht ueber MQTT. Die Gateway-Diagnose steht ohnehin doppelt in `bridge/state`,
+fuer die ist der Spiegel reine Duplikation.
+
+Sauber waere, den Entity-Spiegel eine eigene Ablage bekommen zu lassen statt der
+Device-Registry. `esphome_device_registry.c` hat keinen eigenen Zustand -- es
+leitet die `device_id` aus dem Entity-Key ab und legt alles in der Registry ab.
+Das zu trennen aendert MQTT-sichtbares Verhalten und ist deshalb bewusst nicht
+nebenbei gemacht.
 
 Der Zaehler in `bridge/state` und `bridge/info` meldet ausschliesslich
 `stats.zigbee_count` — vorher stand dort die Gesamtzahl, weshalb `bridge/state`

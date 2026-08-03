@@ -503,6 +503,27 @@ menu "ESP32-C5 Zigbee2MQTT Gateway Configuration"
     endmenu
 
     menu "Device Registry"
+        config ESPHOME_ENTITY_REGISTRY_MIRROR
+            bool "Mirror ESPHome entities into the device registry"
+            default y
+            help
+                Registers every ESPHome entity as a virtual device so that its
+                state flows through the event bus and gets published to MQTT.
+
+                The cost is one registry slot per entity. Measured on a gateway
+                with two paired Zigbee devices: 54 of 64 slots taken by virtual
+                entries. With this on, DEVICE_REGISTRY_MAX_DEVICES has to be
+                budgeted by entity count, not by device count.
+
+                Turning it off frees that capacity. What you lose is the
+                per-entity MQTT topics (zigbee2mqtt/Free Heap and friends) —
+                note that the gateway's own diagnostics are published anyway
+                under bridge/state, so for those the mirror is duplication.
+                Home Assistant is unaffected either way: it reads entities over
+                the ESPHome API, not over MQTT.
+
+                Leave it on if you have MQTT automations bound to those topics.
+
         config DEVICE_REGISTRY_MAX_DEVICES
             int "Device registry capacity (entries)"
             default 64
