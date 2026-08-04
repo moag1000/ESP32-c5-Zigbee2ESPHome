@@ -648,10 +648,20 @@ static void ip_event_handler(void *arg, esp_event_base_t event_base,
  */
 static void log_visible_aps(void)
 {
-    wifi_scan_config_t scan_cfg = { .show_hidden = false };
-
+    /* NULL means "every channel the regulatory domain allows", which is what a
+     * diagnostic wants.
+     *
+     * This used to pass a wifi_scan_config_t that was zero apart from
+     * show_hidden. That is not a full scan: channel_bitmap.ghz_2_channels bit0
+     * selects between "scan as bitmap" (0) and "bypass this band" (1), and the
+     * remaining bits name the channels. All-zero therefore asks to scan by
+     * bitmap with no channels in it. The scan duly reported
+     *
+     *     Scan found no access points at all
+     *
+     * which reads like an RF problem and is nothing of the kind. */
     ESP_LOGI(TAG, "Scanning for access points...");
-    esp_err_t ret = esp_wifi_scan_start(&scan_cfg, true);  /* blocking */
+    esp_err_t ret = esp_wifi_scan_start(NULL, true);  /* blocking, all channels */
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Scan failed: %s", esp_err_to_name(ret));
         return;
