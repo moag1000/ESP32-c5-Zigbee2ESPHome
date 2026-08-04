@@ -48,7 +48,16 @@ const char* crash_reporter_reason_to_string(esp_reset_reason_t reason)
         case ESP_RST_DEEPSLEEP: return "deep_sleep";
         case ESP_RST_BROWNOUT:  return "brownout";
         case ESP_RST_SDIO:      return "sdio";
-        default:                return "unknown";
+        /* Present since ESP-IDF v5.x and reachable on this target. Without
+         * these the table fell through to "unknown", which is what every boot
+         * of a USB-attached devkit reported — the reset the debugger performs
+         * on every flash is ESP_RST_USB. */
+        case ESP_RST_USB:        return "usb";
+        case ESP_RST_JTAG:       return "jtag";
+        case ESP_RST_EFUSE:      return "efuse_error";
+        case ESP_RST_PWR_GLITCH: return "power_glitch";
+        case ESP_RST_CPU_LOCKUP: return "cpu_lockup";
+        default:                 return "unknown";
     }
 }
 
@@ -60,6 +69,13 @@ bool crash_reporter_is_crash(esp_reset_reason_t reason)
         case ESP_RST_TASK_WDT:
         case ESP_RST_WDT:
         case ESP_RST_BROWNOUT:
+        /* Both of these used to fall through `default` and be reported as a
+         * clean boot. CPU lockup is a double exception — the most severe crash
+         * the part can report — and a power glitch is the hardware telling you
+         * the supply dipped, which is precisely the kind of evidence that gets
+         * guessed at for weeks when it is not surfaced. */
+        case ESP_RST_CPU_LOCKUP:
+        case ESP_RST_PWR_GLITCH:
             return true;
 
         case ESP_RST_UNKNOWN:
@@ -68,6 +84,12 @@ bool crash_reporter_is_crash(esp_reset_reason_t reason)
         case ESP_RST_SW:
         case ESP_RST_DEEPSLEEP:
         case ESP_RST_SDIO:
+        /* Developer-initiated: the reset that follows every flash. */
+        case ESP_RST_USB:
+        case ESP_RST_JTAG:
+        /* An efuse read error is a fault, but not a crash of the running
+         * firmware — it says the part came up wrong, not that we broke. */
+        case ESP_RST_EFUSE:
         default:
             return false;
     }
