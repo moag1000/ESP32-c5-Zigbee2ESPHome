@@ -120,6 +120,9 @@ typedef enum {
     /* Retained Topic Cleanup Events */
     EVT_DEVICE_TOPICS_CLEAR,      /**< Clear retained MQTT topics for a device */
 
+    /* ESPHome Entity Events (entities are not devices — see esphome_entity_mirror.h) */
+    EVT_ESPHOME_ENTITY_STATE,     /**< An ESPHome entity's state changed */
+
     EVT_COUNT,                /**< Number of event types (must be last) */
 } event_type_t;
 

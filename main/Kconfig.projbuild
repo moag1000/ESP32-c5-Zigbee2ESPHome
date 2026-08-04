@@ -503,49 +503,73 @@ menu "ESP32-C5 Zigbee2MQTT Gateway Configuration"
     endmenu
 
     menu "Device Registry"
-        config ESPHOME_ENTITY_REGISTRY_MIRROR
-            bool "Mirror ESPHome entities into the device registry"
+        config ESPHOME_ENTITY_MIRROR
+            bool "Keep a mirror of ESPHome entity states"
+            default n if ESPHOME_PRIMARY_INTEGRATION
             default y
             help
-                Registers every ESPHome entity as a virtual device so that its
-                state flows through the event bus and gets published to MQTT.
+                Records the last state of every ESPHome entity and announces
+                changes as EVT_ESPHOME_ENTITY_STATE, which is what feeds the
+                per-entity MQTT topics (zigbee2mqtt/Free Heap and friends).
 
-                The cost is one registry slot per entity. Measured on a gateway
-                with two paired Zigbee devices: 54 of 64 slots taken by virtual
-                entries. With this on, DEVICE_REGISTRY_MAX_DEVICES has to be
-                budgeted by entity count, not by device count.
+                Defaults to off under ESPHOME_PRIMARY_INTEGRATION because there
+                it has no consumer: mqtt_adapter's device-state handler compiles
+                itself out in that mode, and republish_all_device_states() has
+                always skipped entities. The old registry-backed mirror still
+                ran there, spending 54 registry slots to publish nothing.
+                Enabling it explicitly under ESPHome primary now does what the
+                name says and produces the topics.
 
-                Turning it off frees that capacity. What you lose is the
-                per-entity MQTT topics (zigbee2mqtt/Free Heap and friends) —
-                note that the gateway's own diagnostics are published anyway
-                under bridge/state, so for those the mirror is duplication.
-                Home Assistant is unaffected either way: it reads entities over
-                the ESPHome API, not over MQTT.
+                The mirror has its own table and its own capacity
+                (ESPHOME_ENTITY_MIRROR_MAX). It used to store entities in the
+                unified device registry as virtual devices, which meant entity
+                count competed with device count for DEVICE_REGISTRY_MAX_DEVICES
+                — on a gateway with two paired Zigbee devices, 54 of 64 registry
+                slots went to entities. That coupling is gone.
+
+                Turning this off costs the per-entity MQTT topics and nothing
+                else. Home Assistant is unaffected: it reads entities over the
+                ESPHome API, not over MQTT. The gateway's own diagnostics are
+                published under bridge/state either way, so for those the mirror
+                is duplication.
 
                 Leave it on if you have MQTT automations bound to those topics.
+
+        config ESPHOME_ENTITY_MIRROR_MAX
+            int "ESPHome entity mirror capacity (entities)"
+            default 128
+            range 16 1024
+            depends on ESPHOME_ENTITY_MIRROR
+            help
+                How many ESPHome entities the mirror can hold.
+
+                Two paired Zigbee devices plus the gateway's own diagnostics
+                came to 54 entities, and each device adds entities according to
+                its capabilities, so this scales with devices times capabilities
+                rather than with devices. The default leaves generous headroom.
+
+                Registering past this limit logs an error and drops the entity
+                from the mirror — the entity itself still works over the ESPHome
+                API, it just stops appearing on MQTT.
+
+                Cost is about 44 bytes per slot in PSRAM, and the table is
+                rounded up to a power of two with room for a 3/4 load factor.
 
         config DEVICE_REGISTRY_MAX_DEVICES
             int "Device registry capacity (entries)"
             default 64
             range 16 512
             help
-                Total entries in the unified device registry.
+                Total entries in the unified device registry, which holds
 
-                IMPORTANT: this is not the number of Zigbee devices. Every
-                ESPHome entity is registered as a virtual device
-                (esphome_device_registry.c), so the registry holds
+                    Zigbee devices + BLE devices
 
-                    Zigbee devices + BLE devices + one slot per ESPHome entity
-
-                Measured on a gateway with two paired Zigbee devices: 56
-                entries, of which 54 were virtual. Gateway entities alone
-                account for roughly fifteen, and each Zigbee device adds one
-                per exposed value.
-
-                So budget by entities, not by devices. If MAX_ZIGBEE_DEVICES is
-                50 and a device exposes ~20 values, the registry needs to be in
-                the four figures, not 64 — and at that point the per-entity
-                design is worth revisiting rather than the number.
+                Budget this by device count. ESPHome entities are NOT in here:
+                they live in the entity mirror with its own capacity
+                (ESPHOME_ENTITY_MIRROR_MAX). Before that split, every entity was
+                registered as a virtual device and a gateway with two paired
+                Zigbee devices sat at 56 of 64 entries, 54 of them virtual —
+                which made MAX_ZIGBEE_DEVICES=50 unreachable by construction.
 
                 Each entry costs sizeof(device_t) in PSRAM.
 

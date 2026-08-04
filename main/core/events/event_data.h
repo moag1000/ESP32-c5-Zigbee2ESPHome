@@ -72,6 +72,20 @@ typedef struct {
     const char *json_state;     /**< JSON string of changed state */
 } evt_device_state_t;
 
+/** @ownership NONE */
+/**
+ * @brief EVT_ESPHOME_ENTITY_STATE payload
+ *
+ * Carries the key only. ESPHome entities have no device_t and their state is
+ * not in the device registry — read it with esphome_entity_mirror_get(), which
+ * hands back a copy taken under the mirror's lock. Putting the cJSON pointer in
+ * the event instead would race the next sync_state() freeing it.
+ */
+typedef struct {
+    uint32_t key;               /**< ESPHome entity key */
+    uint8_t  entity_type;       /**< esphome_entity_type_t of the entity */
+} evt_esphome_entity_state_t;
+
 /** @ownership BORROW */
 /** @brief EVT_DEVICE_INTERVIEWED payload */
 typedef struct {

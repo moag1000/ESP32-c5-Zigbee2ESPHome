@@ -40,10 +40,13 @@ Exit status is the test result, so it works in a pipeline.
 | Suite | Tests | Covers |
 |---|---|---|
 | Version Management | 17 | version strings and comparison |
-| Device Registry | 15 | the concurrency-safety contract — snapshot_ids, state_dup ownership, slot recycling |
+| Device Registry | 19 | the concurrency-safety contract — snapshot_ids, state_dup ownership, slot recycling |
 | Zigbee Diagnostics | 9 | `zb_diagnostics_get_network_map()` — ID snapshot iteration and the protocol filter |
 | Zigbee Backup | 7 | `collect_devices()` via `zb_backup_create()` — same iteration and filter |
 | ESPHome Protocol | 13 | protobuf encode/decode round-trips, and the message type IDs |
+| ESPHome Entity Mirror | 20 | the open-addressed entity table — backward-shift deletion and `_get()` copy ownership |
+
+85 tests total.
 
 The registry and diagnostics suites exist specifically to pin down behaviour
 that was changed without runtime cover:
@@ -54,6 +57,11 @@ that was changed without runtime cover:
 - `freed_slot_not_reused_immediately` fails if slot allocation goes back to
   scanning from index 0, which handed a removed device's slot straight to the
   next one that joined.
+- `deletion_keeps_collided` in the entity mirror suite is the guard on
+  backward-shift deletion. Getting that wrong does not crash — it makes
+  colliding entries silently unreachable, so it would surface in the field as
+  "some MQTT topics stopped updating after a device was removed" and nowhere
+  else.
 - `skips_non_zigbee_devices` fails if the `dev->protocol` check is dropped
   again. `device_t::proto` is a union, so reading the Zigbee arm for a BLE
   device reinterprets BLE fields. Present in both the diagnostics and the

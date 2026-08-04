@@ -21,7 +21,7 @@
 #include "esphome_api_internal.h"
 #include "esphome_protocol.h"
 #include "esphome_ble_proxy.h"
-#include "esphome_device_registry.h"
+#include "esphome_entity_mirror.h"
 #include "core/memory/memory_manager_ng.h"
 #include "core/events/event_bus.h"
 #include "core/events/event_data.h"
@@ -483,19 +483,20 @@ esp_err_t esphome_api_init(const esphome_api_config_t *config)
         return ret;
     }
 
-#if CONFIG_ESPHOME_ENTITY_REGISTRY_MIRROR
-    /* Mirror ESPHome entities into the unified device_registry.
+#if CONFIG_ESPHOME_ENTITY_MIRROR
+    /* Bring up the entity state mirror.
      *
-     * This is what makes entity states show up as MQTT topics, but it costs one
-     * registry slot per entity — measured at 54 of 64 slots on a gateway with
-     * two paired Zigbee devices. Every other caller of this module is already
-     * guarded by esphome_device_registry_is_initialized(), so skipping the init
-     * is all that is needed to turn the whole mirror off.
+     * This is what makes entity states show up as MQTT topics. It keeps its own
+     * table — entities are not devices and no longer take device registry slots
+     * (they once took 54 of 64 on a gateway with two paired Zigbee devices).
+     * Every other caller of this module is already guarded by
+     * esphome_entity_mirror_is_initialized(), so skipping the init is all that
+     * is needed to turn the whole mirror off.
      *
-     * See CONFIG_ESPHOME_ENTITY_REGISTRY_MIRROR for the trade-off. */
-    ret = esphome_device_registry_init();
+     * See CONFIG_ESPHOME_ENTITY_MIRROR for the trade-off. */
+    ret = esphome_entity_mirror_init();
     if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "Device registry integration not available: %s",
+        ESP_LOGW(TAG, "Entity mirror not available: %s",
                  esp_err_to_name(ret));
         /* Continue without device registry integration - not critical */
     }
@@ -731,8 +732,8 @@ esp_err_t esphome_api_deinit(void)
     s_api.server_task = NULL;
 
     /* Deinitialize device registry integration */
-#if CONFIG_ESPHOME_ENTITY_REGISTRY_MIRROR
-    esphome_device_registry_deinit();
+#if CONFIG_ESPHOME_ENTITY_MIRROR
+    esphome_entity_mirror_deinit();
 #endif
 
     /* Deinitialize entity manager */

@@ -44,6 +44,13 @@ set(TEST_SRCS
     # type IDs actually caused a Home Assistant disconnect loop.
     "../unit/test_esphome_protocol.c"
     "../../main/esphome/esphome_protocol.c"
+
+    # The entity mirror needs memory_manager_ng (already above) and event_bus,
+    # which comes in with the zb_diagnostics suite along with its perf_metrics
+    # mock. Nothing else: the mirror deliberately does not depend on the device
+    # registry any more, which is the whole point of the module.
+    "../unit/test_esphome_entity_mirror.c"
+    "../../main/esphome/esphome_entity_mirror.c"
 )
 
 idf_component_register(
@@ -85,4 +92,11 @@ target_compile_definitions(${COMPONENT_LIB} PRIVATE
     TEST_SUITE_ZB_DIAGNOSTICS=1
     TEST_SUITE_ZB_BACKUP=1
     TEST_SUITE_ESPHOME_PROTOCOL=1
+    TEST_SUITE_ESPHOME_ENTITY_MIRROR=1
+
+    # The mirror's header compiles to no-op stubs unless this is set, and the
+    # test project has no Kconfig entry for it. Define it here so the real
+    # implementation is what gets tested.
+    CONFIG_ESPHOME_ENTITY_MIRROR=1
+    CONFIG_ESPHOME_ENTITY_MIRROR_MAX=64
 )

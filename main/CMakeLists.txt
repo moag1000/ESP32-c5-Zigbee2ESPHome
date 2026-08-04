@@ -119,7 +119,6 @@ set(COMPONENT_SRCS
     "esphome/esphome_gateway_services.c"
     "esphome/esphome_ota.c"
     "esphome/esphome_noise.c"
-    "esphome/esphome_device_registry.c"
     "led/led_controller.c"
 )
 
@@ -242,6 +241,12 @@ endif()
 
 if(CONFIG_MEMORY_DASHBOARD_ENABLE)
     list(APPEND COMPONENT_SRCS "core/monitoring/memory_dashboard.c")
+endif()
+
+# Entity state mirror. Its only consumer is the per-entity MQTT topics, which
+# ESPHome primary mode compiles out, so it defaults to off there.
+if(CONFIG_ESPHOME_ENTITY_MIRROR)
+    list(APPEND COMPONENT_SRCS "esphome/esphome_entity_mirror.c")
 endif()
 
 if(CONFIG_ZIGBEE_MULTI_PAN_ENABLED)

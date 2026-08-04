@@ -85,44 +85,64 @@ Die Map ist die verlaessliche Quelle. Textsuche nach `<modul>_init` taeuscht in
 beide Richtungen: Referenzen aus ebenfalls totem Code zaehlen mit, und
 Substring-Treffer wie `evt_zb_ota_progress_t` sehen aus wie Aufrufe.
 
-## Device-Registry: Kapazitaet zaehlt Entities, nicht Geraete
+## Device-Registry: haelt nur noch Geraete (entkoppelt 2026-08-04)
 
-`esphome_device_registry.c` legt fuer **jede ESPHome-Entity** ein virtuelles
-Geraet in der Registry an. Die Kapazitaet wird also von der Entity-Zahl
-verbraucht, nicht von der Geraetezahl:
+Die Registry zaehlt jetzt Geraete:
 
-    Registry = Zigbee-Geraete + BLE-Geraete + 1 Slot je ESPHome-Entity
+    Registry = Zigbee-Geraete + BLE-Geraete
 
-Live gemessen (2026-08-04), ueber einen HA-Verbindungsaufbau hinweg:
+ESPHome-Entities liegen in `main/esphome/esphome_entity_mirror.c` mit eigener
+Kapazitaet (`CONFIG_ESPHOME_ENTITY_MIRROR_MAX`, Default 128).
+
+**Warum das noetig war.** Vorher legte `esphome_device_registry.c` fuer *jede*
+Entity ein virtuelles Geraet an. Live gemessen (2026-08-04), ueber einen
+HA-Verbindungsaufbau hinweg:
 
     t= 3s   registry= 2/64  ( 3%)   esphome_clients=0   zigbee=2
     t=56s   registry=56/64  (87%)   esphome_clients=1   zigbee=2
 
-In dem Moment, in dem Home Assistant verbindet, entstehen 54 virtuelle
-Eintraege — fuer zwei gepairte Geraete. `CONFIG_MAX_ZIGBEE_DEVICES` steht auf
-50; das ist mit dieser Auslegung unerreichbar.
+54 virtuelle Eintraege fuer zwei gepairte Geraete. `CONFIG_MAX_ZIGBEE_DEVICES`
+steht auf 50 — mit dieser Auslegung unerreichbar.
 
-Gegenprobe mit `CONFIG_ESPHOME_ENTITY_REGISTRY_MIRROR=n`: die Registry bleibt
-bei 2/64, auch mit verbundenem HA.
+**Der Befund, der die Sache entschied:** unter `ESPHOME_PRIMARY_INTEGRATION`
+(= Default) hatte der Spiegel *gar keinen Konsumenten*. `handle_device_state_changed()`
+im `mqtt_adapter` steigt bei genau diesem Define in Zeile 1 aus, und
+`republish_all_device_states()` ueberspringt `DEV_PROTOCOL_VIRTUAL`. Die 54
+Slots und 54 Events pro Zustandsaenderung erzeugten also **kein einziges
+MQTT-Topic**. Einziger Empfaenger war `esphome_adapter`s eigener Handler, der
+virtuelle Geraete nicht filtert — kein Kreislauf (`diagnostics_update()` bricht
+bei non-ZIGBEE ab, `update_entity_states()` findet die Keys nicht), aber
+vollstaendig verschwendete Arbeit.
 
-`bridge/state` fuehrt `registry_used` und `registry_max` mit, damit dieser
-Fuellstand ohne Serial-Log sichtbar ist.
+Daher: `CONFIG_ESPHOME_ENTITY_MIRROR` ist `default n if ESPHOME_PRIMARY_INTEGRATION`.
+Wer ihn dort trotzdem einschaltet, bekommt die Topics jetzt wirklich — vorher
+kostete Einschalten Slots und lieferte nichts.
 
-`CONFIG_DEVICE_REGISTRY_MAX_DEVICES` ist einstellbar (Default 64, unveraendert),
-und `device_registry_add()` warnt ab 80 % Fuellstand statt erst zu scheitern,
-wenn ein echtes Geraet abgewiesen wird.
+**Neuer Datenweg.** Entities haben kein `device_t`:
 
-`CONFIG_ESPHOME_ENTITY_REGISTRY_MIRROR` (Default y) schaltet den Spiegel ab.
-Aus heisst: keine Slots mehr fuer Entities, dafuer keine per-Entity-MQTT-Topics.
-Home Assistant merkt davon nichts -- es liest Entities ueber die ESPHome-API,
-nicht ueber MQTT. Die Gateway-Diagnose steht ohnehin doppelt in `bridge/state`,
-fuer die ist der Spiegel reine Duplikation.
+    Entity-Zustand -> esphome_entity_mirror_sync_state()
+      -> EVT_ESPHOME_ENTITY_STATE (traegt nur den Key)
+      -> mqtt_adapter -> esphome_entity_mirror_get() -> zigbee2mqtt/<name>
 
-Sauber waere, den Entity-Spiegel eine eigene Ablage bekommen zu lassen statt der
-Device-Registry. `esphome_device_registry.c` hat keinen eigenen Zustand -- es
-leitet die `device_id` aus dem Entity-Key ab und legt alles in der Registry ab.
-Das zu trennen aendert MQTT-sichtbares Verhalten und ist deshalb bewusst nicht
-nebenbei gemacht.
+`_get()` liefert eine unter der Mirror-Sperre gezogene **Kopie**. Den
+cJSON-Zeiger ins Event zu legen waere ein Use-after-free, sobald der naechste
+`sync_state()` ihn ersetzt — derselbe Fehler, der schon bei `json_state` steckte.
+
+Die Tabelle ist offen adressiert mit linearem Probing und schliesst Luecken per
+**Backward-Shift** statt Tombstones. Das ist der eine Teil, der stillschweigend
+kaputtgehen kann: ein falsch geschlossener Probe-Lauf macht kollidierte
+Eintraege unerreichbar, ohne zu crashen. `test_deletion_keeps_collided_entries_reachable`
+in `tests/unit/test_esphome_entity_mirror.c` deckt das ab (Suite: 20 Tests).
+
+**Nachweis, dass die Kopplung weg ist:** kein `device_registry_add()` im Baum
+nimmt noch `DEV_PROTOCOL_VIRTUAL`, und im Default-Build wird
+`esphome_entity_mirror.c` gar nicht erst kompiliert (0 Treffer in
+`build/compile_commands.json`). Der Fuellstand ist damit strukturell begrenzt,
+nicht nur beobachtet.
+
+`bridge/state` fuehrt `registry_used` und `registry_max` mit, damit der
+Fuellstand ohne Serial-Log sichtbar ist. `device_registry_add()` warnt ab 80 %
+statt erst zu scheitern, wenn ein echtes Geraet abgewiesen wird.
 
 Der Zaehler in `bridge/state` und `bridge/info` meldet ausschliesslich
 `stats.zigbee_count` — vorher stand dort die Gesamtzahl, weshalb `bridge/state`
@@ -347,7 +367,8 @@ event_subscribe(EVT_DEVICE_STATE_CHANGED, on_state_change, NULL);
 ```
 
 **Event Types:** `EVT_DEVICE_JOINED`, `EVT_DEVICE_LEFT`, `EVT_DEVICE_STATE_CHANGED`,
-`EVT_DEVICE_INTERVIEWED`, `EVT_MQTT_CONNECTED`, `EVT_MQTT_DISCONNECTED`
+`EVT_DEVICE_INTERVIEWED`, `EVT_MQTT_CONNECTED`, `EVT_MQTT_DISCONNECTED`,
+`EVT_ESPHOME_ENTITY_STATE` (Entities, die kein `device_t` haben)
 
 ### Unified Device Model
 ```c
@@ -430,7 +451,7 @@ buffer_pool_t *pool = foundation_get_mqtt_pool();  // 8x 512B
 | **ESPHome Adapter** | `main/core/adapters/esphome_adapter.c` -- Bridges event bus + device registry to ESPHome entities |
 | ESPHome Services | `main/esphome/esphome_services.c` (Framework), `esphome_gateway_services.c` (die 3 Gateway-Services) |
 | ESPHome OTA | `main/esphome/esphome_ota.c` (Port 3232, gestartet aus `esphome_adapter_gateway.c`) |
-| ESPHome Device Registry | `main/esphome/esphome_device_registry.c` |
+| ESPHome Entity Mirror | `main/esphome/esphome_entity_mirror.c` (eigene Ablage, **nicht** die Device-Registry) |
 | ESPHome BLE | `main/esphome/esphome_ble_proxy.c` (**inaktiv**, BT aus) |
 | ESPHome Crypto | `esphome_noise.c`, `esphome_crypto_constants.h` |
 | mmWave | `main/mmwave/mmwave_sensor.c` (S3KM1110, UART, 16 Gates) |

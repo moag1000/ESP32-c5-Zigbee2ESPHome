@@ -19,6 +19,9 @@
 #include "core/memory/memory_manager_ng.h"
 #include "mqtt/gateway_mqtt.h"
 #include "mqtt/mqtt_topics.h"
+#if CONFIG_ESPHOME_ENTITY_MIRROR
+#include "esphome_entity_mirror.h"
+#endif
 #if CONFIG_BATCH_PUBLISHER_ENABLE
 #include "mqtt/batch_publisher.h"
 #endif
@@ -62,6 +65,9 @@ static void handle_mqtt_disconnected(event_type_t type, void *data, size_t data_
 static void handle_power_state_changed(event_type_t type, void *data, size_t data_size, void *ctx);
 static void handle_tuya_datapoint(event_type_t type, void *data, size_t data_size, void *ctx);
 static void handle_bindings_list(event_type_t type, void *data, size_t data_size, void *ctx);
+#if CONFIG_ESPHOME_ENTITY_MIRROR
+static void handle_esphome_entity_state(event_type_t type, void *data, size_t data_size, void *ctx);
+#endif
 
 /* ============================================================================
  * Helper Functions
@@ -86,30 +92,29 @@ static void get_device_display_name(const device_t *dev, char *buf, size_t buf_s
 }
 
 /**
- * @brief Publish device state JSON to MQTT
+ * @brief Publish a state JSON to the state topic of @p display_name
  *
  * Uses the MQTT buffer pool for message formatting when available,
  * falling back to cJSON_PrintUnformatted for larger messages or
  * when the pool is exhausted.
  *
- * @param dev Pointer to device
+ * Takes a name rather than a device because ESPHome entities publish through
+ * here too, and those have no device_t — see esphome_entity_mirror.h.
+ *
+ * @param display_name Name the state topic is built from
  * @param state_json State JSON object (not consumed)
  * @return ESP_OK on success, error otherwise
  */
-static esp_err_t publish_device_state(const device_t *dev, cJSON *state_json)
+static esp_err_t publish_state_by_name(const char *display_name, cJSON *state_json)
 {
     if (!s_mqtt_connected) {
         ESP_LOGD(TAG, "MQTT not connected, skipping state publish");
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (!dev || !state_json) {
+    if (!display_name || !state_json) {
         return ESP_ERR_INVALID_ARG;
     }
-
-    /* Build topic */
-    char display_name[MQTT_MEDIUM_STR_MAX_LEN];
-    get_device_display_name(dev, display_name, sizeof(display_name));
 
     char topic[MQTT_TOPIC_MAX_LEN];
     esp_err_t ret = mqtt_topic_device_state(display_name, topic, sizeof(topic));
@@ -177,6 +182,25 @@ static esp_err_t publish_device_state(const device_t *dev, cJSON *state_json)
     }
 
     return ret;
+}
+
+/**
+ * @brief Publish a device's state JSON to MQTT
+ *
+ * @param dev Pointer to device
+ * @param state_json State JSON object (not consumed)
+ * @return ESP_OK on success, error otherwise
+ */
+static esp_err_t publish_device_state(const device_t *dev, cJSON *state_json)
+{
+    if (!dev) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    char display_name[MQTT_MEDIUM_STR_MAX_LEN];
+    get_device_display_name(dev, display_name, sizeof(display_name));
+
+    return publish_state_by_name(display_name, state_json);
 }
 
 /**
@@ -364,6 +388,54 @@ static void handle_device_state_changed(event_type_t type, void *data, size_t da
                  (unsigned long long)evt->ieee_addr);
     }
 }
+
+#if CONFIG_ESPHOME_ENTITY_MIRROR
+/**
+ * @brief Handle EVT_ESPHOME_ENTITY_STATE — publish an entity's state
+ *
+ * ESPHome entities have no device_t and are not in the device registry, so this
+ * cannot go through handle_device_state_changed(). The event carries the entity
+ * key only; the name and an owned copy of the state come from the mirror, which
+ * takes both under its own lock.
+ *
+ * Unlike the device handler this is not compiled out under ESPHome primary:
+ * CONFIG_ESPHOME_ENTITY_MIRROR already defaults to off in that mode, so a build
+ * that has it on asked for these topics deliberately.
+ */
+static void handle_esphome_entity_state(event_type_t type, void *data,
+                                         size_t data_size, void *ctx)
+{
+    (void)type;
+    (void)ctx;
+
+    if (!data || data_size != sizeof(evt_esphome_entity_state_t)) {
+        return;
+    }
+
+    const evt_esphome_entity_state_t *evt = (const evt_esphome_entity_state_t *)data;
+
+    char name[ESPHOME_ENTITY_MIRROR_NAME_LEN];
+    cJSON *state = NULL;
+    if (esphome_entity_mirror_get(evt->key, name, sizeof(name), &state) != ESP_OK) {
+        ESP_LOGD(TAG, "Entity key=%lu not mirrored, skipping state publish",
+                 (unsigned long)evt->key);
+        return;
+    }
+
+    if (!state) {
+        ESP_LOGD(TAG, "No state yet for entity key=%lu", (unsigned long)evt->key);
+        return;
+    }
+
+    if (name[0] != '\0') {
+        publish_state_by_name(name, state);
+    } else {
+        ESP_LOGD(TAG, "Entity key=%lu has no name, cannot build a topic",
+                 (unsigned long)evt->key);
+    }
+    cJSON_Delete(state);
+}
+#endif /* CONFIG_ESPHOME_ENTITY_MIRROR */
 
 /**
  * @brief Handle EVT_DEVICE_JOINED event
@@ -702,6 +774,15 @@ esp_err_t mqtt_adapter_init(void)
         /* Non-critical, continue without bindings list events */
     }
 
+#if CONFIG_ESPHOME_ENTITY_MIRROR
+    /* Subscribe to ESPHome entity state events */
+    ret = event_subscribe(EVT_ESPHOME_ENTITY_STATE, handle_esphome_entity_state, NULL);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to subscribe to EVT_ESPHOME_ENTITY_STATE: %s", esp_err_to_name(ret));
+        /* Non-critical, continue without per-entity state topics */
+    }
+#endif
+
     /* Check if MQTT is already connected */
     s_mqtt_connected = mqtt_client_is_connected();
 
@@ -728,6 +809,9 @@ esp_err_t mqtt_adapter_deinit(void)
     event_unsubscribe(EVT_POWER_STATE_CHANGED, handle_power_state_changed);
     event_unsubscribe(EVT_TUYA_DATAPOINT, handle_tuya_datapoint);
     event_unsubscribe(EVT_ZB_BINDINGS_LIST, handle_bindings_list);
+#if CONFIG_ESPHOME_ENTITY_MIRROR
+    event_unsubscribe(EVT_ESPHOME_ENTITY_STATE, handle_esphome_entity_state);
+#endif
 
     s_mqtt_connected = false;
     s_initialized = false;

@@ -5,9 +5,9 @@
  * Core entity management functions including initialization, deinitialization,
  * state callback management, entity enumeration, and type lookup.
  *
- * Integration with unified device_registry:
- *   - State changes are synced to device_registry via esphome_device_registry module
- *   - EVT_DEVICE_STATE_CHANGED events are published for each state update
+ * Integration with the ESPHome entity mirror:
+ *   - State changes are recorded by the esphome_entity_mirror module
+ *   - EVT_ESPHOME_ENTITY_STATE events are published for each state update
  *
  * @copyright Copyright (c) 2026
  * @license Apache License 2.0
@@ -15,7 +15,7 @@
 
 #include "esphome_entity_internal.h"
 #include "esphome_crypto_constants.h"
-#include "esphome_device_registry.h"
+#include "esphome_entity_mirror.h"
 
 /* Log tag */
 static const char *TAG = "ESPHOME_ENTITY";
@@ -70,7 +70,7 @@ ENTITY_FIND_BY_KEY_IMPL(text_entry_t, find_text, texts, text_count)
  * @brief Notify state change callback
  *
  * Notifies both the ESPHome API callback (for client broadcasting) and
- * syncs the state to the unified device_registry with event publishing.
+ * records the state in the entity mirror, which publishes the change event.
  */
 void notify_state_change(esphome_entity_type_t type, esphome_entity_key_t key,
                          const void *state)
@@ -80,9 +80,9 @@ void notify_state_change(esphome_entity_type_t type, esphome_entity_key_t key,
         s_entities.state_callback(type, key, state);
     }
 
-    /* Sync state to unified device_registry and publish event */
-    if (esphome_device_registry_is_initialized()) {
-        esphome_device_registry_sync_state(type, key, state);
+    /* Record in the entity mirror, which publishes EVT_ESPHOME_ENTITY_STATE */
+    if (esphome_entity_mirror_is_initialized()) {
+        esphome_entity_mirror_sync_state(type, key, state);
     }
 }
 

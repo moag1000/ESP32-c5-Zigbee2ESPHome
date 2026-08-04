@@ -4,7 +4,7 @@
  *
  * Registration, state management, and encoding for specialized entities.
  *
- * Integration with unified device_registry:
+ * Integration with the ESPHome entity mirror:
  *   - Entity registration creates a virtual device in device_registry
  *   - Capabilities are set based on entity type (LOCK, etc.)
  *
@@ -14,7 +14,7 @@
 
 #include "esphome_entity_internal.h"
 #include "esphome_protocol.h"
-#include "esphome_device_registry.h"
+#include "esphome_entity_mirror.h"
 
 /* ============================================================================
  * Button Registration and State
@@ -62,12 +62,12 @@ esp_err_t esphome_entity_register_button(const esphome_button_config_t *config)
 
     ESP_LOGI(ENTITY_TAG, "Registered button: key=%lu, name='%s'", config->key, config->name);
 
-    /* Register with unified device_registry (best-effort, non-blocking) */
-    if (esphome_device_registry_is_initialized()) {
-        esp_err_t reg_ret = esphome_device_registry_register(
+    /* Mirror into the entity state store (best-effort, non-blocking) */
+    if (esphome_entity_mirror_is_initialized()) {
+        esp_err_t reg_ret = esphome_entity_mirror_register(
             ESPHOME_ENTITY_BUTTON, config->key, config->name, config->unique_id);
         if (reg_ret != ESP_OK) {
-            ESP_LOGD(ENTITY_TAG, "Device registry registration skipped: %s",
+            ESP_LOGD(ENTITY_TAG, "Entity mirror registration skipped: %s",
                      esp_err_to_name(reg_ret));
         }
     }
