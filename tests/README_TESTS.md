@@ -1,6 +1,6 @@
 # Test suite status
 
-Last reviewed: 2026-08-01, against ESP-IDF v6.0.2.
+Last reviewed: 2026-08-05, against ESP-IDF v6.0.2.
 
 ## What was wrong
 
@@ -24,7 +24,7 @@ in `main/CMakeLists.txt` instead.
 
 ## What is green
 
-61 tests, all passing on hardware (ESP32-C5, ESP-IDF v6.0.2).
+103 tests, all passing on hardware (ESP32-C5, ESP-IDF v6.0.2).
 
 Run them with one command — it builds, flashes, runs, reports and puts the
 gateway firmware back, even if the tests fail or you interrupt it:
@@ -134,7 +134,6 @@ helper function ends up linking most of the Zigbee stack.
 |---|---|
 | JSON Utilities | `utils/json_utils.c` → zb_network, device_registry, cluster modules |
 | Config Manager | `core/config_manager.c` → NVS, event bus |
-| MQTT Topics | `mqtt/mqtt_topics.c` |
 | WiFi + MQTT Integration | wifi_manager, mqtt client, mocks |
 | OTA | ota_handler, app_update |
 
