@@ -197,6 +197,50 @@ Budget, das aus `CONFIG_WIFI_CAPTIVE_PORTAL_TIMEOUT_SEC` **abgeleitet** ist; ein
 geratener Festwert (3 min) war 118 s zu kurz und hat den Fix wirkungslos
 gemacht.
 
+## WiFi empfaengt nicht -- und es liegt nicht an dieser Firmware
+
+Stand 2026-08-05, auf Hardware eingegrenzt. Das Gateway assoziiert nicht
+(`reason 201`, NO_AP_FOUND) und ein Scan findet **null** Access Points, auf
+jedem Band:
+
+    2.4 GHz only: no access points     (2,5 s)
+    5 GHz only:   no access points     (7,3 s)
+    both bands:   no access points     (9,7 s)
+
+Die Laufzeiten zeigen, dass die Scans wirklich liefen.
+
+**Was es nicht ist** -- der Reihe nach ausgeschlossen:
+
+| Verdacht | Gegenbeweis |
+|----------|-------------|
+| Falsches Passwort | `reason 201` faellt, bevor der PSK benutzt wird |
+| Falscher Country-Code | `Regulatory domain: DE (env ' ')` gesetzt |
+| Falscher Band-Modus | einzeln 2.4, 5 und AUTO gescannt, alle leer |
+| Kaputte Scan-Config | leere `channel_bitmap` behoben, Ergebnis unveraendert |
+| PHY-Kalibrierung | `CONFIG_ESP_PHY_RF_CAL_FULL`, Ergebnis unveraendert |
+| Radio von Zigbee belegt | nichts ruft 802.15.4 vor dem Scan; `esp_coex_wifi_i154_enable()` erst in `zigbee_stack_start()` |
+| Nichts in Reichweite | Handy und Mac am selben Ort haben WLAN |
+| **Diese Firmware** | **ESP-IDFs eigenes `examples/wifi/scan`, unveraendert, meldet `Total APs scanned = 0`** |
+
+Der letzte Punkt ist der entscheidende. Das Minimalbeispiel wurde **nur in den
+App-Bereich** (0x20000) geflasht, ohne Partitionstabelle -- Pairings,
+`zb_storage` und die Converter-DB bleiben dabei unangetastet. Das ist der
+Weg, wenn so ein Vergleich noch einmal noetig wird:
+
+```bash
+python -m esptool --chip esp32c5 -p <port> write-flash \
+    --flash-size 16MB 0x20000 <fremde_app>.bin
+```
+
+**Gegenprobe, die zaehlt:** 802.15.4 laeuft auf demselben Board einwandfrei --
+Netz auf Kanal 25 gebildet, zwei Geraete gepollt, `online=2` ueber 13 Minuten.
+Der 2,4-GHz-Pfad funktioniert also fuer das Radio, das der Zigbee-Stack
+treibt, waehrend der WiFi-Empfaenger auf beiden Baendern nichts hoert.
+
+Damit liegt die Ursache unterhalb der Software. Weiter kommt man von hier aus
+nicht: das ist ein Fall fuer Antennenanschluss, HF-Frontend oder einen
+Boardtausch, nicht fuer Code.
+
 ## Der Boot-Scan war kaputt (und hat in die Irre gefuehrt)
 
 `log_visible_aps()` uebergab eine `wifi_scan_config_t`, die ausser
