@@ -816,10 +816,6 @@ esp_err_t wifi_manager_init(void)
         }
     }
 
-#if CONFIG_WIFI_SCAN_ON_BOOT
-    log_visible_aps();
-#endif
-
 #ifdef CONFIG_WIFI_PREFER_5GHZ
     /* Use AUTO band mode with rssi_5g_adjustment to prefer 5GHz.
      * Previously used 5G_ONLY which caused a 45s timeout when 5GHz AP
@@ -830,6 +826,17 @@ esp_err_t wifi_manager_init(void)
     } else {
         ESP_LOGW(TAG, "AUTO band mode failed: %s", esp_err_to_name(band_ret));
     }
+#endif
+
+    /* Scan only after the band mode is set.
+     *
+     * This used to run before it, which made the diagnostic lie: the scan
+     * covered whatever band mode the driver happened to start in rather than
+     * the one the gateway actually connects with, so "no access points at all"
+     * said nothing about why association was failing. The scan is here to
+     * answer that question, so it has to see the same bands. */
+#if CONFIG_WIFI_SCAN_ON_BOOT
+    log_visible_aps();
 #endif
 
     /* Disable power save BEFORE connecting to ensure fast response to management frames
