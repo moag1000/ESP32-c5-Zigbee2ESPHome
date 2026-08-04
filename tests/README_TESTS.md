@@ -45,8 +45,9 @@ Exit status is the test result, so it works in a pipeline.
 | Zigbee Backup | 7 | `collect_devices()` via `zb_backup_create()` — same iteration and filter |
 | ESPHome Protocol | 13 | protobuf encode/decode round-trips, and the message type IDs |
 | ESPHome Entity Mirror | 20 | the open-addressed entity table — backward-shift deletion and `_get()` copy ownership |
+| MQTT Topics | 18 | topic building, sanitising and wildcard matching — truncation must error, not shorten |
 
-85 tests total.
+103 tests total.
 
 The registry and diagnostics suites exist specifically to pin down behaviour
 that was changed without runtime cover:
@@ -57,6 +58,11 @@ that was changed without runtime cover:
 - `freed_slot_not_reused_immediately` fails if slot allocation goes back to
   scanning from index 0, which handed a removed device's slot straight to the
   next one that joined.
+- The MQTT topics suite replaced a file that tested nothing: it defined its own
+  `MQTT_BASE_TOPIC` and its own `build_device_state_topic()`, then asserted on
+  those, so it passed no matter what `mqtt_topics.c` did — and would have kept
+  passing had the module been deleted. Worth remembering as a shape: a test
+  that reimplements its subject proves only that the test compiles.
 - `deletion_keeps_collided` in the entity mirror suite is the guard on
   backward-shift deletion. Getting that wrong does not crash — it makes
   colliding entries silently unreachable, so it would surface in the field as

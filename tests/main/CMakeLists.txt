@@ -51,6 +51,12 @@ set(TEST_SRCS
     # registry any more, which is the whole point of the module.
     "../unit/test_esphome_entity_mirror.c"
     "../../main/esphome/esphome_entity_mirror.c"
+
+    # mqtt_topics.c includes nothing but its own header, string.h, ctype.h and
+    # esp_log.h — the cheapest module in the tree to cover, and the one where a
+    # truncated topic silently names the wrong device.
+    "../unit/test_mqtt_topics.c"
+    "../../main/mqtt/mqtt_topics.c"
 )
 
 idf_component_register(
@@ -93,10 +99,16 @@ target_compile_definitions(${COMPONENT_LIB} PRIVATE
     TEST_SUITE_ZB_BACKUP=1
     TEST_SUITE_ESPHOME_PROTOCOL=1
     TEST_SUITE_ESPHOME_ENTITY_MIRROR=1
+    TEST_SUITE_MQTT_TOPICS=1
 
     # The mirror's header compiles to no-op stubs unless this is set, and the
     # test project has no Kconfig entry for it. Define it here so the real
     # implementation is what gets tested.
     CONFIG_ESPHOME_ENTITY_MIRROR=1
     CONFIG_ESPHOME_ENTITY_MIRROR_MAX=64
+
+    # mqtt_topics.h derives MQTT_BASE_TOPIC from this; the test project has no
+    # Kconfig entry for it. Must match the gateway's own default.
+    CONFIG_MQTT_BASE_TOPIC=\"zigbee2mqtt\"
+    CONFIG_HOMEASSISTANT_DISCOVERY_PREFIX=\"homeassistant\"
 )

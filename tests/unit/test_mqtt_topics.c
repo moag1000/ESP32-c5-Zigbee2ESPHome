@@ -1,296 +1,343 @@
 /**
  * @file test_mqtt_topics.c
- * @brief Unit Tests for MQTT Topic Building and Parsing
+ * @brief Tests for MQTT topic building, sanitising and matching
+ *
+ * The previous version of this file tested nothing. It defined its own
+ * MQTT_BASE_TOPIC and its own static build_device_state_topic() and friends,
+ * built topics with snprintf, and asserted on those — so it passed regardless
+ * of what mqtt_topics.c did, and would have kept passing if the module had
+ * been deleted outright. These tests call the real API.
+ *
+ * Two things are worth covering rather than assuming:
+ *
+ * 1. **Truncation.** Every builder is an snprintf into a caller's buffer and
+ *    has to report ESP_ERR_NO_MEM rather than hand back a shortened topic. A
+ *    truncated topic is not a broken string — it is a valid topic naming a
+ *    different device, which is how a state update gets published under
+ *    someone else's name. This project has already had one truncation bug on a
+ *    path built exactly this way.
+ *
+ * 2. **Sanitising.** Friendly names come from users and end up in topics. The
+ *    MQTT wildcards + and # and the separator / have to be neutralised, or a
+ *    device named "Lamp/+" yields a topic overlapping subscriptions it should
+ *    never match.
  *
  * @copyright Copyright (c) 2026
  * @license Apache License 2.0
  */
 
 #include "../test_framework.h"
+#include "mqtt/mqtt_topics.h"
 #include "esp_log.h"
 #include <string.h>
 #include <stdio.h>
 
 static const char *TAG = "TEST_MQTT_TOPICS";
 
-/* Base topic prefix for Zigbee2MQTT */
-#define MQTT_BASE_TOPIC "zigbee2mqtt"
+/** Fill byte used to prove a builder did not write past the length it was given. */
+#define CANARY 0x5A
 
 /**
- * @brief Helper function to build device state topic
+ * @brief Buffer with guard bytes past the usable end
+ *
+ * The builder is given @c usable as its buf_len; everything from buf[usable]
+ * onwards must still read as CANARY afterwards.
  */
-static void build_device_state_topic(const char *friendly_name, char *buffer, size_t len)
+typedef struct {
+    char   buf[MQTT_TOPIC_MAX_LEN + 8];
+    size_t usable;
+} guarded_buf_t;
+
+static void guarded_init(guarded_buf_t *g, size_t usable)
 {
-    snprintf(buffer, len, "%s/%s", MQTT_BASE_TOPIC, friendly_name);
+    memset(g->buf, CANARY, sizeof(g->buf));
+    g->usable = usable;
 }
 
-/**
- * @brief Helper function to build device command topic
- */
-static void build_device_command_topic(const char *friendly_name, char *buffer, size_t len)
+static bool guard_intact(const guarded_buf_t *g)
 {
-    snprintf(buffer, len, "%s/%s/set", MQTT_BASE_TOPIC, friendly_name);
-}
-
-/**
- * @brief Helper function to build bridge topic
- */
-static void build_bridge_topic(const char *subtopic, char *buffer, size_t len)
-{
-    snprintf(buffer, len, "%s/bridge/%s", MQTT_BASE_TOPIC, subtopic);
-}
-
-/**
- * @brief Helper function to parse topic and extract device name
- */
-static bool parse_device_topic(const char *topic, char *device_name, size_t name_len)
-{
-    /* Expected format: "zigbee2mqtt/<device_name>" or "zigbee2mqtt/<device_name>/set" */
-    const char *prefix = MQTT_BASE_TOPIC "/";
-    size_t prefix_len = strlen(prefix);
-
-    if (strncmp(topic, prefix, prefix_len) != 0) {
-        return false;
-    }
-
-    const char *name_start = topic + prefix_len;
-    const char *name_end = strchr(name_start, '/');
-
-    if (name_end == NULL) {
-        /* No slash - use entire remaining string */
-        strncpy(device_name, name_start, name_len - 1);
-        device_name[name_len - 1] = '\0';
-    } else {
-        /* Copy until slash */
-        size_t name_size = name_end - name_start;
-        if (name_size >= name_len) {
-            name_size = name_len - 1;
+    for (size_t i = g->usable; i < sizeof(g->buf); i++) {
+        if ((unsigned char)g->buf[i] != CANARY) {
+            return false;
         }
-        memcpy(device_name, name_start, name_size);
-        device_name[name_size] = '\0';
     }
-
     return true;
 }
 
-/**
- * @brief Test building device state topic
- */
-static void test_build_device_state_topic(void)
-{
-    char topic[128];
-    build_device_state_topic("living_room_light", topic, sizeof(topic));
+/* ============================================================================
+ * Topic construction
+ * ============================================================================ */
 
-    TEST_ASSERT_EQUAL_STRING("zigbee2mqtt/living_room_light", topic);
+static void test_state_topic_shape(void)
+{
+    char topic[MQTT_TOPIC_MAX_LEN];
+    TEST_ASSERT_EQUAL(ESP_OK, mqtt_topic_device_state("Living Room", topic, sizeof(topic)));
+
+    size_t base_len = strlen(MQTT_BASE_TOPIC);
+    TEST_ASSERT_EQUAL(0, strncmp(topic, MQTT_BASE_TOPIC, base_len));
+    TEST_ASSERT_EQUAL('/', topic[base_len]);
+    TEST_ASSERT_EQUAL_STRING("Living Room", topic + base_len + 1);
 }
 
-/**
- * @brief Test building device command topic
- */
-static void test_build_device_command_topic(void)
+static void test_four_topics_are_distinct_and_share_a_prefix(void)
 {
-    char topic[128];
-    build_device_command_topic("bedroom_switch", topic, sizeof(topic));
+    char state[MQTT_TOPIC_MAX_LEN];
+    char set[MQTT_TOPIC_MAX_LEN];
+    char get[MQTT_TOPIC_MAX_LEN];
+    char avail[MQTT_TOPIC_MAX_LEN];
 
-    TEST_ASSERT_EQUAL_STRING("zigbee2mqtt/bedroom_switch/set", topic);
+    TEST_ASSERT_EQUAL(ESP_OK, mqtt_topic_device_state("dev", state, sizeof(state)));
+    TEST_ASSERT_EQUAL(ESP_OK, mqtt_topic_device_set("dev", set, sizeof(set)));
+    TEST_ASSERT_EQUAL(ESP_OK, mqtt_topic_device_get("dev", get, sizeof(get)));
+    TEST_ASSERT_EQUAL(ESP_OK, mqtt_topic_device_availability("dev", avail, sizeof(avail)));
+
+    /* A device's four topics must not collide. State published onto the set
+     * topic would make the gateway command itself. */
+    TEST_ASSERT_NOT_EQUAL(0, strcmp(state, set));
+    TEST_ASSERT_NOT_EQUAL(0, strcmp(state, get));
+    TEST_ASSERT_NOT_EQUAL(0, strcmp(state, avail));
+    TEST_ASSERT_NOT_EQUAL(0, strcmp(set, get));
+    TEST_ASSERT_NOT_EQUAL(0, strcmp(set, avail));
+    TEST_ASSERT_NOT_EQUAL(0, strcmp(get, avail));
+
+    /* All three sub-topics hang off the device topic. */
+    TEST_ASSERT_EQUAL(0, strncmp(set, state, strlen(state)));
+    TEST_ASSERT_EQUAL(0, strncmp(get, state, strlen(state)));
+    TEST_ASSERT_EQUAL(0, strncmp(avail, state, strlen(state)));
 }
 
-/**
- * @brief Test building bridge info topic
- */
-static void test_build_bridge_info_topic(void)
+static void test_null_arguments_rejected(void)
 {
-    char topic[128];
-    build_bridge_topic("info", topic, sizeof(topic));
+    char topic[MQTT_TOPIC_MAX_LEN];
 
-    TEST_ASSERT_EQUAL_STRING("zigbee2mqtt/bridge/info", topic);
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, mqtt_topic_device_state(NULL, topic, sizeof(topic)));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, mqtt_topic_device_state("d", NULL, sizeof(topic)));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, mqtt_topic_device_state("d", topic, 0));
+
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, mqtt_topic_device_set(NULL, topic, sizeof(topic)));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, mqtt_topic_device_get(NULL, topic, sizeof(topic)));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
+                      mqtt_topic_device_availability(NULL, topic, sizeof(topic)));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, mqtt_topic_sanitize_name(NULL, topic, sizeof(topic)));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
+                      mqtt_topic_extract_friendly_name(NULL, topic, sizeof(topic)));
 }
 
-/**
- * @brief Test building bridge state topic
- */
-static void test_build_bridge_state_topic(void)
+/* The point of the suite: a builder that cannot fit the topic must say so
+ * rather than return a shorter, valid-looking topic for a different device. */
+static void test_small_buffer_is_an_error_not_a_truncation(void)
 {
-    char topic[128];
-    build_bridge_topic("state", topic, sizeof(topic));
+    guarded_buf_t g;
+    const size_t tiny = 8;      /* Far shorter than base + '/' + name */
+    const char *long_name = "A Device With A Long Name";
 
-    TEST_ASSERT_EQUAL_STRING("zigbee2mqtt/bridge/state", topic);
+    guarded_init(&g, tiny);
+    TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, mqtt_topic_device_state(long_name, g.buf, tiny));
+    TEST_ASSERT_TRUE(guard_intact(&g));
+
+    guarded_init(&g, tiny);
+    TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, mqtt_topic_device_set(long_name, g.buf, tiny));
+    TEST_ASSERT_TRUE(guard_intact(&g));
+
+    guarded_init(&g, tiny);
+    TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, mqtt_topic_device_get(long_name, g.buf, tiny));
+    TEST_ASSERT_TRUE(guard_intact(&g));
+
+    guarded_init(&g, tiny);
+    TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, mqtt_topic_device_availability(long_name, g.buf, tiny));
+    TEST_ASSERT_TRUE(guard_intact(&g));
 }
 
-/**
- * @brief Test building bridge devices topic
- */
-static void test_build_bridge_devices_topic(void)
+/* Exactly-fitting buffer succeeds; one byte less must fail. */
+static void test_exact_fit_boundary(void)
 {
-    char topic[128];
-    build_bridge_topic("devices", topic, sizeof(topic));
+    const char *name = "dev";
+    size_t needed = strlen(MQTT_BASE_TOPIC) + 1 + strlen(name) + 1;
 
-    TEST_ASSERT_EQUAL_STRING("zigbee2mqtt/bridge/devices", topic);
+    char buf[MQTT_TOPIC_MAX_LEN];
+    TEST_ASSERT_EQUAL(ESP_OK, mqtt_topic_device_state(name, buf, needed));
+    TEST_ASSERT_EQUAL(needed - 1, strlen(buf));
+
+    TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, mqtt_topic_device_state(name, buf, needed - 1));
 }
 
-/**
- * @brief Test building bridge request topic
- */
-static void test_build_bridge_request_topic(void)
-{
-    char topic[128];
-    build_bridge_topic("request/permit_join", topic, sizeof(topic));
+/* ============================================================================
+ * Sanitising
+ * ============================================================================ */
 
-    TEST_ASSERT_EQUAL_STRING("zigbee2mqtt/bridge/request/permit_join", topic);
+static void test_sanitize_neutralises_wildcards_and_separator(void)
+{
+    char out[64];
+
+    TEST_ASSERT_EQUAL(ESP_OK, mqtt_topic_sanitize_name("Lamp/Kitchen", out, sizeof(out)));
+    TEST_ASSERT_EQUAL_STRING("Lamp_Kitchen", out);
+
+    TEST_ASSERT_EQUAL(ESP_OK, mqtt_topic_sanitize_name("all+", out, sizeof(out)));
+    TEST_ASSERT_EQUAL_STRING("all_", out);
+
+    TEST_ASSERT_EQUAL(ESP_OK, mqtt_topic_sanitize_name("all#", out, sizeof(out)));
+    TEST_ASSERT_EQUAL_STRING("all_", out);
+
+    TEST_ASSERT_EQUAL(ESP_OK, mqtt_topic_sanitize_name("Living Room", out, sizeof(out)));
+    TEST_ASSERT_EQUAL_STRING("Living_Room", out);
+
+    /* Whatever goes in, no wildcard or separator may survive. */
+    TEST_ASSERT_EQUAL(ESP_OK, mqtt_topic_sanitize_name("a/b+c#d$e\\f*g?h", out, sizeof(out)));
+    TEST_ASSERT_NULL(strpbrk(out, "/+#$\\*?"));
 }
 
-/**
- * @brief Test parsing device topic
- */
-static void test_parse_device_topic_simple(void)
+static void test_sanitize_keeps_safe_characters(void)
 {
-    char device_name[64];
-    bool result = parse_device_topic("zigbee2mqtt/kitchen_light", device_name, sizeof(device_name));
-
-    TEST_ASSERT_TRUE(result);
-    TEST_ASSERT_EQUAL_STRING("kitchen_light", device_name);
+    char out[64];
+    TEST_ASSERT_EQUAL(ESP_OK, mqtt_topic_sanitize_name("Sensor-1_v2.0", out, sizeof(out)));
+    TEST_ASSERT_EQUAL_STRING("Sensor-1_v2.0", out);
 }
 
-/**
- * @brief Test parsing device command topic
- */
-static void test_parse_device_topic_with_set(void)
+static void test_sanitize_errors_rather_than_truncating(void)
 {
-    char device_name[64];
-    bool result = parse_device_topic("zigbee2mqtt/garage_door/set", device_name, sizeof(device_name));
-
-    TEST_ASSERT_TRUE(result);
-    TEST_ASSERT_EQUAL_STRING("garage_door", device_name);
+    guarded_buf_t g;
+    guarded_init(&g, 8);
+    TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM,
+                      mqtt_topic_sanitize_name("a name far longer than eight", g.buf, 8));
+    TEST_ASSERT_TRUE(guard_intact(&g));
 }
 
-/**
- * @brief Test parsing bridge topic
- */
-static void test_parse_bridge_topic(void)
+static void test_sanitize_empty_name(void)
 {
-    const char *topic = "zigbee2mqtt/bridge/request/permit_join";
-
-    /* Should contain "bridge" */
-    TEST_ASSERT_NOT_NULL(strstr(topic, "bridge"));
-    TEST_ASSERT_NOT_NULL(strstr(topic, "request"));
+    char out[8];
+    TEST_ASSERT_EQUAL(ESP_OK, mqtt_topic_sanitize_name("", out, sizeof(out)));
+    TEST_ASSERT_EQUAL_STRING("", out);
 }
 
-/**
- * @brief Test parsing invalid topic
- */
-static void test_parse_invalid_topic(void)
-{
-    char device_name[64];
-    bool result = parse_device_topic("invalid/topic", device_name, sizeof(device_name));
+/* ============================================================================
+ * Extraction
+ * ============================================================================ */
 
-    TEST_ASSERT_FALSE(result);
+static void test_extract_friendly_name(void)
+{
+    char name[64];
+    char topic[MQTT_TOPIC_MAX_LEN];
+
+    snprintf(topic, sizeof(topic), "%s/Kitchen Lamp", MQTT_BASE_TOPIC);
+    TEST_ASSERT_EQUAL(ESP_OK, mqtt_topic_extract_friendly_name(topic, name, sizeof(name)));
+    TEST_ASSERT_EQUAL_STRING("Kitchen Lamp", name);
+
+    /* A trailing segment must not become part of the name. */
+    snprintf(topic, sizeof(topic), "%s/Kitchen Lamp/set", MQTT_BASE_TOPIC);
+    TEST_ASSERT_EQUAL(ESP_OK, mqtt_topic_extract_friendly_name(topic, name, sizeof(name)));
+    TEST_ASSERT_EQUAL_STRING("Kitchen Lamp", name);
 }
 
-/**
- * @brief Test topic with special characters
- */
-static void test_build_topic_with_special_chars(void)
+static void test_extract_rejects_foreign_base(void)
 {
-    char topic[128];
-    build_device_state_topic("device_name_123", topic, sizeof(topic));
-
-    TEST_ASSERT_NOT_NULL(strstr(topic, "device_name_123"));
+    char name[64];
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG,
+                      mqtt_topic_extract_friendly_name("someoneelse/dev", name, sizeof(name)));
 }
 
-/**
- * @brief Test topic buffer overflow protection
- */
-static void test_build_topic_buffer_size(void)
+static void test_extract_errors_rather_than_truncating(void)
 {
-    char small_buffer[20];
-    build_device_state_topic("very_long_device_name_that_exceeds_buffer",
-                            small_buffer, sizeof(small_buffer));
+    guarded_buf_t g;
+    char topic[MQTT_TOPIC_MAX_LEN];
+    snprintf(topic, sizeof(topic), "%s/A Very Long Device Name Indeed", MQTT_BASE_TOPIC);
 
-    /* Should be null-terminated */
-    TEST_ASSERT_EQUAL('\0', small_buffer[sizeof(small_buffer) - 1]);
+    guarded_init(&g, 8);
+    TEST_ASSERT_EQUAL(ESP_ERR_NO_MEM, mqtt_topic_extract_friendly_name(topic, g.buf, 8));
+    TEST_ASSERT_TRUE(guard_intact(&g));
 }
 
-/**
- * @brief Test multiple device topics
- */
-static void test_build_multiple_topics(void)
+/* A sanitised name must come back out of its own state topic unchanged. */
+static void test_sanitized_name_round_trips(void)
 {
-    char topic1[128], topic2[128], topic3[128];
+    char sane[64];
+    char topic[MQTT_TOPIC_MAX_LEN];
+    char back[64];
 
-    build_device_state_topic("light1", topic1, sizeof(topic1));
-    build_device_state_topic("light2", topic2, sizeof(topic2));
-    build_device_state_topic("light3", topic3, sizeof(topic3));
-
-    TEST_ASSERT_EQUAL_STRING("zigbee2mqtt/light1", topic1);
-    TEST_ASSERT_EQUAL_STRING("zigbee2mqtt/light2", topic2);
-    TEST_ASSERT_EQUAL_STRING("zigbee2mqtt/light3", topic3);
+    TEST_ASSERT_EQUAL(ESP_OK, mqtt_topic_sanitize_name("Buero/Lampe 1", sane, sizeof(sane)));
+    TEST_ASSERT_EQUAL(ESP_OK, mqtt_topic_device_state(sane, topic, sizeof(topic)));
+    TEST_ASSERT_EQUAL(ESP_OK, mqtt_topic_extract_friendly_name(topic, back, sizeof(back)));
+    TEST_ASSERT_EQUAL_STRING(sane, back);
 }
 
-/**
- * @brief Test parsing topic with get suffix
- */
-static void test_parse_device_topic_with_get(void)
-{
-    char device_name[64];
-    bool result = parse_device_topic("zigbee2mqtt/sensor1/get", device_name, sizeof(device_name));
+/* ============================================================================
+ * Wildcard matching
+ * ============================================================================ */
 
-    TEST_ASSERT_TRUE(result);
-    TEST_ASSERT_EQUAL_STRING("sensor1", device_name);
+static void test_matches_exact(void)
+{
+    TEST_ASSERT_TRUE(mqtt_topic_matches("a/b/c", "a/b/c"));
+    TEST_ASSERT_FALSE(mqtt_topic_matches("a/b/c", "a/b/d"));
+    TEST_ASSERT_FALSE(mqtt_topic_matches("a/b", "a/b/c"));
+    TEST_ASSERT_FALSE(mqtt_topic_matches("a/b/c", "a/b"));
 }
 
-/**
- * @brief Test topic matching
- */
-static void test_topic_matching(void)
+static void test_matches_single_level_wildcard(void)
 {
-    const char *topic1 = "zigbee2mqtt/light1";
-    const char *topic2 = "zigbee2mqtt/light1/set";
-
-    /* Both should start with base topic + device name */
-    TEST_ASSERT_NOT_NULL(strstr(topic1, "zigbee2mqtt/light1"));
-    TEST_ASSERT_NOT_NULL(strstr(topic2, "zigbee2mqtt/light1"));
+    TEST_ASSERT_TRUE(mqtt_topic_matches("a/anything/c", "a/+/c"));
+    TEST_ASSERT_TRUE(mqtt_topic_matches("a/b/c", "a/+/c"));
+    /* + covers exactly one level and must not cross a separator. */
+    TEST_ASSERT_FALSE(mqtt_topic_matches("a/b/extra/c", "a/+/c"));
 }
 
-/**
- * @brief Test empty device name handling
- */
-static void test_build_topic_empty_name(void)
+static void test_matches_multi_level_wildcard(void)
 {
-    char topic[128];
-    build_device_state_topic("", topic, sizeof(topic));
-
-    /* Should produce "zigbee2mqtt/" */
-    TEST_ASSERT_EQUAL_STRING("zigbee2mqtt/", topic);
+    TEST_ASSERT_TRUE(mqtt_topic_matches("a/b/c/d", "a/#"));
+    TEST_ASSERT_TRUE(mqtt_topic_matches("a/b", "a/#"));
+    TEST_ASSERT_TRUE(mqtt_topic_matches("anything/at/all", "#"));
+    TEST_ASSERT_FALSE(mqtt_topic_matches("b/c", "a/#"));
 }
 
-/**
- * @brief MQTT topics test suite
- */
+static void test_matches_null_is_false_not_a_crash(void)
+{
+    TEST_ASSERT_FALSE(mqtt_topic_matches(NULL, "a/#"));
+    TEST_ASSERT_FALSE(mqtt_topic_matches("a/b", NULL));
+    TEST_ASSERT_FALSE(mqtt_topic_matches(NULL, NULL));
+}
+
+/* The bridge subscribes with wildcards. A device's set topic has to match the
+ * pattern actually subscribed to, or its commands never arrive. */
+static void test_set_topic_matches_bridge_subscription(void)
+{
+    char topic[MQTT_TOPIC_MAX_LEN];
+    char pattern[MQTT_TOPIC_MAX_LEN];
+
+    TEST_ASSERT_EQUAL(ESP_OK, mqtt_topic_device_set("Kitchen_Lamp", topic, sizeof(topic)));
+
+    snprintf(pattern, sizeof(pattern), "%s/+/set", MQTT_BASE_TOPIC);
+    TEST_ASSERT_TRUE(mqtt_topic_matches(topic, pattern));
+
+    snprintf(pattern, sizeof(pattern), "%s/#", MQTT_BASE_TOPIC);
+    TEST_ASSERT_TRUE(mqtt_topic_matches(topic, pattern));
+}
+
+/* ============================================================================
+ * Suite
+ * ============================================================================ */
+
 static const test_case_t mqtt_topics_tests[] = {
-    {"build_device_state_topic", test_build_device_state_topic},
-    {"build_device_command_topic", test_build_device_command_topic},
-    {"build_bridge_info_topic", test_build_bridge_info_topic},
-    {"build_bridge_state_topic", test_build_bridge_state_topic},
-    {"build_bridge_devices_topic", test_build_bridge_devices_topic},
-    {"build_bridge_request_topic", test_build_bridge_request_topic},
-    {"parse_device_topic_simple", test_parse_device_topic_simple},
-    {"parse_device_topic_with_set", test_parse_device_topic_with_set},
-    {"parse_bridge_topic", test_parse_bridge_topic},
-    {"parse_invalid_topic", test_parse_invalid_topic},
-    {"build_topic_with_special_chars", test_build_topic_with_special_chars},
-    {"build_topic_buffer_size", test_build_topic_buffer_size},
-    {"build_multiple_topics", test_build_multiple_topics},
-    {"parse_device_topic_with_get", test_parse_device_topic_with_get},
-    {"topic_matching", test_topic_matching},
-    {"build_topic_empty_name", test_build_topic_empty_name},
+    {"state_topic_shape",        test_state_topic_shape},
+    {"four_topics_distinct",     test_four_topics_are_distinct_and_share_a_prefix},
+    {"null_arguments_rejected",  test_null_arguments_rejected},
+    {"small_buffer_errors",      test_small_buffer_is_an_error_not_a_truncation},
+    {"exact_fit_boundary",       test_exact_fit_boundary},
+    {"sanitize_wildcards",       test_sanitize_neutralises_wildcards_and_separator},
+    {"sanitize_keeps_safe",      test_sanitize_keeps_safe_characters},
+    {"sanitize_errors_small",    test_sanitize_errors_rather_than_truncating},
+    {"sanitize_empty",           test_sanitize_empty_name},
+    {"extract_friendly_name",    test_extract_friendly_name},
+    {"extract_foreign_base",     test_extract_rejects_foreign_base},
+    {"extract_errors_small",     test_extract_errors_rather_than_truncating},
+    {"sanitized_round_trip",     test_sanitized_name_round_trips},
+    {"matches_exact",            test_matches_exact},
+    {"matches_plus",             test_matches_single_level_wildcard},
+    {"matches_hash",             test_matches_multi_level_wildcard},
+    {"matches_null",             test_matches_null_is_false_not_a_crash},
+    {"set_topic_matches_sub",    test_set_topic_matches_bridge_subscription},
 };
 
-/**
- * @brief Run all MQTT topics tests
- */
 test_stats_t run_mqtt_topics_tests(void)
 {
     ESP_LOGI(TAG, "Running MQTT Topics Tests");
     return test_run_suite(mqtt_topics_tests,
-                         sizeof(mqtt_topics_tests) / sizeof(mqtt_topics_tests[0]));
+                          sizeof(mqtt_topics_tests) / sizeof(mqtt_topics_tests[0]));
 }
