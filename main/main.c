@@ -69,6 +69,17 @@ extern const zb_converter_def_t *conv_generic_for_capabilities(uint32_t caps);
 /* ZCL command retry */
 #include "zigbee/zb_cmd_retry.h"
 
+#if CONFIG_ZB_SCENES_ENABLE
+#include "zigbee/zb_scenes.h"
+#endif
+#if CONFIG_ZB_TOUCHLINK_ENABLE
+#include "zigbee/zb_touchlink.h"
+#endif
+#if CONFIG_ZB_OTA_ENABLE
+#include "zigbee/zb_ota.h"
+#endif
+
+
 /* Lifecycle manager for dynamic service control */
 #include "core/lifecycle_manager.h"
 
@@ -432,6 +443,32 @@ static void zigbee_stack_start(void)
 
 #if CONFIG_GW_LED_ENABLED
     led_status_manager_set_condition(LED_COND_ZIGBEE_RUNNING, true);
+#endif
+
+    /* Optional Zigbee features, each behind its own Kconfig flag and each
+     * defaulting to off. They need the stack running, which is why they are
+     * here rather than in foundation_init.c with the protocol-independent
+     * components. A failure is non-fatal: the gateway's core job does not
+     * depend on any of them. */
+#if CONFIG_ZB_SCENES_ENABLE
+    ret = zb_scenes_init();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG_ZIGBEE, "Scenes init failed: %s (continuing)", esp_err_to_name(ret));
+    }
+#endif
+
+#if CONFIG_ZB_TOUCHLINK_ENABLE
+    ret = zb_touchlink_init();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG_ZIGBEE, "Touchlink init failed: %s (continuing)", esp_err_to_name(ret));
+    }
+#endif
+
+#if CONFIG_ZB_OTA_ENABLE
+    ret = zb_ota_init();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG_ZIGBEE, "Zigbee OTA init failed: %s (continuing)", esp_err_to_name(ret));
+    }
 #endif
 
 #if CONFIG_ESP_COEX_SW_COEXIST_ENABLE && CONFIG_SOC_IEEE802154_SUPPORTED

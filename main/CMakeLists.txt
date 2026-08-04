@@ -15,12 +15,9 @@ set(COMPONENT_SRCS
     "zigbee/zb_callbacks.c"
     "zigbee/zb_interview.c"
     "zigbee/zb_groups.c"
-    "zigbee/zb_scenes.c"
     "zigbee/zb_binding.c"
     "zigbee/zb_backup.c"
     "zigbee/zb_topology.c"
-    "zigbee/zb_touchlink.c"
-    "zigbee/zb_ota.c"
     "zigbee/zb_availability.c"
     "zigbee/zb_rejoin_helper.c"
     "zigbee/zb_leave_helper.c"
@@ -218,6 +215,20 @@ endif()
 # Green Power additionally has no MIC verification (see zb_gp_verify_security);
 # frames at FULL_COUNTER_MIC or above are rejected outright, so enabling this
 # will not give you working secured Green Power devices yet.
+# Zigbee features that were complete but never connected. Each is opt-in and
+# gated here too, so turning one off keeps it out of the image entirely.
+if(CONFIG_ZB_SCENES_ENABLE)
+    list(APPEND COMPONENT_SRCS "zigbee/zb_scenes.c")
+endif()
+
+if(CONFIG_ZB_TOUCHLINK_ENABLE)
+    list(APPEND COMPONENT_SRCS "zigbee/zb_touchlink.c")
+endif()
+
+if(CONFIG_ZB_OTA_ENABLE)
+    list(APPEND COMPONENT_SRCS "zigbee/zb_ota.c")
+endif()
+
 if(CONFIG_ZB_GREEN_POWER_ENABLE)
     list(APPEND COMPONENT_SRCS "zigbee/zb_green_power.c")
 endif()

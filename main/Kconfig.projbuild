@@ -1121,6 +1121,53 @@ menu "ESP32-C5 Zigbee2MQTT Gateway Configuration"
                 Note also that zb_gp_init() currently has no caller, so turning
                 this on adds code to the image without activating anything.
 
+        config ZB_SCENES_ENABLE
+            bool "Enable Zigbee scenes"
+            default n
+            help
+                Scene management: create, store, recall, rename, NVS
+                persistence and the zigbee2mqtt/bridge/request/scene/* topics.
+
+                Complete but unconnected until now, which is why it defaults to
+                off. Storing a scene captures each group member's last reported
+                state out of the device registry — no radio round-trip, and a
+                device that has never reported is left out rather than guessed
+                at.
+
+                Colour is limited to colour temperature. Nothing in the tree
+                reports CIE xy, so scenes never capture it and recall skips it.
+
+        config ZB_TOUCHLINK_ENABLE
+            bool "Enable Zigbee Touchlink"
+            default n
+            help
+                Touchlink commissioning: scan, identify, factory reset and
+                join for nearby devices, plus the matching MQTT requests.
+                Mainly useful for taking over Hue and other ZLL devices that
+                are still bound to another controller.
+
+                Complete but unconnected until now. Touchlink is a proximity
+                protocol — the target has to be within a metre or so — and
+                factory-resetting someone else's device is not reversible from
+                here, so it is off unless you ask for it.
+
+        config ZB_OTA_ENABLE
+            bool "Enable Zigbee OTA server"
+            default n
+            help
+                Serves firmware images to Zigbee devices over the ZCL OTA
+                cluster: image storage, query-next-image, block transfer,
+                upgrade-end, per-device transfer status and statistics.
+
+                Complete but unconnected until now. One gap: the MQTT request
+                handler parses the topic and logs it, but the IEEE address
+                lookup behind zigbee2mqtt/.../ota/update/ and /ota/check/ is
+                not implemented, so trigger it through the C API
+                (zb_ota_notify_device, zb_ota_notify_broadcast) rather than
+                over MQTT.
+
+                Images live in LittleFS and are added with zb_ota_add_image().
+
     endmenu
 
     menu "Multi-PAN Configuration (EXPERIMENTAL)"

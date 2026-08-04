@@ -28,6 +28,7 @@
 #include "esp_heap_caps.h"
 #include <string.h>
 #include <stdlib.h>
+#include <stdint.h>
 
 static const char *TAG = "ZB_SCENES";
 
@@ -1334,30 +1335,78 @@ static esp_err_t capture_group_device_states(zb_scene_t *scene)
         /* Find device info using NG device registry */
         device_t *device = device_registry_get(ieee_addr);
 
-        if (device != NULL) {
-            /* Store device state - in real implementation, would read current state */
-            zb_scene_device_state_t *state = &scene->devices[scene->device_count];
-            state->ieee_addr = ieee_addr;
-            state->endpoint = device->proto.zigbee.endpoint;
-
-            /* TODO: Read actual device state via ZCL Read Attributes
-             * For now, store default values - actual implementation would
-             * need to query the device for current On/Off, Level, Color states
-             */
-            state->on_off_state = true;     /* Placeholder */
-            state->level = ZCL_LEVEL_MAX;   /* Placeholder */
-            state->color_x = 0;
-            state->color_y = 0;
-            state->color_temp = 0;
-
-            scene->device_count++;
-
-            ESP_LOGD(TAG, "Captured state for device 0x%016llX:%d",
-                     (unsigned long long)ieee_addr, device->proto.zigbee.endpoint);
-        } else {
+        if (device == NULL) {
             ESP_LOGW(TAG, "Device 0x%016llX not found in registry",
                      (unsigned long long)ieee_addr);
+            continue;
         }
+
+        /* Take the last reported state rather than reading over the air.
+         *
+         * This used to store on=true, level=max, colours=0 for every member
+         * with a "TODO: read actual device state" next to it, so storing a
+         * scene silently recorded values nobody had. Recalling it would then
+         * drive every light to full brightness regardless of what was captured
+         * — worse than failing, because it looks like it worked.
+         *
+         * The registry already holds what each device last reported, which is
+         * what the gateway knows and what its own MQTT and ESPHome output is
+         * built from. Using it keeps store instant and off the radio. A device
+         * that has never reported is skipped, not invented. */
+        cJSON *json = device_registry_state_dup(ieee_addr);
+        if (json == NULL) {
+            ESP_LOGW(TAG, "Device 0x%016llX has not reported a state yet — "
+                          "leaving it out of the scene",
+                     (unsigned long long)ieee_addr);
+            continue;
+        }
+
+        zb_scene_device_state_t *state = &scene->devices[scene->device_count];
+        memset(state, 0, sizeof(*state));
+        state->ieee_addr = ieee_addr;
+        state->endpoint = device->proto.zigbee.endpoint;
+
+        /* On/Off is "ON"/"OFF" in the zigbee2mqtt-shaped state, but a few
+         * converters emit a plain boolean. Accept both. */
+        const cJSON *on_off = cJSON_GetObjectItem(json, "state");
+        if (cJSON_IsString(on_off) && on_off->valuestring != NULL) {
+            state->on_off_state = (strcmp(on_off->valuestring, "ON") == 0);
+        } else if (cJSON_IsBool(on_off)) {
+            state->on_off_state = cJSON_IsTrue(on_off);
+        }
+
+        const cJSON *level = cJSON_GetObjectItem(json, "brightness");
+        if (cJSON_IsNumber(level)) {
+            double v = level->valuedouble;
+            if (v < 0) {
+                v = 0;
+            } else if (v > ZCL_LEVEL_MAX) {
+                v = ZCL_LEVEL_MAX;
+            }
+            state->level = (uint8_t)v;
+        }
+
+        const cJSON *color_temp = cJSON_GetObjectItem(json, "color_temp");
+        if (cJSON_IsNumber(color_temp)) {
+            double v = color_temp->valuedouble;
+            if (v < 0) {
+                v = 0;
+            } else if (v > UINT16_MAX) {
+                v = UINT16_MAX;
+            }
+            state->color_temp = (uint16_t)v;
+        }
+
+        /* color_x/color_y stay zero: no converter in the tree reports CIE xy,
+         * only colour temperature. Recall skips them when they are zero. */
+
+        cJSON_Delete(json);
+        scene->device_count++;
+
+        ESP_LOGD(TAG, "Captured state for device 0x%016llX:%d "
+                      "(on=%d level=%u ct=%u)",
+                 (unsigned long long)ieee_addr, device->proto.zigbee.endpoint,
+                 (int)state->on_off_state, state->level, state->color_temp);
     }
 
     ESP_LOGI(TAG, "Captured %d device states", scene->device_count);
