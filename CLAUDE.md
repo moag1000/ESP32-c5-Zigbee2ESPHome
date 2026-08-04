@@ -32,46 +32,57 @@ Pruefen, ob es wirklich aus ist: keine `CONFIG_BT_*`-Defines in
 `build/config/sdkconfig.h`, 0 Treffer fuer `bt/host/nimble` in
 `build/compile_commands.json`.
 
-## Nicht verdrahteter Code (gemessen 2026-08-01)
+## Toter Code: aufgeraeumt (gemessen 2026-08-05)
 
-Zwoelf Uebersetzungseinheiten werden kompiliert, tragen aber **kein einziges
-Symbol** zum fertigen Image bei -- der Linker verwirft sie per `--gc-sections`
-vollstaendig. Zusammen rund **10.560 Zeilen**.
+Es gibt **keinen unbeabsichtigt toten Code mehr**. Uebrig sind 1.868 Zeilen,
+die per Konfiguration korrekt nicht im Image landen:
 
 | Modul | LOC | Warum tot |
 |-------|-----|-----------|
-| `zigbee/zb_ota.c` | 1982 | nie initialisiert; die Event-Konsumenten in `mqtt_event_handler.c` existieren, der Produzent laeuft nie |
-| `zigbee/zb_scenes.c` | 1545 | keine externen Referenzen |
-| `zigbee/zb_router.c` | 1119 | Router-Modus; Geraet laeuft als Coordinator (erwartet) |
-| `zigbee/zb_touchlink.c` | 1070 | nie initialisiert |
-| `zigbee/cluster_state_ng.c` | 1000 | **kein einziger Aufruf von `cluster_state_*` im Projekt** |
-| `core/coex_manager.c` | 787 | nie initialisiert (`COEX_MANAGER_CONCEPT.md` nennt es selbst Draft) |
-| `core/monitoring/event_trace.c` | 752 | **verdrahtet 2026-08-02** — `CONFIG_EVENT_TRACE_ENABLE`, default n |
-| `core/adapters/ble_adapter.c` | 749 | BLE ist aus (erwartet) |
-| `mqtt/batch_publisher.c` | 555 | **verdrahtet 2026-08-02** — `CONFIG_BATCH_PUBLISHER_ENABLE`, default n |
-| `core/memory_pool.c` | 462 | nie initialisiert |
-| `core/monitoring/memory_dashboard.c` | 369 | **verdrahtet 2026-08-02** — `CONFIG_MEMORY_DASHBOARD_ENABLE`, default n |
-| `core/monitoring/adaptive_memory.c` | 172 | **verdrahtet 2026-08-02** — `CONFIG_ADAPTIVE_MEMORY_ENABLE`, default n |
+| `zigbee/zb_router.c` | 1119 | Router-Modus; Geraet laeuft als Coordinator |
+| `core/adapters/ble_adapter.c` | 749 | BLE ist projektweit aus |
 
-Zwei davon sind konfigurationsbedingt korrekt tot (`ble_adapter`, `zb_router`).
-Vier sind seit 2026-08-02 verdrahtet (`event_trace`, `memory_dashboard`,
-`batch_publisher`, `adaptive_memory` — alle opt-in per Kconfig, default aus).
-Bleiben rund **6.900 Zeilen** fertig gebauter Features, die nie angeschlossen
-wurden: `zb_ota` (3 TODOs, halbfertig), `zb_scenes`, `zb_touchlink`,
-`coex_manager` (laut eigener Doku Draft), `memory_pool` (generische API, kein
-Singleton) und `cluster_state_ng` (funktional durch `device_registry` ersetzt —
-eher ein Loesch- als ein Anschlusskandidat).
+Vorher waren es rund 10.560 Zeilen in zwoelf Uebersetzungseinheiten. Der Weg
+dahin, weil die Einteilung wichtiger ist als die Zahl:
 
-Verdrahten heisst hier: Kconfig-Flag (default n), `_init()` in
-`foundation_init.c` unter `INIT_OPTIONAL_COMPONENT`, und die Quelle in
-`main/CMakeLists.txt` an dasselbe Flag haengen, damit sie bei ausgeschaltetem
-Feature gar nicht erst kompiliert wird.
+**Geloescht, weil ersetzt statt unfertig** (3.297 Zeilen) -- die Funktion gibt
+es woanders und sie laeuft, ein Anschluss haette eine Zweitimplementierung
+erzeugt:
 
-**Wichtig fuer die Fehlersuche:** Bugs in diesen Dateien koennen kein
-Laufzeitverhalten erklaeren. `cluster_state_ng.c` ist der auffaelligste Fall --
-`CLAUDE.md` beschrieb es lange als zentralen State-Mechanismus, obwohl es nie
-aufgerufen wird. Der State-Weg, der tatsaechlich laeuft, geht ueber
-`device_registry_set_state()` / `_merge_state()` und den Event-Bus.
+- `cluster_state_ng.c/.h` (1000) -- ersetzt durch `device_registry_set_state()`
+  / `_merge_state()`. Der Fall, der am meisten Schaden angerichtet hat: diese
+  Datei stand hier lange als zentraler State-Mechanismus beschrieben, waehrend
+  sie **kein einziger Aufruf** je erreichte.
+- `memory_pool.c/.h` (462) -- ersetzt durch `buffer_pool_t` aus
+  `memory_manager_ng`. `buffer_pool_t` ist in `memory_manager_ng.h` deklariert,
+  nicht in `memory_pool.h` -- letzteren hat nie jemand inkludiert ausser er
+  selbst.
+- `coex_manager.c/.h` (787) -- ersetzt durch `esp_coex_wifi_i154_enable()`, das
+  `main.c` bereits ruft. Der Rest ist BLE-Scan-Duty, und BLE ist aus.
+
+**Verdrahtet, weil vollstaendig und ohne Doppelung** (4.597 Zeilen), je hinter
+einem Kconfig-Flag mit Default n, initialisiert aus `zigbee_stack_start()`:
+
+- `CONFIG_ZB_SCENES_ENABLE` -- `zb_scenes.c` (1545)
+- `CONFIG_ZB_TOUCHLINK_ENABLE` -- `zb_touchlink.c` (1070)
+- `CONFIG_ZB_OTA_ENABLE` -- `zb_ota.c` (1982)
+
+`zb_scenes` brauchte vorher eine Reparatur: `capture_group_device_states()`
+speicherte `on=true, level=MAX` als Platzhalter fuer *jedes* Gruppenmitglied.
+Eine so gespeicherte Szene enthielt Werte, die niemand hatte, und ihr Recall
+haette alle Lampen auf volle Helligkeit gefahren -- schlimmer als ein Fehler,
+weil es nach Erfolg aussieht. Jetzt kommt der Zustand aus
+`device_registry_state_dup()`; ein Geraet, das noch nie gemeldet hat, faellt
+aus der Szene raus statt erfunden zu werden. Farbe nur als `color_temp`, CIE xy
+meldet im ganzen Baum niemand.
+
+`zb_ota` hat eine dokumentierte Luecke: der ZCL-OTA-Server ist vollstaendig,
+aber der MQTT-Handler wertet das Topic aus und hoert dann auf -- die
+IEEE-Aufloesung hinter `/ota/update/` und `/ota/check/` fehlt. Ansteuern also
+ueber `zb_ota_notify_device()`, nicht ueber MQTT. Steht auch im Kconfig-Hilfetext.
+
+Vier weitere Module (`event_trace`, `memory_dashboard`, `batch_publisher`,
+`adaptive_memory`) wurden schon am 2026-08-02 nach demselben Muster verdrahtet.
 
 ### Den Befund reproduzieren
 
