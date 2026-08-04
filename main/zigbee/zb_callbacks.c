@@ -1216,9 +1216,33 @@ void zb_callback_device_announce(esp_zb_zdo_signal_device_annce_params_t *device
 /** Auto-permit-join timer, re-armed by its own callback while it waits. */
 static esp_timer_handle_t s_rejoin_timer;
 
-/** How long to keep waiting for LIFECYCLE_PHASE_NORMAL, in 5s steps. */
-#define ZB_REJOIN_PHASE_RETRY_INTERVAL_US (5 * 1000000ULL)
-#define ZB_REJOIN_PHASE_MAX_RETRIES       36    /* 3 minutes */
+/** How long to keep waiting for LIFECYCLE_PHASE_NORMAL, in 5s steps.
+ *
+ * The budget is derived rather than picked. What delays LIFECYCLE_PHASE_NORMAL
+ * is the captive portal, which blocks app_main for its full timeout when the
+ * uplink is down, so anything shorter than that timeout gives up before the
+ * phase can possibly arrive. Measured on hardware with a fixed 3-minute budget:
+ *
+ *     W (530735) ZB_CB: Boot never left BOOT phase — giving up
+ *     W (635926) CAPTIVE_PORTAL: Captive portal timed out
+ *     I (648865) LIFECYCLE: Phase transition: BOOT -> NORMAL
+ *
+ * — 118 seconds early. The margin covers portal teardown and the rest of boot.
+ */
+#define ZB_REJOIN_PHASE_RETRY_INTERVAL_SEC 5
+#define ZB_REJOIN_PHASE_MARGIN_SEC         120
+
+#if CONFIG_WIFI_CAPTIVE_PORTAL_ENABLE
+#define ZB_REJOIN_PHASE_BUDGET_SEC \
+    (CONFIG_WIFI_CAPTIVE_PORTAL_TIMEOUT_SEC + ZB_REJOIN_PHASE_MARGIN_SEC)
+#else
+#define ZB_REJOIN_PHASE_BUDGET_SEC ZB_REJOIN_PHASE_MARGIN_SEC
+#endif
+
+#define ZB_REJOIN_PHASE_RETRY_INTERVAL_US \
+    ((uint64_t)ZB_REJOIN_PHASE_RETRY_INTERVAL_SEC * 1000000ULL)
+#define ZB_REJOIN_PHASE_MAX_RETRIES \
+    (ZB_REJOIN_PHASE_BUDGET_SEC / ZB_REJOIN_PHASE_RETRY_INTERVAL_SEC)
 
 /**
  * @brief Timer callback to open permit_join after boot.
