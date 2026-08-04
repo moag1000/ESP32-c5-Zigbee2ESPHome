@@ -1213,15 +1213,52 @@ void zb_callback_device_announce(esp_zb_zdo_signal_device_annce_params_t *device
     }
 }
 
+/** Auto-permit-join timer, re-armed by its own callback while it waits. */
+static esp_timer_handle_t s_rejoin_timer;
+
+/** How long to keep waiting for LIFECYCLE_PHASE_NORMAL, in 5s steps. */
+#define ZB_REJOIN_PHASE_RETRY_INTERVAL_US (5 * 1000000ULL)
+#define ZB_REJOIN_PHASE_MAX_RETRIES       36    /* 3 minutes */
+
 /**
  * @brief Timer callback to open permit_join after boot.
  *
- * Runs ~15s after network formation — lifecycle is NORMAL by then and
- * we're outside the Zigbee callback context so the lock is available.
+ * Runs ~15s after network formation, outside the Zigbee callback context so
+ * the lock is available.
+ *
+ * It used to assume the lifecycle was NORMAL by then. That held only while the
+ * coordinator was started after the WiFi and MQTT phases; it now starts before
+ * them (see zigbee_stack_start() in main.c), so on a boot with the uplink down
+ * app_main can still be sitting in the captive portal when this fires, and
+ * zb_coordinator_permit_join() rejects the request outright:
+ *
+ *     W ZB_COORD: Rejecting permit_join during BOOT phase - services not ready
+ *
+ * The request was then simply lost. Wait for the phase instead of assuming it —
+ * the devices this exists for are the ones already paired, and they are exactly
+ * the ones that need it after a coordinator restart.
  */
 static void zb_rejoin_permit_join_cb(void *arg)
 {
     (void)arg;
+
+    static uint32_t retries;
+
+    if (lifecycle_get_phase() == LIFECYCLE_PHASE_BOOT) {
+        if (retries < ZB_REJOIN_PHASE_MAX_RETRIES) {
+            retries++;
+            esp_timer_start_once(s_rejoin_timer, ZB_REJOIN_PHASE_RETRY_INTERVAL_US);
+            ESP_LOGD("ZB_CB", "Still in BOOT phase, retrying permit_join (%lu/%d)",
+                     (unsigned long)retries, ZB_REJOIN_PHASE_MAX_RETRIES);
+        } else {
+            ESP_LOGW("ZB_CB", "Boot never left BOOT phase — giving up on the "
+                              "automatic permit_join. Paired devices still rejoin "
+                              "on their own; use the bridge request to open it.");
+        }
+        return;
+    }
+
+    retries = 0;
     size_t dev_count = device_registry_count();
     ESP_LOGI("ZB_CB", "Auto-opening permit_join for 120s (%zu persisted devices)", dev_count);
     zb_coordinator_permit_join(120);
@@ -1277,16 +1314,24 @@ void zb_callback_network_formed(void)
      * zb_coordinator_permit_join() directly here because:
      *   1. Lifecycle is still BOOT → permit_join is blocked
      *   2. We're inside the Zigbee callback → acquiring Zigbee lock would deadlock
-     * A 15-second one-shot timer runs after the lifecycle enters NORMAL phase. */
+     * The callback waits for LIFECYCLE_PHASE_NORMAL itself. */
     size_t dev_count = device_registry_count();
     if (dev_count > 0) {
-        static esp_timer_handle_t s_rejoin_timer;
-        esp_timer_create_args_t timer_cfg = {
-            .callback = zb_rejoin_permit_join_cb,
-            .name = "rejoin_pj",
-        };
-        if (esp_timer_create(&timer_cfg, &s_rejoin_timer) == ESP_OK) {
-            esp_timer_start_once(s_rejoin_timer, 15 * 1000000ULL); /* 15s delay */
+        /* Create once. The network can form again (a rejoin, a channel change)
+         * and creating a second timer would leak the first one's handle. */
+        if (s_rejoin_timer == NULL) {
+            esp_timer_create_args_t timer_cfg = {
+                .callback = zb_rejoin_permit_join_cb,
+                .name = "rejoin_pj",
+            };
+            if (esp_timer_create(&timer_cfg, &s_rejoin_timer) != ESP_OK) {
+                ESP_LOGW(TAG, "Could not create the permit_join timer");
+                return;
+            }
+        }
+
+        esp_timer_stop(s_rejoin_timer);   /* No-op if it is not running */
+        if (esp_timer_start_once(s_rejoin_timer, 15 * 1000000ULL) == ESP_OK) {
             ESP_LOGI(TAG, "Scheduled permit_join in 15s for %zu persisted device(s)", dev_count);
         }
     }

@@ -358,6 +358,94 @@ static void ble_scanner_delayed_start_callback(void *arg)
  *
  * Initializes all subsystems and starts the main application tasks
  */
+/**
+ * @brief Bring up the Zigbee radio
+ *
+ * Called before the MQTT phase, which is the point. Zigbee is what this
+ * gateway is for and it needs no IP address, but the boot used to run it
+ * strictly after WiFi and MQTT. With the access point unreachable that meant:
+ * ~37s of association attempts, then CONFIG_WIFI_CONNECT_GRACE_SEC of grace,
+ * then a captive portal that blocks until CONFIG_WIFI_CAPTIVE_PORTAL_TIMEOUT_SEC
+ * and calls esp_restart() — so the coordinator never started at all, and the
+ * device sat in a reboot loop with its paired devices unreachable. A Zigbee
+ * network has no reason to depend on the uplink being up.
+ *
+ * It runs after the WiFi association window rather than before it: enabling
+ * 802.15.4 coexistence while the station is still associating changes the RF
+ * conditions of the association itself, and that interaction is not something
+ * to alter blind. Association keeps the radio to itself exactly as before;
+ * only the portal no longer holds Zigbee hostage.
+ *
+ * The three former copies of this (coordinator, router, and the no-choice
+ * default) differed in two lines, so they are one branch here.
+ */
+static void zigbee_stack_start(void)
+{
+    esp_err_t ret;
+
+#if CONFIG_ZIGBEE_DEVICE_TYPE_ROUTER
+    ESP_LOGI(TAG_MAIN, "[PHASE 2b] Zigbee Router Initialization");
+
+    ret = zb_router_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG_ZIGBEE, "Failed to initialize Zigbee router: %s",
+                 esp_err_to_name(ret));
+        ESP_ERROR_CHECK(ret);
+    }
+    ESP_LOGI(TAG_ZIGBEE, "Zigbee router initialized successfully");
+
+    ret = zb_router_start();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG_ZIGBEE, "Failed to start Zigbee router: %s",
+                 esp_err_to_name(ret));
+        ESP_ERROR_CHECK(ret);
+    }
+    ESP_LOGI(TAG_ZIGBEE, "Zigbee router started - searching for network...");
+#else
+    /* Coordinator, and also what an unset device type falls back to. */
+    ESP_LOGI(TAG_MAIN, "[PHASE 2b] Zigbee Coordinator Initialization");
+
+    ret = zb_coordinator_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG_ZIGBEE, "Failed to initialize Zigbee coordinator: %s",
+                 esp_err_to_name(ret));
+        ESP_ERROR_CHECK(ret);
+    }
+    ESP_LOGI(TAG_ZIGBEE, "Zigbee coordinator initialized successfully");
+
+    ret = zb_coordinator_start();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG_ZIGBEE, "Failed to start Zigbee coordinator: %s",
+                 esp_err_to_name(ret));
+        ESP_ERROR_CHECK(ret);
+    }
+    ESP_LOGI(TAG_ZIGBEE, "Zigbee coordinator started successfully");
+
+    /* Initialize ZCL command retry subsystem. Coordinator only — a router
+     * does not originate the commands this retries. */
+    ret = cmd_retry_init();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG_ZIGBEE, "Command retry init failed: %s (non-fatal)",
+                 esp_err_to_name(ret));
+    }
+#endif
+
+#if CONFIG_GW_LED_ENABLED
+    led_status_manager_set_condition(LED_COND_ZIGBEE_RUNNING, true);
+#endif
+
+#if CONFIG_ESP_COEX_SW_COEXIST_ENABLE && CONFIG_SOC_IEEE802154_SUPPORTED
+    ESP_LOGI(TAG_MAIN, "[COEX] Enabling WiFi + 802.15.4 coexistence...");
+    ret = esp_coex_wifi_i154_enable();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG_MAIN, "Failed to enable WiFi/Zigbee coexistence: %s",
+                 esp_err_to_name(ret));
+    } else {
+        ESP_LOGI(TAG_MAIN, "[COEX] WiFi + 802.15.4 coexistence ENABLED");
+    }
+#endif
+}
+
 void app_main(void)
 {
     esp_err_t ret;
@@ -778,6 +866,10 @@ void app_main(void)
         }
     }
 
+    /* Zigbee comes up here, before MQTT and before the captive portal.
+     * See zigbee_stack_start() for why. */
+    zigbee_stack_start();
+
     /* Phase 3: MQTT Client Initialization */
     ESP_LOGI(TAG_MAIN, "[PHASE 3] MQTT Client Initialization");
 
@@ -800,8 +892,24 @@ void app_main(void)
 #endif
             }
         } else if (portal_ret == ESP_ERR_TIMEOUT) {
-            ESP_LOGE(TAG_WIFI, "Captive portal timed out - restarting");
-            esp_restart();
+            /* Carry on rather than restart.
+             *
+             * Restarting here was harmless while Zigbee started later in boot:
+             * there was nothing running to lose. The coordinator now comes up
+             * before this point, so a restart tears down a working Zigbee
+             * network — with its paired devices online — because the WiFi
+             * uplink is unavailable. With a 300s grace period and a 300s portal
+             * timeout that repeated roughly every ten minutes, and Zigbee was
+             * up for about half of each cycle.
+             *
+             * Nothing needs the restart: captive_portal_stop() has already put
+             * the radio back into station mode and re-enabled wifi_manager's
+             * auto-reconnect, so the gateway keeps trying to associate in the
+             * background while doing its actual job. MQTT and ESPHome pick up
+             * on their own once an address appears. */
+            ESP_LOGW(TAG_WIFI, "Captive portal timed out — continuing without an "
+                               "uplink. Zigbee keeps running; wifi_manager retries "
+                               "in the background.");
         }
 #else
         ESP_LOGW(TAG_MQTT, "WiFi not connected - waiting for background reconnect before MQTT...");
@@ -902,148 +1010,19 @@ void app_main(void)
     }
 
 skip_mqtt:
-    /* Phase 4: Zigbee Initialization (Coordinator or Router based on config) */
-#if CONFIG_ZIGBEE_DEVICE_TYPE_COORDINATOR
-    ESP_LOGI(TAG_MAIN, "[PHASE 4] Zigbee Coordinator Initialization");
-
-    ret = zb_coordinator_init();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG_ZIGBEE, "Failed to initialize Zigbee coordinator: %s",
-                 esp_err_to_name(ret));
-        ESP_ERROR_CHECK(ret);
-    }
-    ESP_LOGI(TAG_ZIGBEE, "Zigbee coordinator initialized successfully");
-
-    /* Start Zigbee coordinator */
-    ret = zb_coordinator_start();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG_ZIGBEE, "Failed to start Zigbee coordinator: %s",
-                 esp_err_to_name(ret));
-        ESP_ERROR_CHECK(ret);
-    }
-    ESP_LOGI(TAG_ZIGBEE, "Zigbee coordinator started successfully");
-#if CONFIG_GW_LED_ENABLED
-    led_status_manager_set_condition(LED_COND_ZIGBEE_RUNNING, true);
-#endif
-
-    /* Initialize ZCL command retry subsystem */
-    ret = cmd_retry_init();
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG_ZIGBEE, "Command retry init failed: %s (non-fatal)", esp_err_to_name(ret));
-    }
-
-    /* Enable WiFi + 802.15.4 coexistence for coordinator mode */
-#if CONFIG_ESP_COEX_SW_COEXIST_ENABLE && CONFIG_SOC_IEEE802154_SUPPORTED
-    ESP_LOGI(TAG_MAIN, "[COEX] Enabling WiFi + 802.15.4 coexistence...");
-    ret = esp_coex_wifi_i154_enable();
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG_MAIN, "Failed to enable WiFi/Zigbee coexistence: %s", esp_err_to_name(ret));
-    } else {
-        ESP_LOGI(TAG_MAIN, "[COEX] WiFi + 802.15.4 coexistence ENABLED");
-    }
-#endif
-
-    /* Start NG Architecture Adapters (Event-driven state publishing) */
-    ESP_LOGI(TAG_MAIN, "[INIT] Starting NG Architecture Adapters");
+    /* Phase 4: NG Architecture Adapters
+     *
+     * The Zigbee radio itself came up before Phase 3 — see zigbee_stack_start().
+     * What is left here is the adapter layer, which belongs after MQTT because
+     * that is what it publishes through. */
+    ESP_LOGI(TAG_MAIN, "[PHASE 4] Starting NG Architecture Adapters");
     ret = foundation_start_adapters();
     if (ret != ESP_OK) {
-        ESP_LOGW(TAG_MAIN, "Foundation adapters start failed: %s (continuing)", esp_err_to_name(ret));
+        ESP_LOGW(TAG_MAIN, "Foundation adapters start failed: %s (continuing)",
+                 esp_err_to_name(ret));
     } else {
         ESP_LOGI(TAG_MAIN, "NG Architecture adapters started successfully");
     }
-
-#elif CONFIG_ZIGBEE_DEVICE_TYPE_ROUTER
-    ESP_LOGI(TAG_MAIN, "[PHASE 4] Zigbee Router Initialization");
-
-    ret = zb_router_init();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG_ZIGBEE, "Failed to initialize Zigbee router: %s",
-                 esp_err_to_name(ret));
-        ESP_ERROR_CHECK(ret);
-    }
-    ESP_LOGI(TAG_ZIGBEE, "Zigbee router initialized successfully");
-
-    /* Start Zigbee router */
-    ret = zb_router_start();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG_ZIGBEE, "Failed to start Zigbee router: %s",
-                 esp_err_to_name(ret));
-        ESP_ERROR_CHECK(ret);
-    }
-    ESP_LOGI(TAG_ZIGBEE, "Zigbee router started - searching for network...");
-#if CONFIG_GW_LED_ENABLED
-    led_status_manager_set_condition(LED_COND_ZIGBEE_RUNNING, true);
-#endif
-
-    /* Enable WiFi + 802.15.4 coexistence for router mode */
-#if CONFIG_ESP_COEX_SW_COEXIST_ENABLE && CONFIG_SOC_IEEE802154_SUPPORTED
-    ESP_LOGI(TAG_MAIN, "[COEX] Enabling WiFi + 802.15.4 coexistence...");
-    ret = esp_coex_wifi_i154_enable();
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG_MAIN, "Failed to enable WiFi/Zigbee coexistence: %s", esp_err_to_name(ret));
-    } else {
-        ESP_LOGI(TAG_MAIN, "[COEX] WiFi + 802.15.4 coexistence ENABLED");
-    }
-#endif
-
-    /* Start NG Architecture Adapters (Event-driven state publishing) */
-    ESP_LOGI(TAG_MAIN, "[INIT] Starting NG Architecture Adapters");
-    ret = foundation_start_adapters();
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG_MAIN, "Foundation adapters start failed: %s (continuing)", esp_err_to_name(ret));
-    } else {
-        ESP_LOGI(TAG_MAIN, "NG Architecture adapters started successfully");
-    }
-
-#else
-    /* Default to coordinator if no choice is made */
-    ESP_LOGI(TAG_MAIN, "[PHASE 4] Zigbee Coordinator Initialization (default)");
-
-    ret = zb_coordinator_init();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG_ZIGBEE, "Failed to initialize Zigbee coordinator: %s",
-                 esp_err_to_name(ret));
-        ESP_ERROR_CHECK(ret);
-    }
-    ESP_LOGI(TAG_ZIGBEE, "Zigbee coordinator initialized successfully");
-
-    ret = zb_coordinator_start();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG_ZIGBEE, "Failed to start Zigbee coordinator: %s",
-                 esp_err_to_name(ret));
-        ESP_ERROR_CHECK(ret);
-    }
-    ESP_LOGI(TAG_ZIGBEE, "Zigbee coordinator started successfully");
-#if CONFIG_GW_LED_ENABLED
-    led_status_manager_set_condition(LED_COND_ZIGBEE_RUNNING, true);
-#endif
-
-    /* Initialize ZCL command retry subsystem */
-    ret = cmd_retry_init();
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG_ZIGBEE, "Command retry init failed: %s (non-fatal)", esp_err_to_name(ret));
-    }
-
-    /* Enable WiFi + 802.15.4 coexistence for default coordinator mode */
-#if CONFIG_ESP_COEX_SW_COEXIST_ENABLE && CONFIG_SOC_IEEE802154_SUPPORTED
-    ESP_LOGI(TAG_MAIN, "[COEX] Enabling WiFi + 802.15.4 coexistence...");
-    ret = esp_coex_wifi_i154_enable();
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG_MAIN, "Failed to enable WiFi/Zigbee coexistence: %s", esp_err_to_name(ret));
-    } else {
-        ESP_LOGI(TAG_MAIN, "[COEX] WiFi + 802.15.4 coexistence ENABLED");
-    }
-#endif
-
-    /* Start NG Architecture Adapters (Event-driven state publishing) */
-    ESP_LOGI(TAG_MAIN, "[INIT] Starting NG Architecture Adapters");
-    ret = foundation_start_adapters();
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG_MAIN, "Foundation adapters start failed: %s (continuing)", esp_err_to_name(ret));
-    } else {
-        ESP_LOGI(TAG_MAIN, "NG Architecture adapters started successfully");
-    }
-#endif
 
     /* Phase 5: Core Logic and Gateway Bridge */
     ESP_LOGI(TAG_MAIN, "[PHASE 5] Gateway Bridge Startup");
