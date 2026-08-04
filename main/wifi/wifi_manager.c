@@ -646,49 +646,53 @@ static void ip_event_handler(void *arg, esp_event_base_t event_base,
  * regulatory domain forbids, and an AP that is simply not visible — a scan
  * can. Costs a couple of seconds of boot time, hence opt-in.
  */
-static void log_visible_aps(void)
+/**
+ * @brief Run one blocking scan and log what it found
+ *
+ * NULL means "every channel the regulatory domain allows", which is what a
+ * diagnostic wants.
+ *
+ * This used to pass a wifi_scan_config_t that was zero apart from show_hidden.
+ * That is not a full scan: channel_bitmap.ghz_2_channels bit0 selects between
+ * "scan as bitmap" (0) and "bypass this band" (1), and the remaining bits name
+ * the channels. All-zero therefore asks to scan by bitmap with no channels in
+ * it. The scan duly reported "no access points at all", which reads like an RF
+ * problem and is nothing of the kind.
+ *
+ * @param label Band description for the log line
+ * @return Number of access points found
+ */
+static uint16_t scan_and_log(const char *label)
 {
-    /* NULL means "every channel the regulatory domain allows", which is what a
-     * diagnostic wants.
-     *
-     * This used to pass a wifi_scan_config_t that was zero apart from
-     * show_hidden. That is not a full scan: channel_bitmap.ghz_2_channels bit0
-     * selects between "scan as bitmap" (0) and "bypass this band" (1), and the
-     * remaining bits name the channels. All-zero therefore asks to scan by
-     * bitmap with no channels in it. The scan duly reported
-     *
-     *     Scan found no access points at all
-     *
-     * which reads like an RF problem and is nothing of the kind. */
-    ESP_LOGI(TAG, "Scanning for access points...");
     esp_err_t ret = esp_wifi_scan_start(NULL, true);  /* blocking, all channels */
     if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "Scan failed: %s", esp_err_to_name(ret));
-        return;
+        ESP_LOGW(TAG, "  %s: scan failed: %s", label, esp_err_to_name(ret));
+        return 0;
     }
 
     uint16_t count = 0;
     esp_wifi_scan_get_ap_num(&count);
     if (count == 0) {
-        ESP_LOGW(TAG, "Scan found no access points at all");
-        return;
+        ESP_LOGW(TAG, "  %s: no access points", label);
+        esp_wifi_clear_ap_list();
+        return 0;
     }
 
     /* PSRAM: a full record set is a few KB and must not land on the stack. */
     wifi_ap_record_t *records =
         mem_alloc(sizeof(wifi_ap_record_t) * count, MEM_CAP_PSRAM);
     if (records == NULL) {
-        ESP_LOGW(TAG, "Scan found %u APs but the record buffer did not fit", count);
+        ESP_LOGW(TAG, "  %s: %u APs but the record buffer did not fit", label, count);
         esp_wifi_clear_ap_list();
-        return;
+        return count;
     }
 
     uint16_t got = count;
     if (esp_wifi_scan_get_ap_records(&got, records) == ESP_OK) {
-        ESP_LOGI(TAG, "Visible access points (%u):", got);
+        ESP_LOGI(TAG, "  %s: %u access point(s)", label, got);
         for (uint16_t i = 0; i < got; i++) {
             const wifi_ap_record_t *ap = &records[i];
-            ESP_LOGI(TAG, "  ch%-3d %4d dBm  auth=%d  %s%s",
+            ESP_LOGI(TAG, "    ch%-3d %4d dBm  auth=%d  %s%s",
                      ap->primary, ap->rssi, (int)ap->authmode,
                      (const char *)ap->ssid,
                      ap->primary >= WIFI_MGR_5GHZ_CHANNEL_MIN ? "  [5GHz]" : "");
@@ -697,6 +701,52 @@ static void log_visible_aps(void)
 
     mem_ng_free(records);
     esp_wifi_clear_ap_list();
+    return count;
+}
+
+/**
+ * @brief Scan each band separately, then together
+ *
+ * One combined scan cannot distinguish "nothing on the air" from "this band
+ * mode does not scan what you think it does". On a dual-band part that
+ * difference is the whole question: an empty result under AUTO says nothing
+ * about whether 2.4 GHz alone would have found the access point.
+ *
+ * Leaves the band mode as it found it.
+ */
+static void log_visible_aps(void)
+{
+    static const struct {
+        wifi_band_mode_t mode;
+        const char      *label;
+    } passes[] = {
+        { WIFI_BAND_MODE_2G_ONLY, "2.4 GHz only" },
+        { WIFI_BAND_MODE_5G_ONLY, "5 GHz only"   },
+        { WIFI_BAND_MODE_AUTO,    "both bands"   },
+    };
+
+    wifi_band_mode_t saved = WIFI_BAND_MODE_AUTO;
+    esp_wifi_get_band_mode(&saved);
+
+    ESP_LOGI(TAG, "Scanning for access points, one pass per band:");
+
+    uint16_t total = 0;
+    for (size_t i = 0; i < sizeof(passes) / sizeof(passes[0]); i++) {
+        esp_err_t ret = esp_wifi_set_band_mode(passes[i].mode);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "  %s: band mode not settable: %s",
+                     passes[i].label, esp_err_to_name(ret));
+            continue;
+        }
+        total += scan_and_log(passes[i].label);
+    }
+
+    if (total == 0) {
+        ESP_LOGW(TAG, "No access points on any band. Either nothing is on the "
+                      "air within range, or this radio is not receiving.");
+    }
+
+    esp_wifi_set_band_mode(saved);
 }
 #endif /* CONFIG_WIFI_SCAN_ON_BOOT */
 
