@@ -73,12 +73,37 @@ echo "Port: $PORT"
 restore_gateway() {
     [ "$RESTORE" -eq 1 ] || { echo "Leaving the test app on the board (--no-restore)."; return; }
     log "Restoring gateway firmware"
-    if idf.py -C "$PROJECT_DIR" -p "$PORT" flash >/dev/null 2>&1; then
-        echo "Gateway restored."
-    else
-        echo "WARNING: gateway restore failed — the board is still running the tests." >&2
-        echo "Run: idf.py -C $PROJECT_DIR -p $PORT flash" >&2
-    fi
+
+    # Retry: a board that has just been reset over USB-Serial/JTAG is not
+    # always ready for the next connection straight away, and leaving the test
+    # firmware on the gateway is the worst outcome this script can produce.
+    local attempt
+    for attempt in 1 2 3; do
+        if idf.py -C "$PROJECT_DIR" -p "$PORT" flash >/dev/null 2>&1; then
+            echo "Gateway restored."
+            return
+        fi
+        echo "Restore attempt $attempt failed, retrying..." >&2
+        sleep 3
+    done
+
+    # Make this impossible to miss: the board is left running the tests.
+    cat >&2 <<EOM
+
+################################################################################
+#  GATEWAY NOT RESTORED — the board is still running the TEST firmware.
+#
+#  Three attempts failed. The board may need to be power-cycled: unplug the
+#  USB cable, plug it back in, then run
+#
+#      idf.py -C $PROJECT_DIR -p $PORT flash
+#
+#  Until then the gateway is not doing its job: no Zigbee, no MQTT, no
+#  Home Assistant. Pairings and the converter database are untouched — the
+#  test app shares the partition layout and only occupies ota_0.
+################################################################################
+
+EOM
 }
 trap restore_gateway EXIT
 
