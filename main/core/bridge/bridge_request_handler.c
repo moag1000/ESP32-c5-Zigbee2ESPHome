@@ -1091,9 +1091,23 @@ static esp_err_t handle_converter_db_update(const char *topic, const char *paylo
     /* Create directory if needed (may fail if exists, that's OK) */
     mkdir("/littlefs/converters", 0755);
 
-    /* Write decoded data to file */
+    /* Write decoded data to file.
+     *
+     * snprintf truncates safely, but silently — and a truncated path writes to
+     * a different file than the caller asked for while the response still says
+     * success. Two long names could even truncate onto each other. Check the
+     * result and refuse instead. */
     char path[80];
-    snprintf(path, sizeof(path), "/littlefs/converters/%s", filename);
+    int path_len = snprintf(path, sizeof(path), "/littlefs/converters/%s", filename);
+    if (path_len < 0 || (size_t)path_len >= sizeof(path)) {
+        ESP_LOGE(TAG, "Filename too long for converter path: %s", filename);
+        mem_ng_free(decoded);
+        cJSON_Delete(json);
+        bridge_response_publish_error(RESPONSE_TOPIC_CONVERTER_DB_UPDATE,
+                                      "Filename too long",
+                                      get_current_transaction());
+        return ESP_ERR_INVALID_ARG;
+    }
 
     FILE *f = fopen(path, "w");
     if (f == NULL) {
