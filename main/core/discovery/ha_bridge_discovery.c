@@ -937,6 +937,16 @@ static void collect_bridge_state(ha_bridge_state_t *state)
     device_registry_get_stats(&reg_stats);
     state->device_count = (uint16_t)reg_stats.zigbee_count;
 
+    /* Registry occupancy, separately from the device count.
+     *
+     * Now that device_count reports Zigbee devices only, nothing outside the
+     * serial log showed how full the registry actually is — and it fills from
+     * ESPHome entity count, not device count, so it can be near capacity with
+     * two devices paired. Publishing both makes that visible in Home Assistant
+     * instead of only in an 80%% warning nobody is watching for. */
+    state->registry_used = (uint16_t)reg_stats.device_count;
+    state->registry_max  = (uint16_t)reg_stats.max_devices;
+
     /* Coordinator settings */
     zb_coordinator_settings_t coord_settings;
     if (zb_coordinator_get_settings(&coord_settings) == ESP_OK) {
@@ -1530,6 +1540,8 @@ esp_err_t ha_bridge_publish_state(void)
     /* Add all state fields */
     cJSON_AddStringToObject(json, "state", state.state);
     cJSON_AddNumberToObject(json, "device_count", state.device_count);
+    cJSON_AddNumberToObject(json, "registry_used", state.registry_used);
+    cJSON_AddNumberToObject(json, "registry_max", state.registry_max);
     cJSON_AddNumberToObject(json, "channel", state.channel);
 
     /* PAN ID as hex string */

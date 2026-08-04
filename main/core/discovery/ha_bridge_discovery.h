@@ -60,6 +60,8 @@ extern "C" {
 typedef struct {
     const char *state;          /**< Bridge state: "online" or "offline" */
     uint16_t device_count;      /**< Number of paired Zigbee devices */
+    uint16_t registry_used;     /**< Device registry entries in use (all protocols) */
+    uint16_t registry_max;      /**< Device registry capacity */
     uint8_t channel;            /**< Current Zigbee channel (11-26) */
     uint16_t pan_id;            /**< Network PAN ID */
     const char *coordinator_state; /**< Coordinator state string */
