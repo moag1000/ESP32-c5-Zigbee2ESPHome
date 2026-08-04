@@ -65,6 +65,54 @@
 
 static const char *TAG = "ZB_CB";
 
+/**
+ * @brief Copy a ZCL character string attribute into a fixed buffer
+ *
+ * ZCL character strings are [length][bytes], and the length byte comes off the
+ * air from the reporting device. Clamping it against the destination alone is
+ * not enough: a frame carrying a short value with a large length byte would
+ * make memcpy read past the end of the attribute. The three Basic-cluster
+ * string attributes did exactly that, while the numeric cases a few lines below
+ * were already checking data->size.
+ *
+ * Clamps against both the attribute's own size and the destination, and always
+ * null-terminates.
+ *
+ * @return true if something was copied, false if the attribute was unusable
+ */
+static bool zcl_copy_char_string(const esp_zb_zcl_attribute_data_t *data,
+                                 char *dst, size_t dst_size)
+{
+    if (data == NULL || dst == NULL || dst_size < 2) {
+        return false;
+    }
+    if (data->type != ESP_ZB_ZCL_ATTR_TYPE_CHAR_STRING || data->value == NULL) {
+        return false;
+    }
+    /* Need at least the length byte itself. */
+    if (data->size < 2) {
+        return false;
+    }
+
+    const uint8_t *raw = (const uint8_t *)data->value;
+    size_t len = raw[0];
+
+    const size_t available = (size_t)data->size - 1;  /* bytes after the length */
+    if (len > available) {
+        len = available;
+    }
+    if (len > dst_size - 1) {
+        len = dst_size - 1;
+    }
+    if (len == 0) {
+        return false;
+    }
+
+    memcpy(dst, raw + 1, len);
+    dst[len] = '\0';
+    return true;
+}
+
 /* Forward declarations for internal helpers */
 static esp_err_t zb_coordinator_action_handler(esp_zb_core_action_callback_id_t callback_id,
                                                 const void *message);
@@ -1355,23 +1403,15 @@ static void handle_basic_cluster_report(uint16_t short_addr, esp_zb_zcl_report_a
 
     switch (attr_id) {
         case ESP_ZB_ZCL_ATTR_BASIC_MANUFACTURER_NAME_ID:
-            if (data->type == ESP_ZB_ZCL_ATTR_TYPE_CHAR_STRING && data->value != NULL) {
-                /* First byte is string length for ZCL strings */
-                uint8_t len = ((uint8_t *)data->value)[0];
-                if (len > 0 && len < sizeof(device->manufacturer)) {
-                    memcpy(device->manufacturer, &((uint8_t *)data->value)[1], len);
-                    device->manufacturer[len] = '\0';
-                    ESP_LOGI(TAG, "Device 0x%04X manufacturer: %s", short_addr, device->manufacturer);
-                }
+            if (zcl_copy_char_string(data, device->manufacturer,
+                                     sizeof(device->manufacturer))) {
+                ESP_LOGI(TAG, "Device 0x%04X manufacturer: %s", short_addr, device->manufacturer);
             }
             break;
 
         case ESP_ZB_ZCL_ATTR_BASIC_MODEL_IDENTIFIER_ID:
-            if (data->type == ESP_ZB_ZCL_ATTR_TYPE_CHAR_STRING && data->value != NULL) {
-                uint8_t len = ((uint8_t *)data->value)[0];
-                if (len > 0 && len < sizeof(device->model)) {
-                    memcpy(device->model, &((uint8_t *)data->value)[1], len);
-                    device->model[len] = '\0';
+            {
+                if (zcl_copy_char_string(data, device->model, sizeof(device->model))) {
                     ESP_LOGI(TAG, "Device 0x%04X model: %s", short_addr, device->model);
 
                     /* Check if this is a sleepy device with an active interview.
@@ -1533,12 +1573,9 @@ static void handle_basic_cluster_report(uint16_t short_addr, esp_zb_zcl_report_a
             break;
 
         case ESP_ZB_ZCL_ATTR_BASIC_SW_BUILD_ID:
-            if (data->type == ESP_ZB_ZCL_ATTR_TYPE_CHAR_STRING && data->value != NULL) {
-                uint8_t len = ((uint8_t *)data->value)[0];
+            {
                 char sw_version[65];
-                if (len > 0 && len < sizeof(sw_version)) {
-                    memcpy(sw_version, &((uint8_t *)data->value)[1], len);
-                    sw_version[len] = '\0';
+                if (zcl_copy_char_string(data, sw_version, sizeof(sw_version))) {
                     ESP_LOGI(TAG, "Device 0x%04X SW version: %s", short_addr, sw_version);
                 }
             }
