@@ -93,9 +93,20 @@ verbraucht, nicht von der Geraetezahl:
 
     Registry = Zigbee-Geraete + BLE-Geraete + 1 Slot je ESPHome-Entity
 
-Gemessen am laufenden Gateway mit **zwei** gepairten Zigbee-Geraeten: 56 von 64
-Eintraegen belegt, davon 54 virtuell. `CONFIG_MAX_ZIGBEE_DEVICES` steht auf 50 —
-das ist mit dieser Auslegung unerreichbar.
+Live gemessen (2026-08-04), ueber einen HA-Verbindungsaufbau hinweg:
+
+    t= 3s   registry= 2/64  ( 3%)   esphome_clients=0   zigbee=2
+    t=56s   registry=56/64  (87%)   esphome_clients=1   zigbee=2
+
+In dem Moment, in dem Home Assistant verbindet, entstehen 54 virtuelle
+Eintraege — fuer zwei gepairte Geraete. `CONFIG_MAX_ZIGBEE_DEVICES` steht auf
+50; das ist mit dieser Auslegung unerreichbar.
+
+Gegenprobe mit `CONFIG_ESPHOME_ENTITY_REGISTRY_MIRROR=n`: die Registry bleibt
+bei 2/64, auch mit verbundenem HA.
+
+`bridge/state` fuehrt `registry_used` und `registry_max` mit, damit dieser
+Fuellstand ohne Serial-Log sichtbar ist.
 
 `CONFIG_DEVICE_REGISTRY_MAX_DEVICES` ist einstellbar (Default 64, unveraendert),
 und `device_registry_add()` warnt ab 80 % Fuellstand statt erst zu scheitern,
