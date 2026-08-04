@@ -148,6 +148,62 @@ Der Zaehler in `bridge/state` und `bridge/info` meldet ausschliesslich
 `stats.zigbee_count` — vorher stand dort die Gesamtzahl, weshalb `bridge/state`
 56 gepairte Geraete behauptete waehrend `bridge/devices` zwei auflistete.
 
+## Boot-Reihenfolge: Zigbee haengt nicht am Uplink (seit 2026-08-04)
+
+Der Boot lief frueher strikt **WiFi -> MQTT -> Zigbee**. Ohne erreichbaren AP
+hiess das: ~37 s Assoziationsversuche, dann `CONFIG_WIFI_CONNECT_GRACE_SEC`
+(300 s) Gnadenfrist, dann ein Captive Portal, das
+`CONFIG_WIFI_CAPTIVE_PORTAL_TIMEOUT_SEC` (300 s) blockiert und danach
+`esp_restart()` rief. Der Koordinator wurde **nie erreicht** — das Geraet war
+nicht offline, sondern tot, in einer Neustartschleife alle ~10,6 min.
+
+Jetzt: `zigbee_stack_start()` in `main.c` (PHASE 2b) startet das Radio **vor**
+der MQTT-Phase. Verifiziert auf Hardware ohne WLAN:
+
+    I (335166) MAIN: [PHASE 2b] Zigbee Coordinator Initialization
+    I (335802) MAIN: [PHASE 3] MQTT Client Initialization
+    I (464777) ZB_AVAIL: Status: online=2, offline=0, unknown=0
+    W (636141) WIFI: Captive portal timed out — continuing without an uplink
+    I (648865) LIFECYCLE: Phase transition: BOOT -> NORMAL
+
+Ein einziger Boot ueber 785 s (vorher Neustart bei ~635 s).
+
+**Bewusst nicht geaendert:** die Assoziation selbst laeuft weiterhin ohne
+aktives 802.15.4. `zigbee_stack_start()` steht *nach* dem WiFi-Zeitfenster,
+weil das Einschalten der Koexistenz waehrend der Assoziation deren
+RF-Bedingungen veraendert — das blind umzustellen waere nicht pruefbar
+gewesen.
+
+**Der Portal-Timeout startet nicht mehr neu.** `captive_portal_stop()` setzt
+ohnehin STA-Modus und wifi_manager-Auto-Reconnect zurueck; der Neustart hat nur
+ein laufendes Zigbee-Netz abgerissen.
+
+**Zwei Folgefehler, die dabei entstanden sind** (beide behoben, aber als Muster
+merken): der Auto-`permit_join` fuer persistierte Geraete stand unter dem
+Kommentar *"lifecycle is NORMAL by then"* — eine Annahme, die nur galt, solange
+Zigbee nach den Netzphasen startete. Er wartet jetzt auf die Phase, mit einem
+Budget, das aus `CONFIG_WIFI_CAPTIVE_PORTAL_TIMEOUT_SEC` **abgeleitet** ist; ein
+geratener Festwert (3 min) war 118 s zu kurz und hat den Fix wirkungslos
+gemacht.
+
+## Der Boot-Scan war kaputt (und hat in die Irre gefuehrt)
+
+`log_visible_aps()` uebergab eine `wifi_scan_config_t`, die ausser
+`show_hidden` komplett 0 war. Das ist **kein** Vollscan:
+`channel_bitmap.ghz_2_channels` bit0 waehlt zwischen *"scan as bitmap"* (0) und
+*"bypass this band"* (1), bits 1-14 benennen die Kanaele. Alles 0 heisst also
+"scanne per Bitmap, mit leerer Bitmap". Ergebnis:
+
+    W WIFI_MGR: Scan found no access points at all
+
+Das liest sich wie ein Funkproblem und ist keines. ESP-IDFs eigenes
+Scan-Beispiel uebergibt `NULL` fuer einen Vollscan und baut eine Bitmap nur fuer
+gezielte Kanaele — jetzt genauso.
+
+**Nicht verwechseln:** dass der 2,4-GHz-Pfad funktioniert, steht unabhaengig
+fest. 802.15.4 bildet ein Netz auf Kanal 25 und pollt zwei Geraete erfolgreich
+(`online=2`). Dafuer braucht es den Scan nicht.
+
 ## Konfigurations-Kette
 
 `CMakeLists.txt` setzt `SDKCONFIG_DEFAULTS` auf **zwei** Dateien:
