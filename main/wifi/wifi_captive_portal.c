@@ -273,8 +273,22 @@ static int generate_scan_html(char *buf, size_t buf_size)
 
     if (ap_count == 0) {
         mem_ng_free(ap_list);
+        /* Say that an empty list is not proof of an empty airwave.
+         *
+         * Measured on this hardware: a scan-only build with no connect
+         * attempts, passive, 200ms dwell, ten rounds over five minutes,
+         * reported zero access points every single time — not one beacon, not
+         * even a neighbour — while the same board associates at -43 dBm and
+         * stays up for hours. Scanning is effectively blind here.
+         *
+         * "No networks found" therefore reads as "your network is gone" when
+         * the truth is "this list cannot be trusted, type the name". The form
+         * below already takes a hand-entered SSID, so this is only about not
+         * sending the user off to debug their router. */
         return snprintf(buf, buf_size,
-                        "<p class='scan-hint'>No networks found</p>");
+                        "<p class='scan-hint'>No networks found. This list is "
+                        "unreliable on this hardware and can be empty even when "
+                        "your network is fine &mdash; type the name below.</p>");
     }
 
     /* Escaped SSID buffers: max 32 chars × 6 (worst case &#39;) + NUL */
