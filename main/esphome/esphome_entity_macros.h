@@ -36,10 +36,10 @@
 #define ENTITY_FIND_BY_KEY_IMPL(entry_type, func_name, array_name, count_name)    \
     entry_type *func_name(esphome_entity_key_t key)                               \
     {                                                                              \
-        for (size_t i = 0; i < s_entities.count_name; i++) {                      \
-            if (s_entities.array_name[i].registered &&                            \
-                s_entities.array_name[i].config.key == key) {                     \
-                return &s_entities.array_name[i];                                 \
+        for (size_t i = 0; i < s_entities->count_name; i++) {                      \
+            if (s_entities->array_name[i].registered &&                            \
+                s_entities->array_name[i].config.key == key) {                     \
+                return &s_entities->array_name[i];                                 \
             }                                                                      \
         }                                                                          \
         return NULL;                                                               \
@@ -49,7 +49,7 @@
  * @brief Standard mutex acquisition with timeout check
  */
 #define ENTITY_MUTEX_TAKE()                                                        \
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS)       \
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS)       \
         != pdTRUE) {                                                               \
         return ESP_ERR_TIMEOUT;                                                    \
     }
@@ -58,13 +58,13 @@
  * @brief Standard mutex release
  */
 #define ENTITY_MUTEX_GIVE()                                                        \
-    xSemaphoreGiveRecursive(s_entities.mutex)
+    xSemaphoreGiveRecursive(s_entities->mutex)
 
 /**
  * @brief Standard initialization check
  */
 #define ENTITY_CHECK_INIT()                                                        \
-    if (!s_entities.initialized) {                                                 \
+    if (!s_entities->initialized) {                                                 \
         return ESP_ERR_INVALID_STATE;                                              \
     }
 
@@ -72,7 +72,7 @@
  * @brief Standard initialization check with error log
  */
 #define ENTITY_CHECK_INIT_LOG(tag)                                                 \
-    if (!s_entities.initialized) {                                                 \
+    if (!s_entities->initialized) {                                                 \
         ESP_LOGE(tag, "Entity manager not initialized");                           \
         return ESP_ERR_INVALID_STATE;                                              \
     }

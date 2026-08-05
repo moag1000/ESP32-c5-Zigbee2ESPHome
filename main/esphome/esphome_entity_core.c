@@ -14,6 +14,7 @@
  */
 
 #include "esphome_entity_internal.h"
+#include "core/memory/memory_manager_ng.h"
 #include "esphome_crypto_constants.h"
 #include "esphome_entity_mirror.h"
 
@@ -27,24 +28,7 @@ const char *ENTITY_TAG = "ESPHOME_ENTITY";
  * Module State - Global Definition
  * ============================================================================ */
 
-esphome_entity_state_t s_entities = {
-    .sensor_count = 0,
-    .binary_sensor_count = 0,
-    .switch_count = 0,
-    .select_count = 0,
-    .light_count = 0,
-    .cover_count = 0,
-    .fan_count = 0,
-    .climate_count = 0,
-    .text_sensor_count = 0,
-    .number_count = 0,
-    .button_count = 0,
-    .lock_count = 0,
-    .media_player_count = 0,
-    .alarm_count = 0,
-    .text_count = 0,
-    .initialized = false,
-};
+esphome_entity_state_t *s_entities = NULL;
 
 /* ============================================================================
  * Internal Helpers - Find Functions (Generated via macro)
@@ -76,8 +60,8 @@ void notify_state_change(esphome_entity_type_t type, esphome_entity_key_t key,
                          const void *state)
 {
     /* Notify ESPHome API callback for client broadcasting */
-    if (s_entities.state_callback) {
-        s_entities.state_callback(type, key, state);
+    if (s_entities && s_entities->state_callback) {
+        s_entities->state_callback(type, key, state);
     }
 
     /* Record in the entity mirror, which publishes EVT_ESPHOME_ENTITY_STATE */
@@ -95,54 +79,69 @@ void notify_state_change(esphome_entity_type_t type, esphome_entity_key_t key,
  */
 esp_err_t esphome_entities_init(void)
 {
-    if (s_entities.initialized) {
+    /* s_entities is NULL until the allocation below — checking ->initialized
+     * first would dereference NULL on the very first call. */
+    if (s_entities && s_entities->initialized) {
         ESP_LOGW(TAG, "Entity manager already initialized");
         return ESP_OK;
     }
 
     ESP_LOGI(TAG, "Initializing entity manager...");
 
+    /* Storage goes to PSRAM: 53.9 KB that internal RAM does not have to spare.
+     * mem_ng_calloc zeroes it, which the per-array memsets below then repeat
+     * harmlessly and explicitly. */
+    s_entities = mem_ng_calloc(1, sizeof(esphome_entity_state_t), MEM_CAP_PSRAM);
+    if (!s_entities) {
+        ESP_LOGE(TAG, "Failed to allocate %zu bytes of entity storage",
+                 sizeof(esphome_entity_state_t));
+        return ESP_ERR_NO_MEM;
+    }
+    ESP_LOGI(TAG, "Entity storage: %zu bytes in PSRAM", sizeof(esphome_entity_state_t));
+
     /* Create mutex */
-    s_entities.mutex = xSemaphoreCreateRecursiveMutex();
-    if (!s_entities.mutex) {
+    s_entities->mutex = xSemaphoreCreateRecursiveMutex();
+    if (!s_entities->mutex) {
         ESP_LOGE(TAG, "Failed to create mutex");
+        mem_ng_free(s_entities);
+        s_entities = NULL;
         return ESP_ERR_NO_MEM;
     }
 
     /* Clear storage */
-    memset(s_entities.sensors, 0, sizeof(s_entities.sensors));
-    memset(s_entities.binary_sensors, 0, sizeof(s_entities.binary_sensors));
-    memset(s_entities.switches, 0, sizeof(s_entities.switches));
-    memset(s_entities.selects, 0, sizeof(s_entities.selects));
-    memset(s_entities.lights, 0, sizeof(s_entities.lights));
-    memset(s_entities.covers, 0, sizeof(s_entities.covers));
-    memset(s_entities.fans, 0, sizeof(s_entities.fans));
-    memset(s_entities.climates, 0, sizeof(s_entities.climates));
-    memset(s_entities.text_sensors, 0, sizeof(s_entities.text_sensors));
-    memset(s_entities.numbers, 0, sizeof(s_entities.numbers));
-    memset(s_entities.buttons, 0, sizeof(s_entities.buttons));
-    memset(s_entities.locks, 0, sizeof(s_entities.locks));
-    memset(s_entities.media_players, 0, sizeof(s_entities.media_players));
-    memset(s_entities.alarms, 0, sizeof(s_entities.alarms));
-    memset(s_entities.texts, 0, sizeof(s_entities.texts));
+    memset(s_entities->sensors, 0, sizeof(s_entities->sensors));
+    memset(s_entities->binary_sensors, 0, sizeof(s_entities->binary_sensors));
+    memset(s_entities->switches, 0, sizeof(s_entities->switches));
+    memset(s_entities->selects, 0, sizeof(s_entities->selects));
+    memset(s_entities->lights, 0, sizeof(s_entities->lights));
+    memset(s_entities->covers, 0, sizeof(s_entities->covers));
+    memset(s_entities->fans, 0, sizeof(s_entities->fans));
+    memset(s_entities->climates, 0, sizeof(s_entities->climates));
+    memset(s_entities->text_sensors, 0, sizeof(s_entities->text_sensors));
+    memset(s_entities->numbers, 0, sizeof(s_entities->numbers));
+    memset(s_entities->buttons, 0, sizeof(s_entities->buttons));
+    memset(s_entities->locks, 0, sizeof(s_entities->locks));
+    memset(s_entities->media_players, 0, sizeof(s_entities->media_players));
+    memset(s_entities->alarms, 0, sizeof(s_entities->alarms));
+    memset(s_entities->texts, 0, sizeof(s_entities->texts));
 
-    s_entities.sensor_count = 0;
-    s_entities.binary_sensor_count = 0;
-    s_entities.switch_count = 0;
-    s_entities.select_count = 0;
-    s_entities.light_count = 0;
-    s_entities.cover_count = 0;
-    s_entities.fan_count = 0;
-    s_entities.climate_count = 0;
-    s_entities.text_sensor_count = 0;
-    s_entities.number_count = 0;
-    s_entities.button_count = 0;
-    s_entities.lock_count = 0;
-    s_entities.media_player_count = 0;
-    s_entities.alarm_count = 0;
-    s_entities.text_count = 0;
-    s_entities.state_callback = NULL;
-    s_entities.initialized = true;
+    s_entities->sensor_count = 0;
+    s_entities->binary_sensor_count = 0;
+    s_entities->switch_count = 0;
+    s_entities->select_count = 0;
+    s_entities->light_count = 0;
+    s_entities->cover_count = 0;
+    s_entities->fan_count = 0;
+    s_entities->climate_count = 0;
+    s_entities->text_sensor_count = 0;
+    s_entities->number_count = 0;
+    s_entities->button_count = 0;
+    s_entities->lock_count = 0;
+    s_entities->media_player_count = 0;
+    s_entities->alarm_count = 0;
+    s_entities->text_count = 0;
+    s_entities->state_callback = NULL;
+    s_entities->initialized = true;
 
     ESP_LOGI(TAG, "Entity manager initialized (max: %d sensors, %d binary, %d switches, "
             "%d text_sensors, %d numbers, %d buttons)",
@@ -157,18 +156,21 @@ esp_err_t esphome_entities_init(void)
  */
 esp_err_t esphome_entities_deinit(void)
 {
-    if (!s_entities.initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_OK;
     }
 
     ESP_LOGI(TAG, "Deinitializing entity manager...");
 
-    if (s_entities.mutex) {
-        vSemaphoreDelete(s_entities.mutex);
-        s_entities.mutex = NULL;
+    if (s_entities->mutex) {
+        vSemaphoreDelete(s_entities->mutex);
+        s_entities->mutex = NULL;
     }
 
-    s_entities.initialized = false;
+    s_entities->initialized = false;
+
+    mem_ng_free(s_entities);
+    s_entities = NULL;
     return ESP_OK;
 }
 
@@ -177,7 +179,10 @@ esp_err_t esphome_entities_deinit(void)
  */
 esp_err_t esphome_entities_set_state_callback(esphome_state_change_cb_t callback)
 {
-    s_entities.state_callback = callback;
+    if (!s_entities) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    s_entities->state_callback = callback;
     return ESP_OK;
 }
 
@@ -227,11 +232,11 @@ esp_err_t esphome_entity_get_type(esphome_entity_key_t key, esphome_entity_type_
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -284,7 +289,7 @@ esp_err_t esphome_entity_get_type(esphome_entity_key_t key, esphome_entity_type_
         ret = ESP_OK;
     }
 
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     return ret;
 }
 
@@ -297,167 +302,167 @@ esp_err_t esphome_entity_get_type(esphome_entity_key_t key, esphome_entity_type_
  */
 void esphome_entities_enumerate(esphome_entity_enum_cb_t callback, void *user_data)
 {
-    if (!callback || !s_entities.initialized) {
+    if (!callback || !s_entities->initialized) {
         return;
     }
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return;
     }
 
     /* Enumerate sensors */
-    for (size_t i = 0; i < s_entities.sensor_count; i++) {
-        if (s_entities.sensors[i].registered) {
-            if (!callback(ESPHOME_ENTITY_SENSOR, s_entities.sensors[i].config.key,
-                         &s_entities.sensors[i].config, user_data)) {
+    for (size_t i = 0; i < s_entities->sensor_count; i++) {
+        if (s_entities->sensors[i].registered) {
+            if (!callback(ESPHOME_ENTITY_SENSOR, s_entities->sensors[i].config.key,
+                         &s_entities->sensors[i].config, user_data)) {
                 goto done;
             }
         }
     }
 
     /* Enumerate binary sensors */
-    for (size_t i = 0; i < s_entities.binary_sensor_count; i++) {
-        if (s_entities.binary_sensors[i].registered) {
+    for (size_t i = 0; i < s_entities->binary_sensor_count; i++) {
+        if (s_entities->binary_sensors[i].registered) {
             if (!callback(ESPHOME_ENTITY_BINARY_SENSOR,
-                         s_entities.binary_sensors[i].config.key,
-                         &s_entities.binary_sensors[i].config, user_data)) {
+                         s_entities->binary_sensors[i].config.key,
+                         &s_entities->binary_sensors[i].config, user_data)) {
                 goto done;
             }
         }
     }
 
     /* Enumerate switches */
-    for (size_t i = 0; i < s_entities.switch_count; i++) {
-        if (s_entities.switches[i].registered) {
-            if (!callback(ESPHOME_ENTITY_SWITCH, s_entities.switches[i].config.key,
-                         &s_entities.switches[i].config, user_data)) {
+    for (size_t i = 0; i < s_entities->switch_count; i++) {
+        if (s_entities->switches[i].registered) {
+            if (!callback(ESPHOME_ENTITY_SWITCH, s_entities->switches[i].config.key,
+                         &s_entities->switches[i].config, user_data)) {
                 goto done;
             }
         }
     }
 
     /* Enumerate text sensors */
-    for (size_t i = 0; i < s_entities.text_sensor_count; i++) {
-        if (s_entities.text_sensors[i].registered) {
-            if (!callback(ESPHOME_ENTITY_TEXT_SENSOR, s_entities.text_sensors[i].config.key,
-                         &s_entities.text_sensors[i].config, user_data)) {
+    for (size_t i = 0; i < s_entities->text_sensor_count; i++) {
+        if (s_entities->text_sensors[i].registered) {
+            if (!callback(ESPHOME_ENTITY_TEXT_SENSOR, s_entities->text_sensors[i].config.key,
+                         &s_entities->text_sensors[i].config, user_data)) {
                 goto done;
             }
         }
     }
 
     /* Enumerate numbers */
-    for (size_t i = 0; i < s_entities.number_count; i++) {
-        if (s_entities.numbers[i].registered) {
-            if (!callback(ESPHOME_ENTITY_NUMBER, s_entities.numbers[i].config.key,
-                         &s_entities.numbers[i].config, user_data)) {
+    for (size_t i = 0; i < s_entities->number_count; i++) {
+        if (s_entities->numbers[i].registered) {
+            if (!callback(ESPHOME_ENTITY_NUMBER, s_entities->numbers[i].config.key,
+                         &s_entities->numbers[i].config, user_data)) {
                 goto done;
             }
         }
     }
 
     /* Enumerate buttons */
-    for (size_t i = 0; i < s_entities.button_count; i++) {
-        if (s_entities.buttons[i].registered) {
-            if (!callback(ESPHOME_ENTITY_BUTTON, s_entities.buttons[i].config.key,
-                         &s_entities.buttons[i].config, user_data)) {
+    for (size_t i = 0; i < s_entities->button_count; i++) {
+        if (s_entities->buttons[i].registered) {
+            if (!callback(ESPHOME_ENTITY_BUTTON, s_entities->buttons[i].config.key,
+                         &s_entities->buttons[i].config, user_data)) {
                 goto done;
             }
         }
     }
 
     /* Enumerate selects */
-    for (size_t i = 0; i < s_entities.select_count; i++) {
-        if (s_entities.selects[i].registered) {
-            if (!callback(ESPHOME_ENTITY_SELECT, s_entities.selects[i].config.key,
-                         &s_entities.selects[i].config, user_data)) {
+    for (size_t i = 0; i < s_entities->select_count; i++) {
+        if (s_entities->selects[i].registered) {
+            if (!callback(ESPHOME_ENTITY_SELECT, s_entities->selects[i].config.key,
+                         &s_entities->selects[i].config, user_data)) {
                 goto done;
             }
         }
     }
 
     /* Enumerate lights */
-    for (size_t i = 0; i < s_entities.light_count; i++) {
-        if (s_entities.lights[i].registered) {
-            if (!callback(ESPHOME_ENTITY_LIGHT, s_entities.lights[i].config.key,
-                         &s_entities.lights[i].config, user_data)) {
+    for (size_t i = 0; i < s_entities->light_count; i++) {
+        if (s_entities->lights[i].registered) {
+            if (!callback(ESPHOME_ENTITY_LIGHT, s_entities->lights[i].config.key,
+                         &s_entities->lights[i].config, user_data)) {
                 goto done;
             }
         }
     }
 
     /* Enumerate covers */
-    for (size_t i = 0; i < s_entities.cover_count; i++) {
-        if (s_entities.covers[i].registered) {
-            if (!callback(ESPHOME_ENTITY_COVER, s_entities.covers[i].config.key,
-                         &s_entities.covers[i].config, user_data)) {
+    for (size_t i = 0; i < s_entities->cover_count; i++) {
+        if (s_entities->covers[i].registered) {
+            if (!callback(ESPHOME_ENTITY_COVER, s_entities->covers[i].config.key,
+                         &s_entities->covers[i].config, user_data)) {
                 goto done;
             }
         }
     }
 
     /* Enumerate fans */
-    for (size_t i = 0; i < s_entities.fan_count; i++) {
-        if (s_entities.fans[i].registered) {
-            if (!callback(ESPHOME_ENTITY_FAN, s_entities.fans[i].config.key,
-                         &s_entities.fans[i].config, user_data)) {
+    for (size_t i = 0; i < s_entities->fan_count; i++) {
+        if (s_entities->fans[i].registered) {
+            if (!callback(ESPHOME_ENTITY_FAN, s_entities->fans[i].config.key,
+                         &s_entities->fans[i].config, user_data)) {
                 goto done;
             }
         }
     }
 
     /* Enumerate climates */
-    for (size_t i = 0; i < s_entities.climate_count; i++) {
-        if (s_entities.climates[i].registered) {
-            if (!callback(ESPHOME_ENTITY_CLIMATE, s_entities.climates[i].config.key,
-                         &s_entities.climates[i].config, user_data)) {
+    for (size_t i = 0; i < s_entities->climate_count; i++) {
+        if (s_entities->climates[i].registered) {
+            if (!callback(ESPHOME_ENTITY_CLIMATE, s_entities->climates[i].config.key,
+                         &s_entities->climates[i].config, user_data)) {
                 goto done;
             }
         }
     }
 
     /* Enumerate locks */
-    for (size_t i = 0; i < s_entities.lock_count; i++) {
-        if (s_entities.locks[i].registered) {
-            if (!callback(ESPHOME_ENTITY_LOCK, s_entities.locks[i].config.key,
-                         &s_entities.locks[i].config, user_data)) {
+    for (size_t i = 0; i < s_entities->lock_count; i++) {
+        if (s_entities->locks[i].registered) {
+            if (!callback(ESPHOME_ENTITY_LOCK, s_entities->locks[i].config.key,
+                         &s_entities->locks[i].config, user_data)) {
                 goto done;
             }
         }
     }
 
     /* Enumerate media players */
-    for (size_t i = 0; i < s_entities.media_player_count; i++) {
-        if (s_entities.media_players[i].registered) {
-            if (!callback(ESPHOME_ENTITY_MEDIA_PLAYER, s_entities.media_players[i].config.key,
-                         &s_entities.media_players[i].config, user_data)) {
+    for (size_t i = 0; i < s_entities->media_player_count; i++) {
+        if (s_entities->media_players[i].registered) {
+            if (!callback(ESPHOME_ENTITY_MEDIA_PLAYER, s_entities->media_players[i].config.key,
+                         &s_entities->media_players[i].config, user_data)) {
                 goto done;
             }
         }
     }
 
     /* Enumerate alarm control panels */
-    for (size_t i = 0; i < s_entities.alarm_count; i++) {
-        if (s_entities.alarms[i].registered) {
-            if (!callback(ESPHOME_ENTITY_ALARM_PANEL, s_entities.alarms[i].config.key,
-                         &s_entities.alarms[i].config, user_data)) {
+    for (size_t i = 0; i < s_entities->alarm_count; i++) {
+        if (s_entities->alarms[i].registered) {
+            if (!callback(ESPHOME_ENTITY_ALARM_PANEL, s_entities->alarms[i].config.key,
+                         &s_entities->alarms[i].config, user_data)) {
                 goto done;
             }
         }
     }
 
     /* Enumerate text entities */
-    for (size_t i = 0; i < s_entities.text_count; i++) {
-        if (s_entities.texts[i].registered) {
-            if (!callback(ESPHOME_ENTITY_TEXT, s_entities.texts[i].config.key,
-                         &s_entities.texts[i].config, user_data)) {
+    for (size_t i = 0; i < s_entities->text_count; i++) {
+        if (s_entities->texts[i].registered) {
+            if (!callback(ESPHOME_ENTITY_TEXT, s_entities->texts[i].config.key,
+                         &s_entities->texts[i].config, user_data)) {
                 goto done;
             }
         }
     }
 
 done:
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
 }
 
 /**
@@ -465,11 +470,11 @@ done:
  */
 size_t esphome_entities_get_total_count(void)
 {
-    return s_entities.sensor_count + s_entities.binary_sensor_count + s_entities.switch_count +
-           s_entities.text_sensor_count + s_entities.number_count + s_entities.button_count +
-           s_entities.select_count + s_entities.light_count + s_entities.cover_count +
-           s_entities.fan_count + s_entities.climate_count + s_entities.lock_count +
-           s_entities.media_player_count + s_entities.alarm_count + s_entities.text_count;
+    return s_entities->sensor_count + s_entities->binary_sensor_count + s_entities->switch_count +
+           s_entities->text_sensor_count + s_entities->number_count + s_entities->button_count +
+           s_entities->select_count + s_entities->light_count + s_entities->cover_count +
+           s_entities->fan_count + s_entities->climate_count + s_entities->lock_count +
+           s_entities->media_player_count + s_entities->alarm_count + s_entities->text_count;
 }
 
 /* ============================================================================

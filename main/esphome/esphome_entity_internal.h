@@ -212,7 +212,18 @@ typedef struct {
 /**
  * @brief Global entity manager state
  */
-extern esphome_entity_state_t s_entities;
+/**
+ * @brief Entity storage, allocated in PSRAM at init
+ *
+ * This is 53.9 KB — by far the largest single object the firmware had in
+ * internal .bss, out of 115 KB total. Internal RAM is the constraint here
+ * (67 KB free in steady state) while 6 MB of PSRAM sits unused, so the table
+ * lives there instead. Nothing touches it from an ISR; access is from the
+ * ESPHome server task and the event dispatcher, serialised by its own mutex.
+ *
+ * NULL until esphome_entities_init() runs.
+ */
+extern esphome_entity_state_t *s_entities;
 
 /**
  * @brief Log tag for entity module

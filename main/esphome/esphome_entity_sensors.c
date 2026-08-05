@@ -29,12 +29,12 @@ esp_err_t esphome_entity_register_sensor(const esphome_sensor_config_t *config)
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         ESP_LOGE(ENTITY_TAG, "Entity manager not initialized");
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -48,21 +48,21 @@ esp_err_t esphome_entity_register_sensor(const esphome_sensor_config_t *config)
     }
 
     /* Check capacity */
-    if (s_entities.sensor_count >= ESPHOME_MAX_SENSORS) {
+    if (s_entities->sensor_count >= ESPHOME_MAX_SENSORS) {
         ESP_LOGE(ENTITY_TAG, "Maximum sensors reached (%d)", ESPHOME_MAX_SENSORS);
         ret = ESPHOME_ERR_MAX_ENTITIES;
         goto done;
     }
 
     /* Add sensor */
-    size_t idx = s_entities.sensor_count;
-    memcpy(&s_entities.sensors[idx].config, config, sizeof(esphome_sensor_config_t));
-    s_entities.sensors[idx].state.key = config->key;
-    s_entities.sensors[idx].state.state = 0.0f;
-    s_entities.sensors[idx].state.missing_state = true;
-    s_entities.sensors[idx].state.device_id = config->device_id;
-    s_entities.sensors[idx].registered = true;
-    s_entities.sensor_count++;
+    size_t idx = s_entities->sensor_count;
+    memcpy(&s_entities->sensors[idx].config, config, sizeof(esphome_sensor_config_t));
+    s_entities->sensors[idx].state.key = config->key;
+    s_entities->sensors[idx].state.state = 0.0f;
+    s_entities->sensors[idx].state.missing_state = true;
+    s_entities->sensors[idx].state.device_id = config->device_id;
+    s_entities->sensors[idx].registered = true;
+    s_entities->sensor_count++;
 
     ESP_LOGI(ENTITY_TAG, "Registered sensor: key=%lu, name='%s'", config->key, config->name);
 
@@ -77,7 +77,7 @@ esp_err_t esphome_entity_register_sensor(const esphome_sensor_config_t *config)
     }
 
 done:
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     return ret;
 }
 
@@ -86,11 +86,11 @@ done:
  */
 esp_err_t esphome_entity_update_sensor(esphome_entity_key_t key, float value)
 {
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -108,12 +108,12 @@ esp_err_t esphome_entity_update_sensor(esphome_entity_key_t key, float value)
     ESP_LOGD(ENTITY_TAG, "Sensor %lu state: %.2f", key, value);
 
     /* Notify callback */
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     notify_state_change(ESPHOME_ENTITY_SENSOR, key, &entry->state);
     return ESP_OK;
 
 done:
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     return ret;
 }
 
@@ -122,11 +122,11 @@ done:
  */
 esp_err_t esphome_entity_set_sensor_missing(esphome_entity_key_t key)
 {
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -141,12 +141,12 @@ esp_err_t esphome_entity_set_sensor_missing(esphome_entity_key_t key)
     entry->state.missing_state = true;
 
     /* Notify callback */
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     notify_state_change(ESPHOME_ENTITY_SENSOR, key, &entry->state);
     return ESP_OK;
 
 done:
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     return ret;
 }
 
@@ -159,11 +159,11 @@ esp_err_t esphome_entity_get_sensor(esphome_entity_key_t key, esphome_sensor_sta
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -178,7 +178,7 @@ esp_err_t esphome_entity_get_sensor(esphome_entity_key_t key, esphome_sensor_sta
     memcpy(state, &entry->state, sizeof(esphome_sensor_state_t));
 
 done:
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     return ret;
 }
 
@@ -192,11 +192,11 @@ esp_err_t esphome_entity_get_sensor_config(esphome_entity_key_t key,
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -211,7 +211,7 @@ esp_err_t esphome_entity_get_sensor_config(esphome_entity_key_t key,
     memcpy(config, &entry->config, sizeof(esphome_sensor_config_t));
 
 done:
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     return ret;
 }
 
@@ -220,7 +220,7 @@ done:
  */
 size_t esphome_entity_get_sensor_count(void)
 {
-    return s_entities.sensor_count;
+    return s_entities->sensor_count;
 }
 
 /* ============================================================================
@@ -236,12 +236,12 @@ esp_err_t esphome_entity_register_binary_sensor(const esphome_binary_sensor_conf
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         ESP_LOGE(ENTITY_TAG, "Entity manager not initialized");
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -255,22 +255,22 @@ esp_err_t esphome_entity_register_binary_sensor(const esphome_binary_sensor_conf
     }
 
     /* Check capacity */
-    if (s_entities.binary_sensor_count >= ESPHOME_MAX_BINARY_SENSORS) {
+    if (s_entities->binary_sensor_count >= ESPHOME_MAX_BINARY_SENSORS) {
         ESP_LOGE(ENTITY_TAG, "Maximum binary sensors reached (%d)", ESPHOME_MAX_BINARY_SENSORS);
         ret = ESPHOME_ERR_MAX_ENTITIES;
         goto done;
     }
 
     /* Add binary sensor */
-    size_t idx = s_entities.binary_sensor_count;
-    memcpy(&s_entities.binary_sensors[idx].config, config,
+    size_t idx = s_entities->binary_sensor_count;
+    memcpy(&s_entities->binary_sensors[idx].config, config,
            sizeof(esphome_binary_sensor_config_t));
-    s_entities.binary_sensors[idx].state.key = config->key;
-    s_entities.binary_sensors[idx].state.state = false;
-    s_entities.binary_sensors[idx].state.missing_state = true;
-    s_entities.binary_sensors[idx].state.device_id = config->device_id;
-    s_entities.binary_sensors[idx].registered = true;
-    s_entities.binary_sensor_count++;
+    s_entities->binary_sensors[idx].state.key = config->key;
+    s_entities->binary_sensors[idx].state.state = false;
+    s_entities->binary_sensors[idx].state.missing_state = true;
+    s_entities->binary_sensors[idx].state.device_id = config->device_id;
+    s_entities->binary_sensors[idx].registered = true;
+    s_entities->binary_sensor_count++;
 
     ESP_LOGI(ENTITY_TAG, "Registered binary sensor: key=%lu, name='%s'", config->key, config->name);
 
@@ -285,7 +285,7 @@ esp_err_t esphome_entity_register_binary_sensor(const esphome_binary_sensor_conf
     }
 
 done:
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     return ret;
 }
 
@@ -294,11 +294,11 @@ done:
  */
 esp_err_t esphome_entity_update_binary_sensor(esphome_entity_key_t key, bool state)
 {
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -316,12 +316,12 @@ esp_err_t esphome_entity_update_binary_sensor(esphome_entity_key_t key, bool sta
     ESP_LOGD(ENTITY_TAG, "Binary sensor %lu state: %s", key, state ? "ON" : "OFF");
 
     /* Notify callback */
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     notify_state_change(ESPHOME_ENTITY_BINARY_SENSOR, key, &entry->state);
     return ESP_OK;
 
 done:
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     return ret;
 }
 
@@ -330,11 +330,11 @@ done:
  */
 esp_err_t esphome_entity_set_binary_sensor_missing(esphome_entity_key_t key)
 {
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -349,12 +349,12 @@ esp_err_t esphome_entity_set_binary_sensor_missing(esphome_entity_key_t key)
     entry->state.missing_state = true;
 
     /* Notify callback */
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     notify_state_change(ESPHOME_ENTITY_BINARY_SENSOR, key, &entry->state);
     return ESP_OK;
 
 done:
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     return ret;
 }
 
@@ -368,11 +368,11 @@ esp_err_t esphome_entity_get_binary_sensor(esphome_entity_key_t key,
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -387,7 +387,7 @@ esp_err_t esphome_entity_get_binary_sensor(esphome_entity_key_t key,
     memcpy(state, &entry->state, sizeof(esphome_binary_sensor_state_t));
 
 done:
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     return ret;
 }
 
@@ -401,11 +401,11 @@ esp_err_t esphome_entity_get_binary_sensor_config(esphome_entity_key_t key,
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -420,7 +420,7 @@ esp_err_t esphome_entity_get_binary_sensor_config(esphome_entity_key_t key,
     memcpy(config, &entry->config, sizeof(esphome_binary_sensor_config_t));
 
 done:
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     return ret;
 }
 
@@ -429,7 +429,7 @@ done:
  */
 size_t esphome_entity_get_binary_sensor_count(void)
 {
-    return s_entities.binary_sensor_count;
+    return s_entities->binary_sensor_count;
 }
 
 /* ============================================================================
@@ -445,12 +445,12 @@ esp_err_t esphome_entity_register_text_sensor(const esphome_text_sensor_config_t
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         ESP_LOGE(ENTITY_TAG, "Entity manager not initialized");
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -464,21 +464,21 @@ esp_err_t esphome_entity_register_text_sensor(const esphome_text_sensor_config_t
     }
 
     /* Check capacity */
-    if (s_entities.text_sensor_count >= ESPHOME_MAX_TEXT_SENSORS) {
+    if (s_entities->text_sensor_count >= ESPHOME_MAX_TEXT_SENSORS) {
         ESP_LOGE(ENTITY_TAG, "Maximum text sensors reached (%d)", ESPHOME_MAX_TEXT_SENSORS);
         ret = ESPHOME_ERR_MAX_ENTITIES;
         goto done;
     }
 
     /* Add text sensor */
-    size_t idx = s_entities.text_sensor_count;
-    memcpy(&s_entities.text_sensors[idx].config, config, sizeof(esphome_text_sensor_config_t));
-    s_entities.text_sensors[idx].state.key = config->key;
-    s_entities.text_sensors[idx].state.state[0] = '\0';
-    s_entities.text_sensors[idx].state.missing_state = true;
-    s_entities.text_sensors[idx].state.device_id = config->device_id;
-    s_entities.text_sensors[idx].registered = true;
-    s_entities.text_sensor_count++;
+    size_t idx = s_entities->text_sensor_count;
+    memcpy(&s_entities->text_sensors[idx].config, config, sizeof(esphome_text_sensor_config_t));
+    s_entities->text_sensors[idx].state.key = config->key;
+    s_entities->text_sensors[idx].state.state[0] = '\0';
+    s_entities->text_sensors[idx].state.missing_state = true;
+    s_entities->text_sensors[idx].state.device_id = config->device_id;
+    s_entities->text_sensors[idx].registered = true;
+    s_entities->text_sensor_count++;
 
     ESP_LOGI(ENTITY_TAG, "Registered text sensor: key=%lu, name='%s'", config->key, config->name);
 
@@ -493,7 +493,7 @@ esp_err_t esphome_entity_register_text_sensor(const esphome_text_sensor_config_t
     }
 
 done:
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     return ret;
 }
 
@@ -506,11 +506,11 @@ esp_err_t esphome_entity_update_text_sensor(esphome_entity_key_t key, const char
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -529,12 +529,12 @@ esp_err_t esphome_entity_update_text_sensor(esphome_entity_key_t key, const char
     ESP_LOGD(ENTITY_TAG, "Text sensor %lu state: '%s'", key, value);
 
     /* Notify callback */
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     notify_state_change(ESPHOME_ENTITY_TEXT_SENSOR, key, &entry->state);
     return ESP_OK;
 
 done:
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     return ret;
 }
 
@@ -543,11 +543,11 @@ done:
  */
 esp_err_t esphome_entity_set_text_sensor_missing(esphome_entity_key_t key)
 {
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -562,12 +562,12 @@ esp_err_t esphome_entity_set_text_sensor_missing(esphome_entity_key_t key)
     entry->state.missing_state = true;
 
     /* Notify callback */
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     notify_state_change(ESPHOME_ENTITY_TEXT_SENSOR, key, &entry->state);
     return ESP_OK;
 
 done:
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     return ret;
 }
 
@@ -581,11 +581,11 @@ esp_err_t esphome_entity_get_text_sensor(esphome_entity_key_t key,
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -600,7 +600,7 @@ esp_err_t esphome_entity_get_text_sensor(esphome_entity_key_t key,
     memcpy(state, &entry->state, sizeof(esphome_text_sensor_state_t));
 
 done:
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     return ret;
 }
 
@@ -614,11 +614,11 @@ esp_err_t esphome_entity_get_text_sensor_config(esphome_entity_key_t key,
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -633,7 +633,7 @@ esp_err_t esphome_entity_get_text_sensor_config(esphome_entity_key_t key,
     memcpy(config, &entry->config, sizeof(esphome_text_sensor_config_t));
 
 done:
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     return ret;
 }
 
@@ -642,7 +642,7 @@ done:
  */
 size_t esphome_entity_get_text_sensor_count(void)
 {
-    return s_entities.text_sensor_count;
+    return s_entities->text_sensor_count;
 }
 
 /* ============================================================================

@@ -29,12 +29,12 @@ esp_err_t esphome_entity_register_button(const esphome_button_config_t *config)
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         ESP_LOGE(ENTITY_TAG, "Entity manager not initialized");
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -48,17 +48,17 @@ esp_err_t esphome_entity_register_button(const esphome_button_config_t *config)
     }
 
     /* Check capacity */
-    if (s_entities.button_count >= ESPHOME_MAX_BUTTONS) {
+    if (s_entities->button_count >= ESPHOME_MAX_BUTTONS) {
         ESP_LOGE(ENTITY_TAG, "Maximum buttons reached (%d)", ESPHOME_MAX_BUTTONS);
         ret = ESPHOME_ERR_MAX_ENTITIES;
         goto done;
     }
 
     /* Add button */
-    size_t idx = s_entities.button_count;
-    memcpy(&s_entities.buttons[idx].config, config, sizeof(esphome_button_config_t));
-    s_entities.buttons[idx].registered = true;
-    s_entities.button_count++;
+    size_t idx = s_entities->button_count;
+    memcpy(&s_entities->buttons[idx].config, config, sizeof(esphome_button_config_t));
+    s_entities->buttons[idx].registered = true;
+    s_entities->button_count++;
 
     ESP_LOGI(ENTITY_TAG, "Registered button: key=%lu, name='%s'", config->key, config->name);
 
@@ -73,7 +73,7 @@ esp_err_t esphome_entity_register_button(const esphome_button_config_t *config)
     }
 
 done:
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     return ret;
 }
 
@@ -87,11 +87,11 @@ esp_err_t esphome_entity_get_button_config(esphome_entity_key_t key,
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -106,7 +106,7 @@ esp_err_t esphome_entity_get_button_config(esphome_entity_key_t key,
     memcpy(config, &entry->config, sizeof(esphome_button_config_t));
 
 done:
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     return ret;
 }
 
@@ -115,7 +115,7 @@ done:
  */
 size_t esphome_entity_get_button_count(void)
 {
-    return s_entities.button_count;
+    return s_entities->button_count;
 }
 
 /**
@@ -123,11 +123,11 @@ size_t esphome_entity_get_button_count(void)
  */
 esp_err_t esphome_entity_execute_button_press(esphome_entity_key_t key)
 {
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -138,7 +138,7 @@ esp_err_t esphome_entity_execute_button_press(esphome_entity_key_t key)
         callback = entry->config.press_callback;
     }
 
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
 
     if (!entry) {
         return ESPHOME_ERR_ENTITY_NOT_FOUND;
@@ -181,14 +181,14 @@ esp_err_t esphome_entity_register_lock(const esphome_lock_config_t *config)
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         ESP_LOGE(ENTITY_TAG, "Entity manager not initialized");
         return ESP_ERR_INVALID_STATE;
     }
 
     esp_err_t ret = ESP_OK;
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -198,24 +198,24 @@ esp_err_t esphome_entity_register_lock(const esphome_lock_config_t *config)
         goto cleanup;
     }
 
-    if (s_entities.lock_count >= ESPHOME_MAX_LOCKS) {
+    if (s_entities->lock_count >= ESPHOME_MAX_LOCKS) {
         ESP_LOGE(ENTITY_TAG, "Maximum locks reached (%d)", ESPHOME_MAX_LOCKS);
         ret = ESPHOME_ERR_MAX_ENTITIES;
         goto cleanup;
     }
 
-    size_t idx = s_entities.lock_count;
-    memcpy(&s_entities.locks[idx].config, config, sizeof(esphome_lock_config_t));
-    s_entities.locks[idx].state.key = config->key;
-    s_entities.locks[idx].state.device_id = config->device_id;
-    s_entities.locks[idx].state.state = ESPHOME_LOCK_STATE_LOCKED;
-    s_entities.locks[idx].registered = true;
-    s_entities.lock_count++;
+    size_t idx = s_entities->lock_count;
+    memcpy(&s_entities->locks[idx].config, config, sizeof(esphome_lock_config_t));
+    s_entities->locks[idx].state.key = config->key;
+    s_entities->locks[idx].state.device_id = config->device_id;
+    s_entities->locks[idx].state.state = ESPHOME_LOCK_STATE_LOCKED;
+    s_entities->locks[idx].registered = true;
+    s_entities->lock_count++;
 
     ESP_LOGI(ENTITY_TAG, "Registered lock: key=%lu, name='%s'", config->key, config->name);
 
 cleanup:
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     return ret;
 }
 
@@ -224,13 +224,13 @@ cleanup:
  */
 esp_err_t esphome_entity_update_lock(esphome_entity_key_t key, esphome_lock_state_t state)
 {
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
     esp_err_t ret = ESP_OK;
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -243,12 +243,12 @@ esp_err_t esphome_entity_update_lock(esphome_entity_key_t key, esphome_lock_stat
     entry->state.state = state;
     ESP_LOGD(ENTITY_TAG, "Lock %lu state: %d", key, state);
 
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     notify_state_change(ESPHOME_ENTITY_LOCK, key, &entry->state);
     return ESP_OK;
 
 cleanup:
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     return ret;
 }
 
@@ -261,13 +261,13 @@ esp_err_t esphome_entity_get_lock(esphome_entity_key_t key, esphome_lock_entity_
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
     esp_err_t ret = ESP_OK;
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -280,7 +280,7 @@ esp_err_t esphome_entity_get_lock(esphome_entity_key_t key, esphome_lock_entity_
     memcpy(state, &entry->state, sizeof(esphome_lock_entity_state_t));
 
 cleanup:
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     return ret;
 }
 
@@ -293,13 +293,13 @@ esp_err_t esphome_entity_get_lock_config(esphome_entity_key_t key, esphome_lock_
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
     esp_err_t ret = ESP_OK;
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -312,7 +312,7 @@ esp_err_t esphome_entity_get_lock_config(esphome_entity_key_t key, esphome_lock_
     memcpy(config, &entry->config, sizeof(esphome_lock_config_t));
 
 cleanup:
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     return ret;
 }
 
@@ -321,7 +321,7 @@ cleanup:
  */
 size_t esphome_entity_get_lock_count(void)
 {
-    return s_entities.lock_count;
+    return s_entities->lock_count;
 }
 
 /**
@@ -330,11 +330,11 @@ size_t esphome_entity_get_lock_count(void)
 esp_err_t esphome_entity_execute_lock_command(esphome_entity_key_t key,
                                                esphome_lock_command_t command)
 {
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -345,7 +345,7 @@ esp_err_t esphome_entity_execute_lock_command(esphome_entity_key_t key,
         callback = entry->config.command_callback;
     }
 
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
 
     if (!entry) {
         return ESPHOME_ERR_ENTITY_NOT_FOUND;
@@ -386,14 +386,14 @@ esp_err_t esphome_entity_register_media_player(const esphome_media_player_config
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         ESP_LOGE(ENTITY_TAG, "Entity manager not initialized");
         return ESP_ERR_INVALID_STATE;
     }
 
     esp_err_t ret = ESP_OK;
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -403,26 +403,26 @@ esp_err_t esphome_entity_register_media_player(const esphome_media_player_config
         goto cleanup;
     }
 
-    if (s_entities.media_player_count >= ESPHOME_MAX_MEDIA_PLAYERS) {
+    if (s_entities->media_player_count >= ESPHOME_MAX_MEDIA_PLAYERS) {
         ESP_LOGE(ENTITY_TAG, "Maximum media players reached (%d)", ESPHOME_MAX_MEDIA_PLAYERS);
         ret = ESPHOME_ERR_MAX_ENTITIES;
         goto cleanup;
     }
 
-    size_t idx = s_entities.media_player_count;
-    memcpy(&s_entities.media_players[idx].config, config, sizeof(esphome_media_player_config_t));
-    s_entities.media_players[idx].state.key = config->key;
-    s_entities.media_players[idx].state.device_id = config->device_id;
-    s_entities.media_players[idx].state.state = ESPHOME_MEDIA_PLAYER_STATE_IDLE;
-    s_entities.media_players[idx].state.volume = 1.0f;
-    s_entities.media_players[idx].state.muted = false;
-    s_entities.media_players[idx].registered = true;
-    s_entities.media_player_count++;
+    size_t idx = s_entities->media_player_count;
+    memcpy(&s_entities->media_players[idx].config, config, sizeof(esphome_media_player_config_t));
+    s_entities->media_players[idx].state.key = config->key;
+    s_entities->media_players[idx].state.device_id = config->device_id;
+    s_entities->media_players[idx].state.state = ESPHOME_MEDIA_PLAYER_STATE_IDLE;
+    s_entities->media_players[idx].state.volume = 1.0f;
+    s_entities->media_players[idx].state.muted = false;
+    s_entities->media_players[idx].registered = true;
+    s_entities->media_player_count++;
 
     ESP_LOGI(ENTITY_TAG, "Registered media player: key=%lu, name='%s'", config->key, config->name);
 
 cleanup:
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     return ret;
 }
 
@@ -436,13 +436,13 @@ esp_err_t esphome_entity_update_media_player(esphome_entity_key_t key,
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
     esp_err_t ret = ESP_OK;
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -456,12 +456,12 @@ esp_err_t esphome_entity_update_media_player(esphome_entity_key_t key,
     entry->state.key = key;
     ESP_LOGD(ENTITY_TAG, "Media player %lu state: %d, vol=%.2f", key, state->state, state->volume);
 
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     notify_state_change(ESPHOME_ENTITY_MEDIA_PLAYER, key, &entry->state);
     return ESP_OK;
 
 cleanup:
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     return ret;
 }
 
@@ -475,13 +475,13 @@ esp_err_t esphome_entity_get_media_player(esphome_entity_key_t key,
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
     esp_err_t ret = ESP_OK;
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -494,7 +494,7 @@ esp_err_t esphome_entity_get_media_player(esphome_entity_key_t key,
     memcpy(state, &entry->state, sizeof(esphome_media_player_entity_state_t));
 
 cleanup:
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     return ret;
 }
 
@@ -508,13 +508,13 @@ esp_err_t esphome_entity_get_media_player_config(esphome_entity_key_t key,
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
     esp_err_t ret = ESP_OK;
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -527,7 +527,7 @@ esp_err_t esphome_entity_get_media_player_config(esphome_entity_key_t key,
     memcpy(config, &entry->config, sizeof(esphome_media_player_config_t));
 
 cleanup:
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     return ret;
 }
 
@@ -536,7 +536,7 @@ cleanup:
  */
 size_t esphome_entity_get_media_player_count(void)
 {
-    return s_entities.media_player_count;
+    return s_entities->media_player_count;
 }
 
 /**
@@ -549,11 +549,11 @@ esp_err_t esphome_entity_execute_media_player_command(esphome_entity_key_t key,
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -564,7 +564,7 @@ esp_err_t esphome_entity_execute_media_player_command(esphome_entity_key_t key,
         callback = entry->config.command_callback;
     }
 
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
 
     if (!entry) {
         return ESPHOME_ERR_ENTITY_NOT_FOUND;
@@ -618,14 +618,14 @@ esp_err_t esphome_entity_register_alarm(const esphome_alarm_config_t *config)
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         ESP_LOGE(ENTITY_TAG, "Entity manager not initialized");
         return ESP_ERR_INVALID_STATE;
     }
 
     esp_err_t ret = ESP_OK;
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -635,24 +635,24 @@ esp_err_t esphome_entity_register_alarm(const esphome_alarm_config_t *config)
         goto cleanup;
     }
 
-    if (s_entities.alarm_count >= ESPHOME_MAX_ALARM_PANELS) {
+    if (s_entities->alarm_count >= ESPHOME_MAX_ALARM_PANELS) {
         ESP_LOGE(ENTITY_TAG, "Maximum alarm panels reached (%d)", ESPHOME_MAX_ALARM_PANELS);
         ret = ESPHOME_ERR_MAX_ENTITIES;
         goto cleanup;
     }
 
-    size_t idx = s_entities.alarm_count;
-    memcpy(&s_entities.alarms[idx].config, config, sizeof(esphome_alarm_config_t));
-    s_entities.alarms[idx].state.key = config->key;
-    s_entities.alarms[idx].state.device_id = config->device_id;
-    s_entities.alarms[idx].state.state = ESPHOME_ALARM_STATE_DISARMED;
-    s_entities.alarms[idx].registered = true;
-    s_entities.alarm_count++;
+    size_t idx = s_entities->alarm_count;
+    memcpy(&s_entities->alarms[idx].config, config, sizeof(esphome_alarm_config_t));
+    s_entities->alarms[idx].state.key = config->key;
+    s_entities->alarms[idx].state.device_id = config->device_id;
+    s_entities->alarms[idx].state.state = ESPHOME_ALARM_STATE_DISARMED;
+    s_entities->alarms[idx].registered = true;
+    s_entities->alarm_count++;
 
     ESP_LOGI(ENTITY_TAG, "Registered alarm panel: key=%lu, name='%s'", config->key, config->name);
 
 cleanup:
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     return ret;
 }
 
@@ -661,13 +661,13 @@ cleanup:
  */
 esp_err_t esphome_entity_update_alarm(esphome_entity_key_t key, esphome_alarm_state_t state)
 {
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
     esp_err_t ret = ESP_OK;
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -680,12 +680,12 @@ esp_err_t esphome_entity_update_alarm(esphome_entity_key_t key, esphome_alarm_st
     entry->state.state = state;
     ESP_LOGD(ENTITY_TAG, "Alarm %lu state: %d", key, state);
 
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     notify_state_change(ESPHOME_ENTITY_ALARM_PANEL, key, &entry->state);
     return ESP_OK;
 
 cleanup:
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     return ret;
 }
 
@@ -698,13 +698,13 @@ esp_err_t esphome_entity_get_alarm(esphome_entity_key_t key, esphome_alarm_entit
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
     esp_err_t ret = ESP_OK;
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -717,7 +717,7 @@ esp_err_t esphome_entity_get_alarm(esphome_entity_key_t key, esphome_alarm_entit
     memcpy(state, &entry->state, sizeof(esphome_alarm_entity_state_t));
 
 cleanup:
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     return ret;
 }
 
@@ -730,13 +730,13 @@ esp_err_t esphome_entity_get_alarm_config(esphome_entity_key_t key, esphome_alar
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
     esp_err_t ret = ESP_OK;
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -749,7 +749,7 @@ esp_err_t esphome_entity_get_alarm_config(esphome_entity_key_t key, esphome_alar
     memcpy(config, &entry->config, sizeof(esphome_alarm_config_t));
 
 cleanup:
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     return ret;
 }
 
@@ -758,7 +758,7 @@ cleanup:
  */
 size_t esphome_entity_get_alarm_count(void)
 {
-    return s_entities.alarm_count;
+    return s_entities->alarm_count;
 }
 
 /**
@@ -768,11 +768,11 @@ esp_err_t esphome_entity_execute_alarm_command(esphome_entity_key_t key,
                                                 esphome_alarm_command_t command,
                                                 const char *code)
 {
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -783,7 +783,7 @@ esp_err_t esphome_entity_execute_alarm_command(esphome_entity_key_t key,
         callback = entry->config.command_callback;
     }
 
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
 
     if (!entry) {
         return ESPHOME_ERR_ENTITY_NOT_FOUND;
@@ -838,14 +838,14 @@ esp_err_t esphome_entity_register_text(const esphome_text_config_t *config)
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         ESP_LOGE(ENTITY_TAG, "Entity manager not initialized");
         return ESP_ERR_INVALID_STATE;
     }
 
     esp_err_t ret = ESP_OK;
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -855,25 +855,25 @@ esp_err_t esphome_entity_register_text(const esphome_text_config_t *config)
         goto cleanup;
     }
 
-    if (s_entities.text_count >= ESPHOME_MAX_TEXTS) {
+    if (s_entities->text_count >= ESPHOME_MAX_TEXTS) {
         ESP_LOGE(ENTITY_TAG, "Maximum text entities reached (%d)", ESPHOME_MAX_TEXTS);
         ret = ESPHOME_ERR_MAX_ENTITIES;
         goto cleanup;
     }
 
-    size_t idx = s_entities.text_count;
-    memcpy(&s_entities.texts[idx].config, config, sizeof(esphome_text_config_t));
-    s_entities.texts[idx].state.key = config->key;
-    s_entities.texts[idx].state.device_id = config->device_id;
-    s_entities.texts[idx].state.state[0] = '\0';
-    s_entities.texts[idx].state.missing_state = true;
-    s_entities.texts[idx].registered = true;
-    s_entities.text_count++;
+    size_t idx = s_entities->text_count;
+    memcpy(&s_entities->texts[idx].config, config, sizeof(esphome_text_config_t));
+    s_entities->texts[idx].state.key = config->key;
+    s_entities->texts[idx].state.device_id = config->device_id;
+    s_entities->texts[idx].state.state[0] = '\0';
+    s_entities->texts[idx].state.missing_state = true;
+    s_entities->texts[idx].registered = true;
+    s_entities->text_count++;
 
     ESP_LOGI(ENTITY_TAG, "Registered text entity: key=%lu, name='%s'", config->key, config->name);
 
 cleanup:
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     return ret;
 }
 
@@ -886,13 +886,13 @@ esp_err_t esphome_entity_update_text(esphome_entity_key_t key, const char *value
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
     esp_err_t ret = ESP_OK;
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -908,12 +908,12 @@ esp_err_t esphome_entity_update_text(esphome_entity_key_t key, const char *value
 
     ESP_LOGD(ENTITY_TAG, "Text %lu state: '%s'", key, entry->state.state);
 
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     notify_state_change(ESPHOME_ENTITY_TEXT, key, &entry->state);
     return ESP_OK;
 
 cleanup:
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     return ret;
 }
 
@@ -922,13 +922,13 @@ cleanup:
  */
 esp_err_t esphome_entity_set_text_missing(esphome_entity_key_t key)
 {
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
     esp_err_t ret = ESP_OK;
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -940,12 +940,12 @@ esp_err_t esphome_entity_set_text_missing(esphome_entity_key_t key)
 
     entry->state.missing_state = true;
 
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     notify_state_change(ESPHOME_ENTITY_TEXT, key, &entry->state);
     return ESP_OK;
 
 cleanup:
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     return ret;
 }
 
@@ -958,13 +958,13 @@ esp_err_t esphome_entity_get_text(esphome_entity_key_t key, esphome_text_entity_
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
     esp_err_t ret = ESP_OK;
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -977,7 +977,7 @@ esp_err_t esphome_entity_get_text(esphome_entity_key_t key, esphome_text_entity_
     memcpy(state, &entry->state, sizeof(esphome_text_entity_state_t));
 
 cleanup:
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     return ret;
 }
 
@@ -990,13 +990,13 @@ esp_err_t esphome_entity_get_text_config(esphome_entity_key_t key, esphome_text_
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
     esp_err_t ret = ESP_OK;
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -1009,7 +1009,7 @@ esp_err_t esphome_entity_get_text_config(esphome_entity_key_t key, esphome_text_
     memcpy(config, &entry->config, sizeof(esphome_text_config_t));
 
 cleanup:
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
     return ret;
 }
 
@@ -1018,7 +1018,7 @@ cleanup:
  */
 size_t esphome_entity_get_text_count(void)
 {
-    return s_entities.text_count;
+    return s_entities->text_count;
 }
 
 /**
@@ -1030,11 +1030,11 @@ esp_err_t esphome_entity_execute_text_command(esphome_entity_key_t key, const ch
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities.initialized) {
+    if (!s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (xSemaphoreTakeRecursive(s_entities.mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
+    if (xSemaphoreTakeRecursive(s_entities->mutex, GW_DEFAULT_MUTEX_TIMEOUT_1S_TICKS) != pdTRUE) {
         return ESP_ERR_TIMEOUT;
     }
 
@@ -1045,7 +1045,7 @@ esp_err_t esphome_entity_execute_text_command(esphome_entity_key_t key, const ch
         callback = entry->config.command_callback;
     }
 
-    xSemaphoreGiveRecursive(s_entities.mutex);
+    xSemaphoreGiveRecursive(s_entities->mutex);
 
     if (!entry) {
         return ESPHOME_ERR_ENTITY_NOT_FOUND;
