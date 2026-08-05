@@ -34,8 +34,13 @@ static const tuya_dp_entry_t s_fingerbot_dp_map[] = {
       .enum_names = (const char **)s_mode_enum_names, .enum_values = s_mode_enum_values,
       .enum_count = 3 },
     { .dp_id = 102, .dp_type = TUYA_DP_TYPE_VALUE, .key = "down_movement" },
-    { .dp_id = 103, .dp_type = TUYA_DP_TYPE_VALUE, .key = "sustain_time",
-      .scale = 0.1f },  /* DP unit is 100ms, expose unit is seconds */
+    /* DP 103 carries seconds directly — no scaling. The 0.1 factor that used
+     * to sit here made Home Assistant show a tenth of the real hold time and
+     * send ten times what was asked for: a requested 1s held the switch for
+     * 10s. Confirmed against the device's own quirk
+     * (data/converters_zhaquirks/tz3210_dse8ogfy.json, DP 103 plain int) and
+     * zigbee2mqtt, which writes the value raw. */
+    { .dp_id = 103, .dp_type = TUYA_DP_TYPE_VALUE, .key = "sustain_time" },
     { .dp_id = 104, .dp_type = TUYA_DP_TYPE_BOOL,  .key = "reverse" },
     { .dp_id = 105, .dp_type = TUYA_DP_TYPE_VALUE, .key = "battery" },
     { .dp_id = 106, .dp_type = TUYA_DP_TYPE_VALUE, .key = "up_movement" },
@@ -117,7 +122,9 @@ static const zb_expose_t s_fingerbot_exposes[] = {
         .unit = "s",
         .icon = "mdi:timer-outline",
         .description = "Hold time at bottom position",
-        .ext.numeric = { .min = 0, .max = 25, .step = 1 },
+        /* zigbee2mqtt caps this at 10s; 25 fed the device values it does not
+         * accept. */
+        .ext.numeric = { .min = 0, .max = 10, .step = 1 },
     },
 
     /* Reverse — DP 104 */
