@@ -36,6 +36,25 @@ What follows from that:
 - **6801 device definitions loaded at runtime** from LittleFS, replaceable
   without recompiling.
 
+## Hardware
+
+**ESP32-C5 with 8 MB PSRAM and 16 MB flash.** All three matter:
+
+| | why |
+|---|---|
+| **C5, not C6/H2** | dual-band Wi-Fi. The C5 can put the uplink on 5 GHz and leave 2.4 GHz to Zigbee; C6 and H2 are 2.4 GHz only and share the band with what they are trying to talk to |
+| **8 MB PSRAM** | the converter database, the entity table and all of cJSON live there. Without it internal RAM does not fit the firmware |
+| **16 MB flash** | 4 MB app partition plus a 7.2 MB LittleFS partition for the 4.9 MB device database |
+
+Reference board: **ESP32-C5-DevKitC-1** (the variant with PSRAM). Any C5 module
+with the same memory works; check the PSRAM, some C5 boards ship without.
+
+An external antenna helps. Zigbee, Wi-Fi and BLE share one RF path, and this is
+a single-SoC design — see the honesty section below.
+
+**Wiring**: none required for the gateway itself. The optional mmWave presence
+sensor (S3KM1110) is UART, pins in `CONFIG_MMWAVE_*`.
+
 ## Status, honestly
 
 Hobby project, one board, one developer. Espressif recommends dual-SoC designs
@@ -62,6 +81,22 @@ Known gaps: GATT connections are untested for want of a device; the C5's Wi-Fi
 scan returns nothing useful, so anything scan-based (the captive portal's
 network list) is unreliable; 47 % of flash and a good deal of the codebase have
 never been reviewed.
+
+## How it compares
+
+| | this project | zigbee2mqtt / ZHA | ESPHome zigbee component |
+|---|---|---|---|
+| Role | Zigbee **coordinator** | coordinator | Zigbee **end device** |
+| Path to Home Assistant | ESPHome native API | MQTT broker / ZHA integration | via a separate coordinator |
+| Broker required | no | yes (z2m) | no |
+| Runs on | ESP32-C5 alone | Pi/server + USB stick | ESP32-C6/H2/C5 |
+| Wi-Fi band vs Zigbee | **5 GHz uplink, 2.4 GHz Zigbee** | depends on host | shares 2.4 GHz |
+| Device definitions | 6801, runtime-loadable | thousands, mature | n/a |
+| Maturity | hobby project | production, years of it | official ESPHome |
+
+**Keywords**: ESP32-C5, Zigbee coordinator, ESPHome native API, Home Assistant,
+Zigbee gateway without MQTT, zigbee2mqtt alternative, ESP32 Zigbee bridge,
+dual-band Zigbee gateway, ESP-IDF, zigbee-herdsman-converters.
 
 ## Features
 

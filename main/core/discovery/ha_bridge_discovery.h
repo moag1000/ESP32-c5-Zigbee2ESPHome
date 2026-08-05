@@ -165,7 +165,7 @@ esp_err_t ha_bridge_discovery_remove(void);
  *   "free_heap_kb": 52,
  *   "uptime_sec": 36000,
  *   "wifi_rssi": -61,
- *   "wifi_ip": "192.168.2.25",
+ *   "wifi_ip": "192.168.1.100",
  *   "wifi_signal_quality": 78,
  *   "wifi_band": "5GHz",
  *   "wifi_hostname": "zigbee-gateway",
