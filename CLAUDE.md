@@ -407,9 +407,30 @@ Sub-device info is provided in `DeviceInfoResponse` via `esphome_api_handlers.c`
 | BLE Scanner | -- | **deaktiviert** (Code im Baum, nicht kompiliert) |
 | ESPHome BLE Proxy | -- | **deaktiviert** |
 
-**Hardware:** 384KB SRAM, 8MB PSRAM. Der Wert "~40KB internal free after full
-init" stammt aus der Zeit mit aktivem BLE; ohne BLE sollten rund 30KB mehr frei
-sein, das ist aber seit der Abschaltung **nicht auf Hardware nachgemessen**.
+**Hardware:** 384KB SRAM, 8MB PSRAM.
+
+**Speicherstand, auf Hardware gemessen 2026-08-05** (loest den alten Wert
+"~40KB internal free after full init" aus der BLE-Zeit ab):
+
+| | |
+|---|---|
+| HP SRAM statisch (Linker) | 236 KB von 321 KB = 73,6 % belegt, **84,7 KB frei** |
+| davon `.bss` / `.text` / `.data` | 115 KB / 90 KB / 31 KB |
+| Interner Heap beim Start | 198 KB gesamt, 147 KB frei |
+| **Interner Heap eingeschwungen** | **67 KB frei** (WiFi + MQTT + Zigbee aktiv) |
+| Tiefststand seit Boot | 30 KB |
+| PSRAM | 6115 KB gesamt, 6109 KB frei -- praktisch ungenutzt |
+| PSRAM `.bss` statisch | 20 KB |
+| Flash-Image | 2,1 MB, App-Partition zu 47 % frei |
+| CPU eingeschwungen | 30-36 % |
+
+**Caveat:** waehrend der Messung war **kein Home-Assistant-Client verbunden**
+(`max_clients=2`, 0 aktiv). Der ESPHome-Client mit seiner Entity-Registrierung
+ist der groesste Einzelverbraucher; der Wert mit verbundenem HA fehlt noch.
+
+Auffaellig: PSRAM liegt zu 99,9 % brach, waehrend der interne Heap mit 67 KB
+der Engpass ist. Wer Luft braucht, verschiebt Allokationen nach PSRAM
+(`mem_alloc(..., MEM_CAP_PSRAM)`) -- der Weg ist da, er wird nur kaum benutzt.
 
 ## ESP-IDF
 
@@ -762,6 +783,7 @@ esphome_adapter_register_device(dev);  // auto-maps capabilities to entities
 - [ ] ESPHome OTA fuer Zigbee-Sub-Devices (`esphome_ota.c` deckt bisher nur das
       Gateway selbst ab, Port 3232)
 - [ ] Bootloader-Groesse: 0x5700 von 0x6000 belegt, nur ~2.3KB frei
-- [ ] Freien internen RAM ohne BLE auf Hardware nachmessen
+- [x] Freien internen RAM ohne BLE auf Hardware nachgemessen (67 KB frei, siehe oben)
+- [ ] Denselben Wert mit verbundenem Home Assistant messen
 - [ ] `docs/` auf den aktuellen Stand ziehen -- grosse Teile sind noch der
       Fork-Stand vom 2026-02-19 und beschreiben BLE als aktiv
