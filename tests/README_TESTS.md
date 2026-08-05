@@ -130,8 +130,36 @@ Two suites test code that no longer exists in the project:
 | `unit/test_memory_manager.c` | `core/memory_manager.h` — replaced by `core/memory/memory_manager_ng.h`, different API |
 | `integration/test_zigbee_mqtt_bridge.c` | `zigbee/zb_device_handler.h` — deleted (~1750 LOC removed during the NG migration) |
 
-These need rewriting against the current API, not repairing. They are left in
-the tree as reference for what used to be covered.
+These need rewriting against the current API, not repairing — the headers they
+include do not exist. `core/memory_manager.h` became
+`core/monitoring/memory_manager.h` with a different API, and
+`zigbee/zb_device_handler.h` was deleted outright. They are left in the tree as
+a record of what used to be covered, not as something to fix in place.
+
+Two more are unwired but for a different reason: `integration/test_ota.c` calls
+only `config_manager_get_config()` and `version` helpers, and
+`integration/test_wifi_mqtt_integration.c` exercises mocks rather than
+production code. Wiring either would add passing tests without adding
+coverage.
+
+## Do not wire the config_manager suite without changing it first
+
+`tests/unit/test_config_manager.c` calls `config_manager_reset_to_defaults()`,
+which does `nvs_erase_all()` on `CONFIG_NVS_NAMESPACE`, plus
+`config_manager_save()` and `config_manager_import_json()`.
+
+The test app deliberately shares the gateway's partition layout, so that is the
+**gateway's own** configuration namespace. Running this suite as written would
+erase the stored Zigbee network parameters — PAN ID and channel. The gateway
+would then form a different network on next boot and both paired devices would
+be gone.
+
+`config_manager.c` links trivially (its only real dependency is NVS), so this
+suite looks like the easiest one to enable. It is not. Enabling it needs either
+a separate NVS partition for tests or the destructive cases removed.
+
+This is the same hazard `run_all_tests.c` already guards against by refusing to
+do the usual "on ESP_ERR_NVS_NO_FREE_PAGES, erase and retry" dance.
 
 ## What is blocked on dependency cascades
 
@@ -144,7 +172,7 @@ helper function ends up linking most of the Zigbee stack.
 | Suite | Needs |
 |---|---|
 | JSON Utilities | `utils/json_utils.c` → zb_network, device_registry, cluster modules |
-| Config Manager | `core/config_manager.c` → NVS, event bus |
+| Config Manager | links easily, but see the NVS hazard above — not a dependency problem |
 | WiFi + MQTT Integration | wifi_manager, mqtt client, mocks |
 | OTA | ota_handler, app_update |
 
