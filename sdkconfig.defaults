@@ -257,8 +257,27 @@ CONFIG_ESPHOME_NOISE_REQUIRE_PSK=y
 # DISABLED: ESP32-C5 cannot maintain stable GATT connections for BLE proxy.
 # Disabling BLE frees ~30KB internal RAM for Zigbee+WiFi stability.
 #
-CONFIG_BT_ENABLED=n
-CONFIG_BT_SCANNER_ENABLED=n
+# Bluetooth re-enabled 2026-08-05.
+#
+# It was switched off because the C5 "held no stable GATT connections under
+# WiFi+Zigbee coexistence load". That observation was made while WiFi itself
+# was broken for want of esp_coex_wifi_i154_enable() being called before the
+# association window — see CLAUDE.md. With that fixed, and with internal RAM
+# up from 67 KB to 122 KB free, the reason no longer holds and the ~25 KB cost
+# is affordable.
+#
+# Scanning is off at boot and switched from Home Assistant, as is the choice
+# between passive and active. Active transmits scan requests and therefore
+# competes with Zigbee for the radio, so it is a decision to make while
+# watching, not a compile-time constant.
+CONFIG_BT_ENABLED=y
+CONFIG_BT_NIMBLE_ENABLED=y
+CONFIG_BT_NIMBLE_ROLE_OBSERVER=y
+CONFIG_BT_NIMBLE_ROLE_CENTRAL=y
+CONFIG_BT_NIMBLE_ROLE_PERIPHERAL=n
+CONFIG_BT_NIMBLE_ROLE_BROADCASTER=n
+CONFIG_BT_NIMBLE_MAX_CONNECTIONS=3
+CONFIG_BT_SCANNER_ENABLED=y
 
 #
 # WiFi/Zigbee Coexistence

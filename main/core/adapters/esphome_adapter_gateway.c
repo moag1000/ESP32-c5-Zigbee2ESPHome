@@ -53,6 +53,9 @@ static const char *TAG = "gw_entities";
 #define GW_KEY_OTA_MODE            0x40000008
 
 #if CONFIG_MMWAVE_SENSOR_ENABLE
+#define GW_KEY_BLE_SCANNER         0x4000000A
+#define GW_KEY_BLE_ACTIVE_SCAN     0x4000000B
+
 #define GW_KEY_MMWAVE_PRESENCE     0x40000010
 #define GW_KEY_MMWAVE_DISTANCE     0x40000011
 #endif
@@ -257,6 +260,42 @@ static void on_device_count_change(event_type_t type, void *data, size_t data_si
  * Registration
  * ============================================================================ */
 
+
+#if CONFIG_BT_SCANNER_ENABLED
+/** @brief Start/stop BLE scanning from Home Assistant. */
+static esp_err_t gw_ble_scanner_command(esphome_entity_key_t key, bool state)
+{
+    (void)key;
+    esp_err_t ret = state ? ble_scanner_start() : ble_scanner_stop();
+    if (ret == ESP_OK) {
+        esphome_entity_update_switch(GW_KEY_BLE_SCANNER, state);
+        ESP_LOGI(TAG, "BLE scanner %s via Home Assistant", state ? "started" : "stopped");
+    } else {
+        ESP_LOGW(TAG, "BLE scanner %s failed: %s",
+                 state ? "start" : "stop", esp_err_to_name(ret));
+    }
+    return ret;
+}
+
+/**
+ * @brief Switch active scanning from Home Assistant
+ *
+ * Active scanning transmits scan requests, so on this part it competes with
+ * Zigbee for the 2.4 GHz radio. Making it a switch rather than a build-time
+ * option means the trade can be made while watching what it costs, instead of
+ * being decided once at compile time.
+ */
+static esp_err_t gw_ble_active_scan_command(esphome_entity_key_t key, bool state)
+{
+    (void)key;
+    ble_scanner_set_active_mode(state);
+    esphome_entity_update_switch(GW_KEY_BLE_ACTIVE_SCAN, state);
+    ESP_LOGI(TAG, "BLE %s scanning selected via Home Assistant",
+             state ? "active" : "passive");
+    return ESP_OK;
+}
+#endif
+
 esp_err_t esphome_adapter_gateway_register(void)
 {
     if (s_gw_initialized) {
@@ -279,6 +318,39 @@ esp_err_t esphome_adapter_gateway_register(void)
         esphome_entity_register_switch(&cfg);
         esphome_entity_update_switch(GW_KEY_PERMIT_JOIN, zb_coordinator_is_permit_join_enabled());
     }
+
+
+#if CONFIG_BT_SCANNER_ENABLED
+    /* --- BLE Scanner Switch --- */
+    {
+        esphome_switch_config_t cfg = {0};
+        cfg.key = GW_KEY_BLE_SCANNER;
+        cfg.device_id = 0;
+        strncpy(cfg.name, "BLE Scanner", sizeof(cfg.name) - 1);
+        snprintf(cfg.unique_id, sizeof(cfg.unique_id), "zbgw_ble_scanner");
+        strncpy(cfg.icon, "mdi:bluetooth", sizeof(cfg.icon) - 1);
+        cfg.entity_category = 1;  /* CONFIG */
+        cfg.command_callback = gw_ble_scanner_command;
+        esphome_entity_register_switch(&cfg);
+        esphome_entity_update_switch(GW_KEY_BLE_SCANNER,
+                                     ble_scanner_get_state() == BLE_SCANNER_STATE_RUNNING);
+    }
+
+    /* --- BLE Active Scan Switch --- */
+    {
+        esphome_switch_config_t cfg = {0};
+        cfg.key = GW_KEY_BLE_ACTIVE_SCAN;
+        cfg.device_id = 0;
+        strncpy(cfg.name, "BLE Active Scan", sizeof(cfg.name) - 1);
+        snprintf(cfg.unique_id, sizeof(cfg.unique_id), "zbgw_ble_active_scan");
+        strncpy(cfg.icon, "mdi:bluetooth-transfer", sizeof(cfg.icon) - 1);
+        cfg.entity_category = 1;  /* CONFIG */
+        cfg.command_callback = gw_ble_active_scan_command;
+        esphome_entity_register_switch(&cfg);
+        esphome_entity_update_switch(GW_KEY_BLE_ACTIVE_SCAN,
+                                     ble_scanner_is_active_enabled());
+    }
+#endif
 
     /* --- Permit Join Duration Number --- */
     {

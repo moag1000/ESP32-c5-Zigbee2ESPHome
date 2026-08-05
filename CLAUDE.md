@@ -10,27 +10,44 @@ ESPHome Native API ist die PRIMARY Home Assistant Integration (Port 6053, Noise 
 MQTT ist sekundaer: Bridge-Management, Debug-Logs, Fallback.
 Memory-optimiert, saubere Architektur, keine Code-Duplikation.
 
-## BLE: deaktiviert
+## BLE: wieder aktiv (2026-08-05)
 
-`CONFIG_BT_ENABLED=n` in `sdkconfig.defaults`. Der C5 haelt unter
-WiFi+Zigbee-Koexistenzlast keine stabilen GATT-Verbindungen; das Abschalten
-gibt rund 30KB internes RAM fuer Zigbee und WiFi frei.
+`CONFIG_BT_ENABLED=y`, NimBLE als Observer/Central, Scanner an.
 
-- Der komplette NimBLE-Block ist aus `sdkconfig.defaults` entfernt
-- `BT_SCANNER_ENABLED` hat `depends on BT_ENABLED` -- ein lokaler Override in
-  `sdkconfig.local` kann BLE-App-Code nicht mehr ohne Controller aktivieren
-- `BT_SRCS` in `main/CMakeLists.txt` wird nur bei aktivem BT eingebunden;
-  der BLE-Quellcode bleibt vollstaendig im Baum, wird aber nicht kompiliert
-- `main/bluetooth/ble_stubs.c` liefert die No-Op-Symbole. Signaturen muessen
-  exakt zu `esphome_ble_proxy.h` passen (3-Param-Handler
-  `uint8_t client_id, const uint8_t *payload, size_t len`)
-- `esphome_api_handlers.c` meldet `bluetooth_proxy_feature_flags = 0` und laesst
-  Feld 18 (BT-MAC) weg
-- Damit ist auch der ESPHome BLE Proxy inaktiv
+**Warum die Abschaltung hinfaellig ist.** Hier stand als Begruendung, der C5
+halte "unter WiFi+Zigbee-Koexistenzlast keine stabilen GATT-Verbindungen".
+Diese Beobachtung entstand, waehrend **WLAN selbst kaputt war** -- weil
+`esp_coex_wifi_i154_enable()` erst spaet im Boot lief. Die Diagnose hat also
+mutmasslich die Folge statt der Ursache getroffen.
 
-Pruefen, ob es wirklich aus ist: keine `CONFIG_BT_*`-Defines in
-`build/config/sdkconfig.h`, 0 Treffer fuer `bt/host/nimble` in
-`build/compile_commands.json`.
+Gemessen, nachdem die Koexistenz vorgezogen wurde:
+
+    WLAN-Assoziation   25,2 s, 0 Fehlversuche   (ohne BLE: 26,5 s)
+    Zigbee             online=2, offline=0, ueber den ganzen Lauf
+    BLE-Scan           18 Advertisements, 18 Geraete
+    interner Heap      65 KB frei (ohne BLE: 122 KB)
+
+Dreifachfunk laeuft also, und BLE kostet WLAN nichts messbares.
+
+**Der Preis ist Speicher, nicht Stabilitaet:** 25 KB statisch, zur Laufzeit
+rund 59 KB (NimBLE-Host und Controller-Puffer). Das ist tragbar, seit der
+interne Heap von 67 KB auf 122 KB gestiegen ist -- vorher waere es nicht
+gegangen.
+
+**Noch offen:** GATT-Verbindungen selbst sind nicht getestet, es stand kein
+Geraet dafuer bereit. Was hier belegt ist, ist Scannen unter Dreifachlast.
+
+### Schalten aus Home Assistant
+
+Zwei Schalter, beide `entity_category = config`:
+
+- **BLE Scanner** -- Scannen an/aus (`ble_scanner_start/stop`)
+- **BLE Active Scan** -- passiv gegen aktiv (`ble_scanner_set_active_mode`)
+
+Aktives Scannen sendet Scan Requests und konkurriert damit um dasselbe
+2,4-GHz-Funkteil wie Zigbee. Deshalb ist es ein Schalter und keine
+Compile-Zeit-Entscheidung: der Handel laesst sich so beobachten statt raten.
+Passiv ist der Startzustand.
 
 ## Toter Code: aufgeraeumt (gemessen 2026-08-05)
 
