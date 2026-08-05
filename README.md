@@ -1,71 +1,109 @@
-# ESP32-C5 Zigbee Gateway (ESPHome Native API + MQTT)
+# ESP32-C5 Zigbee → ESPHome converter
 
-> ⚠️ **EXPERIMENTAL PROJECT**: This is a hobbyist/learning project. Espressif **recommends dual-SoC solutions** (e.g., ESP32-S3 + ESP32-H2) for production Zigbee gateways due to better reliability and lower packet loss on single-RF-path systems.
->
-> **Best for**: Learning, experimentation, proof-of-concept
-> **Not recommended for**: Production deployments, mission-critical applications
+That is the whole idea: a **Zigbee 3.0 coordinator** that converts its paired
+devices into **ESPHome native API** entities, on a single ESP32-C5.
 
-> 🔴 **Bluetooth is disabled** (`CONFIG_BT_ENABLED=n`, as of 2026-07-31). The
-> ESP32-C5 could not hold stable GATT connections under WiFi + Zigbee
-> coexistence load. The BLE source tree is still present but is not compiled;
-> turning it back on means re-enabling `CONFIG_BT_ENABLED` and restoring the
-> NimBLE block in `sdkconfig.defaults`. Every BLE section below describes code
-> that currently does not run.
+No MQTT broker. No zigbee2mqtt. No ZHA. One device, one integration.
 
-A **Zigbee Coordinator** with an **ESPHome Native API** bridge for Home Assistant,
-built on the ESP32-C5 SoC.
+## What this does differently
 
-## Overview
+Everything else in this space goes one of two ways: an ESP32 that *becomes* a
+Zigbee device for someone else's coordinator ([ESPHome's zigbee
+component](https://esphome.io/components/zigbee/),
+[luar123/zigbee_esphome](https://github.com/luar123/zigbee_esphome)), or a
+coordinator that publishes to **MQTT** (zigbee2mqtt, ZHA). This is the
+combination nobody else builds: the coordinator runs here, and the devices it
+pairs show up as **ESPHome sub-devices** in Home Assistant.
 
-This project implements a Zigbee gateway on the ESP32-C5 microcontroller:
-- **Zigbee 3.0**: Coordinator for Zigbee devices (lights, sensors, switches)
-- **WiFi 6**: Dual-band connectivity with ESPHome Native API (primary) + MQTT bridge (secondary)
-- **Bluetooth LE**: implemented but **currently disabled** — see the banner above
+**The ESP32-C5 is the reason it is worth doing.** Zigbee lives on 2.4 GHz. Every
+2.4 GHz-only gateway — ESP32-C6, ESP32-H2, and any USB stick in a Pi on 2.4 GHz
+Wi-Fi — competes with itself for the band. The C5 is dual-band, so the uplink
+sits on 5 GHz while Zigbee keeps 2.4 GHz:
 
-### Key Features
+    Wi-Fi   channel 64, 5 GHz, -41 dBm
+    Zigbee  channel 25, 2.4 GHz
 
-#### Zigbee Gateway
-- **Zigbee 3.0 Coordinator**: Manages up to 20-30 Zigbee devices (conservative tested limits)
-- **MQTT Bridge**: Bi-directional communication with Home Assistant
-- **Home Assistant Discovery**: Automatic device discovery via MQTT
-- **ZCL Cluster Support**: On/Off, Level, Color, Temperature, Humidity, Occupancy
+C6 and H2 cannot do this at all.
 
-#### Bluetooth Gateway — DISABLED
-Implemented but not compiled (`CONFIG_BT_ENABLED=n`). Kept for reference:
-- **BLE Passive Scanner**: Beacon tracking, presence detection (iBeacon, Eddystone)
-- **BLE Active Proxy**: GATT connections to BLE sensors (Xiaomi, Govee)
-- **Device Tracking**: RSSI-based presence detection for 50+ BLE devices
-- **Supported Devices**: Xiaomi LYWSD03MMC, Govee H5075, iBeacons, BLE trackers
+What follows from that:
 
-#### ESPHome Integration (primary HA path)
-- **ESPHome Native API**: Full compatibility with Home Assistant ESPHome, port 6053, Noise encryption
-- **Auto-Discovery**: Appears as ESPHome device in Home Assistant
-- **Sub-Devices**: Zigbee devices appear as sub-devices of the gateway (ESPHome 2025.7.0+)
-- **Entity Support**: Sensors, Binary Sensors, Switches, Lights, Covers, Fans, Climate, Locks
-- **ESPHome OTA**: firmware updates over the ESPHome protocol on port 3232
-- **Service Calls**: framework is in place, but only `test_service` is registered so far
+- **No broker in the path.** Nothing to install, nothing to keep running,
+  one less thing that can be down.
+- **Zigbee does not depend on the uplink.** The coordinator comes up before
+  Wi-Fi and MQTT. With the network gone, paired devices stay reachable.
+- **Devices are real HA devices**, with entities sorted into Controls,
+  Configuration and Diagnostic — not MQTT topics plus discovery payloads.
+- **6801 device definitions loaded at runtime** from LittleFS, replaceable
+  without recompiling.
 
-#### Converter Database
-- Device definitions are **loaded at runtime** from a JSON database in LittleFS,
-  not compiled into the firmware
-- Transpiled from zigbee-herdsman-converters (MIT, Koen Kanters) and
-  zha-device-handlers (Apache-2.0) by the host tooling. Those two projects
-  are what turns a paired address into a named device with working
-  controls — see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-  tools in `tools/`
-- The database can be replaced at runtime over MQTT
-  (`zigbee2mqtt/bridge/request/converter_db/update`)
+## Status, honestly
 
-#### mmWave Presence
-- S3KM1110 24GHz FMCW radar over UART, 16 distance gates (~70cm each)
-- Enabled with `CONFIG_MMWAVE_SENSOR_ENABLE`
+Hobby project, one board, one developer. Espressif recommends dual-SoC designs
+(ESP32-S3 + ESP32-H2) for production Zigbee gateways, and that advice stands:
+single-RF-path systems see more packet loss.
 
-#### System Features
-- **WiFi Connectivity**: Dual-band WiFi 6 (2.4GHz + 5GHz, 5GHz preferred via `CONFIG_WIFI_PREFER_5GHZ`)
-- **WiFi Coexistence**: Hardware coexistence for WiFi/BT/Zigbee on 2.4GHz
-- **OTA Updates**: Over-the-air firmware updates
-- **Memory Optimized**: Efficient PSRAM management for single-core architecture
-- **Runtime Configuration**: MQTT-based + NVS persistent configuration
+**Use it for** learning, experimenting, and a small network you are willing to
+tinker with. **Do not use it for** anything you need to just work.
+
+zigbee2mqtt and ZHA are vastly more mature — thousands of contributors, years of
+field testing, far more devices. This is a different shape, not a better one.
+
+Measured on hardware (ESP32-C5, ESP-IDF v6.0.2):
+
+| | |
+|---|---|
+| Wi-Fi association | 25-27 s from boot, 0 failed attempts |
+| Devices in converter DB | 6801, from 1360 manufacturers |
+| Internal heap, steady state | 122 KB free (65 KB with BLE on) |
+| Internal heap, low-water mark | 121 KB |
+| Test suite | 119 tests, on-device |
+
+Known gaps: GATT connections are untested for want of a device; the C5's Wi-Fi
+scan returns nothing useful, so anything scan-based (the captive portal's
+network list) is unreliable; 47 % of flash and a good deal of the codebase have
+never been reviewed.
+
+## Features
+
+**Zigbee** — 3.0 coordinator, device interview, converter binding, groups,
+direct binding, network topology and heal, availability tracking, backup and
+restore. Scenes, Touchlink and Zigbee OTA are complete but off by default
+(`CONFIG_ZB_SCENES_ENABLE`, `CONFIG_ZB_TOUCHLINK_ENABLE`, `CONFIG_ZB_OTA_ENABLE`).
+
+**Home Assistant** — ESPHome native API on port 6053 with Noise encryption,
+sub-devices, 15 entity types, entity categories, OTA on port 3232, and the
+service calls `permit_join`, `remove_device`, `reconfigure_device`.
+
+**Bluetooth** — NimBLE scanner, passive or active, switchable from Home
+Assistant at runtime. Re-enabled after the original reason for disabling it
+turned out to be a Wi-Fi coexistence bug rather than a BLE problem.
+
+**MQTT** — secondary. Bridge management, diagnostics, converter database
+updates. Not required for Home Assistant.
+
+**Other** — S3KM1110 mmWave presence over UART, captive portal for Wi-Fi setup,
+crash reporting, LED status, performance metrics.
+
+## Credit where it is due
+
+This gateway would be a Zigbee adapter without two projects that did the hard
+part — knowing what a device *is*:
+
+- **[zigbee-herdsman-converters](https://github.com/Koenkk/zigbee-herdsman-converters)**
+  (MIT, Koen Kanters) — thousands of devices described by hundreds of people,
+  each entry usually somebody buying hardware and working out what its vendor
+  actually did. It is why a paired address becomes a "Fingerbot Plus" with a
+  mode selector. **[Sponsor Koen](https://github.com/sponsors/Koenkk)** — if
+  this project is useful to you, that is where the money should go first.
+- **[zha-device-handlers](https://github.com/zigpy/zha-device-handlers)**
+  (Apache-2.0) — covers what the z2m set does not.
+- **[ESPHome](https://github.com/esphome/esphome)** — the native API's wire
+  format, message numbering and entity model are theirs.
+
+Full notices in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+<!-- If you want your own funding link, add a .github/FUNDING.yml and reference
+     it here. Left out deliberately rather than guessed at. -->
 
 ## Hardware Requirements
 
@@ -230,16 +268,27 @@ The partition table is optimized for 16MB flash with OTA support and Zigbee + Bl
 
 **Total**: 16MB (0x1000000) - Full flash utilization with dual OTA partitions
 
-### Memory Budget (384KB SRAM)
+### Memory budget (320 KB usable SRAM)
 
-| Configuration | Free Heap | Zigbee Devices | BT Devices | Status |
-|---------------|-----------|----------------|------------|--------|
-| **Zigbee Only** | ~120KB | 50 | 0 | ✅ Recommended |
-| **Zigbee + BT** | ~60KB  | 30 | 50 | ⚠️ Tight but functional |
+Measured on hardware 2026-08-05, steady state with Wi-Fi, MQTT and Zigbee up:
 
-**Memory Target**:
-- Zigbee Only: Minimum 50KB free heap
-- With Bluetooth: Minimum 40KB free heap (WARNING threshold)
+| Configuration | Free internal heap | Low-water mark |
+|---|---|---|
+| Zigbee only | **122 KB** | 121 KB |
+| Zigbee + BLE | **65 KB** | 64 KB |
+
+The low-water mark used to be 30 KB regardless of the steady-state figure,
+because the tightest moment is early boot rather than operation — loading the
+converter index briefly took 158 KB. That allocation now goes to PSRAM, along
+with the entity table and all of cJSON.
+
+PSRAM is 8 MB and still barely used, so it is the place to move anything large
+that is not touched from an ISR:
+
+```bash
+riscv32-esp-elf-nm --print-size --size-sort --radix=d build/*.elf \
+  | awk '$3=="b" || $3=="B" {print $2, $4}' | sort -rn | head -20
+```
 
 ## Development Phases
 
