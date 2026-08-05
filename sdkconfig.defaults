@@ -243,7 +243,12 @@ CONFIG_MBEDTLS_HARDWARE_AES=y
 # ESPHome API - Noise Encryption
 #
 CONFIG_ESPHOME_NOISE_ENCRYPTION=y
-CONFIG_ESPHOME_NOISE_PSK="REDACTED-NOISE-PSK"
+# CONFIG_ESPHOME_NOISE_PSK moved to sdkconfig.local (gitignored).
+# It is a shared secret and must not live in a tracked file; a repo
+# default would be the same key on every clone. Left empty here, which
+# CONFIG_ESPHOME_NOISE_REQUIRE_PSK=y turns into a refused connection
+# rather than an unauthenticated one.
+CONFIG_ESPHOME_NOISE_PSK=""
 CONFIG_ESPHOME_ALLOW_PLAINTEXT=n
 CONFIG_ESPHOME_NOISE_REQUIRE_PSK=y
 
