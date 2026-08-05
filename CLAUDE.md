@@ -593,8 +593,25 @@ LittleFS.
   (Format v2 mit `manufacturers`- und `files`-Objekten)
 - Loader: `main/zigbee/converter/zb_converter_loader.c`
 - Partition: `spiffs` ab 0x921000, 0x6DF000 gross (siehe `partitions.csv`)
-- Quelldaten im Repo unter `data/`: 447 Hersteller-JSONs, `converters_merged/`
-  (162), `converters_zhaquirks/` (554), gepacktes `converters.bin` (6.9MB)
+- Quelldaten im Repo unter `data/`: 477 Hersteller-JSONs (z2m 26.91.0),
+  `converters_merged/` (133 Dateien, 1360 Hersteller, 6801 Geraete),
+  `converters_zhaquirks/` (554)
+- **Ausrollen per LittleFS-Abbild statt MQTT.** `CMakeLists.txt` erzeugt mit
+  `littlefs_create_partition_image(spiffs build/lfs_root)` ein Partitionsabbild.
+  Bewusst **ohne** `FLASH_IN_PROJECT`, damit ein normaler `idf.py flash` nur die
+  App schreibt und die DB nie nebenbei ueberbuegelt:
+
+  ```bash
+  rm -rf build/lfs_root && mkdir -p build/lfs_root/converters
+  cp data/converters_merged/*.json build/lfs_root/converters/
+  idf.py build
+  python -m esptool --chip esp32c5 -p <port> --flash-size 16MB \
+      write-flash 0x921000 build/spiffs.bin
+  ```
+
+  Der MQTT-Weg (`tools/upload_converters.py`) bleibt fuer Teilupdates. Ueber die
+  ESPHome-API geht es **nicht** sinnvoll -- sie kennt keinen Dateitransfer, nur
+  base64-Stueckelung durch Service-Aufrufe, was bei 4,9 MB unbrauchbar ist.
 - Host-Tools in `tools/`: `z2m_converter_extract.py`, `zhaquirks_transpiler.py`,
   `merge_converter_dbs.py`, `validate_converter_db.py`, `upload_converters.py`.
   `tools/zhc/` und `tools/zhaquirks/` sind die eingecheckten Upstream-Quellen.

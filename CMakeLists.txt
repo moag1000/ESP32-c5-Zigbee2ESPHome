@@ -42,3 +42,20 @@ project(${PROJECT_NAME})
 # Enable C23 standard for C files only (gnu23 for GCC extensions)
 # Generator expression prevents applying to C++ files in ESP-IDF components
 idf_build_set_property(COMPILE_OPTIONS "$<$<COMPILE_LANGUAGE:C>:-std=gnu23>" APPEND)
+
+# Converter database as a LittleFS image for the `spiffs` partition.
+#
+# The database is ~4.9 MB and has been deployed over MQTT until now
+# (tools/upload_converters.py, zigbee2mqtt/bridge/request/converter_db/update).
+# That path stays, but for a full replacement an image written straight to the
+# partition over USB is faster and cannot half-succeed.
+#
+# Deliberately without FLASH_IN_PROJECT: `idf.py flash` should keep touching
+# only the app, so a firmware flash never rewrites the database. Write it
+# explicitly when it changes:
+#
+#   idf.py littlefs-spiffs-image
+#   esptool --chip esp32c5 -p <port> write-flash 0x921000 build/spiffs.bin
+#
+# The image root must contain converters/, which is CONVERTER_DB_PATH.
+littlefs_create_partition_image(spiffs "${CMAKE_CURRENT_LIST_DIR}/build/lfs_root")
