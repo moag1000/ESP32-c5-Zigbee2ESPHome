@@ -49,11 +49,17 @@ That contains bootloader, partition table, firmware and the 6801-device
 converter database. The board then brings up a **captive portal** — join the
 `ESP32-C5-Setup-XXXX` access point and enter your Wi-Fi credentials.
 
-The released images carry **no credentials of any kind**, including no ESPHome
-encryption key. `scripts/release.sh` builds them from a config with every secret
-blanked and refuses to produce anything if it finds one in the output. To use
-the ESPHome API you set `CONFIG_ESPHOME_NOISE_PSK` in `sdkconfig.local` and build
-yourself — see Quick Start.
+The portal also takes the **Home Assistant encryption key**, with a button to
+generate one. Paste the same value into Home Assistant when it asks. Nothing
+needs compiling.
+
+The released images carry **no credentials of any kind**, including no
+encryption key — one baked into a public binary would be shared by everybody who
+flashed it. `scripts/release.sh` builds from a config with every secret blanked
+and refuses to produce anything if it finds one in the output.
+
+The key is stored in NVS and takes precedence over `CONFIG_ESPHOME_NOISE_PSK`,
+so a developer build with a key in `sdkconfig.local` still works unchanged.
 
 Updating firmware later without touching the database:
 

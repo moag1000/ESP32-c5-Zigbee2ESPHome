@@ -33,6 +33,8 @@
 
 #include "wifi_manager.h"
 #include "wifi_config.h"
+#include "esphome/esphome_noise.h"
+#include "mbedtls/platform_util.h"
 #include "captive_portal_html.h"
 #include "utils/version.h"
 
@@ -618,6 +620,34 @@ static esp_err_t http_post_connect_handler(httpd_req_t *req)
         return ESP_OK;
     }
     extract_param(body, "password", password, sizeof(password));
+
+    /* Optional ESPHome API key.
+     *
+     * Released images ship without one — a key baked into a public binary
+     * would be shared by everybody who flashed it. Taking it here means a
+     * pre-built image is usable without compiling anything, which was the
+     * whole point of shipping one. Stored straight away rather than with the
+     * WiFi credentials below, because it is valid regardless of whether the
+     * connection test then succeeds. */
+    {
+        char psk[ESPHOME_NOISE_PSK_BASE64_LEN] = {0};
+        if (extract_param(body, "psk", psk, sizeof(psk)) && psk[0] != '\0') {
+            uint8_t decoded[ESPHOME_NOISE_KEY_SIZE];
+            if (esphome_noise_decode_key(psk, decoded) == ESP_OK) {
+                esp_err_t pr = wifi_config_save_esphome_psk(psk);
+                ESP_LOGI(TAG, "ESPHome API key stored: %s", esp_err_to_name(pr));
+            } else {
+                ESP_LOGW(TAG, "Ignoring malformed ESPHome API key from portal");
+                httpd_resp_set_type(req, "application/json");
+                httpd_resp_sendstr(req,
+                    "{\"success\":false,\"error\":"
+                    "\"Encryption key must be Base64 of 32 bytes (44 characters)\"}");
+                return ESP_OK;
+            }
+            mbedtls_platform_zeroize(decoded, sizeof(decoded));
+            mbedtls_platform_zeroize(psk, sizeof(psk));
+        }
+    }
 
     if (strlen(ssid) == 0) {
         httpd_resp_set_type(req, "application/json");

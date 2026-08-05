@@ -11,6 +11,7 @@
  */
 
 #include "esphome_api_internal.h"
+#include "wifi/wifi_config.h"
 #include "esphome_protocol.h"
 #include "esphome_ble_proxy.h"
 #include "core/memory/memory_manager_ng.h"
@@ -238,10 +239,22 @@ esp_err_t esphome_api_handle_noise_handshake(esphome_client_t *client, uint8_t c
              mac_bytes[3], mac_bytes[4], mac_bytes[5]);
 
     /* Create Noise context */
+    /* Stored key first, build-time key second.
+     *
+     * Released images ship without a key — one baked into a public binary
+     * would be shared by every device flashed from it. The captive portal
+     * takes it instead and puts it in NVS, so a pre-built image is usable
+     * without compiling anything. A key in sdkconfig.local still works and
+     * serves as the fallback for developer builds. */
+    static char psk_nvs[ESPHOME_NOISE_PSK_BASE64_LEN];
+    psk_nvs[0] = '\0';
+    wifi_config_load_esphome_psk(psk_nvs, sizeof(psk_nvs));
+
+    const char *psk = (psk_nvs[0] != '\0') ? psk_nvs :
 #ifdef CONFIG_ESPHOME_NOISE_PSK
-    const char *psk = CONFIG_ESPHOME_NOISE_PSK;
+                      CONFIG_ESPHOME_NOISE_PSK;
 #else
-    const char *psk = NULL;
+                      NULL;
 #endif
 
 #ifdef CONFIG_ESPHOME_NOISE_REQUIRE_PSK

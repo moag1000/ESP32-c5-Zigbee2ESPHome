@@ -106,6 +106,27 @@ esp_err_t wifi_config_erase_nvs(void);
  */
 esp_err_t wifi_config_validate(const wifi_manager_config_t *config);
 
+/**
+ * @brief Store the ESPHome API encryption key entered in the captive portal
+ *
+ * Released firmware images carry no key — shipping one would mean every device
+ * flashed from the same image shares it. Compiling your own just to set it
+ * defeats the point of a pre-built image, so the portal takes it instead and
+ * this puts it in NVS, where esphome_api_server.c looks first.
+ *
+ * @param[in] psk_base64 Base64 of 32 bytes, or NULL/"" to clear
+ * @return ESP_OK, or an NVS error
+ */
+esp_err_t wifi_config_save_esphome_psk(const char *psk_base64);
+/**
+ * @brief Read the stored ESPHome API key
+ *
+ * @param[out] buf       Receives the Base64 key, empty string when unset
+ * @param[in]  buf_size  Size of @p buf; 48 bytes is enough
+ * @return ESP_OK even when nothing is stored — check for an empty string
+ */
+esp_err_t wifi_config_load_esphome_psk(char *buf, size_t buf_size);
+
 #ifdef __cplusplus
 }
 #endif

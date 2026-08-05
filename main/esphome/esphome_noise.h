@@ -46,6 +46,9 @@ extern "C" {
 /** @brief ChaCha20-Poly1305 MAC/tag size */
 #define ESPHOME_NOISE_MAC_SIZE          16
 
+/** @brief Buffer size for a Base64 PSK: 44 characters plus terminator. */
+#define ESPHOME_NOISE_PSK_BASE64_LEN    48
+
 /** @brief SHA256 hash size */
 #define ESPHOME_NOISE_HASH_SIZE         32
 
