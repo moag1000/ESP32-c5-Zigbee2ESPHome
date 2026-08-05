@@ -259,6 +259,37 @@ gezielte Kanaele — jetzt genauso.
 fest. 802.15.4 bildet ein Netz auf Kanal 25 und pollt zwei Geraete erfolgreich
 (`online=2`). Dafuer braucht es den Scan nicht.
 
+## ESPHome-API: Hello-Laenge war ungeprueft (behoben 2026-08-05)
+
+Remote auslesbarer Pufferueberlauf **vor** jeder Authentifizierung, gefunden
+beim Verdrahten der Noise-Tests.
+
+Die Nutzlastlaenge des Hello-Rahmens ist ein 16-Bit-Feld direkt vom Socket,
+erreicht also 65535 -- `client->rx_buffer` ist `ESPHOME_RX_BUFFER_SIZE` (1024).
+Die Leseschleife wurde von diesem Wert getrieben, ohne Schranke. Drei Bytes
+`01 FF FF` plus Daten schrieben damit bis ~64 KB ueber den Puffer hinaus, ueber
+`rx_buffer_len` und den **Zeiger** `noise_ctx`, die in `esphome_client_t`
+direkt dahinter liegen.
+
+Hello ist die erste Nachricht der Verbindung; der PSK kommt erst beim Handshake
+ins Spiel. Es brauchte also keine Zugangsdaten, nur Erreichbarkeit von TCP 6053
+-- dem Port, an dem Home Assistant haengt.
+
+Der Handshake-Pfad direkt darunter hatte die entsprechende Pruefung immer. Der
+Hello-Pfad nie.
+
+**Wie es gefunden wurde, weil das die uebertragbare Lehre ist:**
+`tests/unit/test_esphome_noise.c` lag seit jeher ungebaut im Baum, weil es
+gegen Unitys `TEST_CASE`/`TEST_ADD` geschrieben war. Nach der Umstellung fiel
+genau ein Test durch -- `hello_invalid_marker` erwartete, dass
+`esphome_noise_process_hello()` ein Marker-Byte prueft. Tut es nicht und soll
+es nicht: der `0x01`-Frame-Indikator gehoert eine Ebene hoeher. Dieser Frage
+nachzugehen fuehrte auf die fehlende Schranke. Ein fehlschlagender Test ist
+nicht immer ein Fehler im Pruefling.
+
+Alle uebrigen `recv()`-Aufrufe in `esphome_api_server.c` wurden mitgeprueft und
+sind begrenzt.
+
 ## Konfigurations-Kette
 
 `CMakeLists.txt` setzt `SDKCONFIG_DEFAULTS` auf **zwei** Dateien:

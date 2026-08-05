@@ -24,7 +24,7 @@ in `main/CMakeLists.txt` instead.
 
 ## What is green
 
-103 tests, all passing on hardware (ESP32-C5, ESP-IDF v6.0.2).
+119 tests, all passing on hardware (ESP32-C5, ESP-IDF v6.0.2).
 
 Run them with one command — it builds, flashes, runs, reports and puts the
 gateway firmware back, even if the tests fail or you interrupt it:
@@ -46,8 +46,9 @@ Exit status is the test result, so it works in a pipeline.
 | ESPHome Protocol | 13 | protobuf encode/decode round-trips, and the message type IDs |
 | ESPHome Entity Mirror | 20 | the open-addressed entity table — backward-shift deletion and `_get()` copy ownership |
 | MQTT Topics | 18 | topic building, sanitising and wildcard matching — truncation must error, not shorten |
+| ESPHome Noise | 16 | context lifecycle, Hello phase, key decode/generate, pre-ready guards |
 
-103 tests total.
+119 tests total.
 
 The registry and diagnostics suites exist specifically to pin down behaviour
 that was changed without runtime cover:
@@ -63,6 +64,16 @@ that was changed without runtime cover:
   those, so it passed no matter what `mqtt_topics.c` did — and would have kept
   passing had the module been deleted. Worth remembering as a shape: a test
   that reimplements its subject proves only that the test compiles.
+- The Noise suite paid for itself on first run. It had sat unbuilt because it
+  was written against Unity's `TEST_CASE`/`TEST_ADD`; converting it to this
+  framework produced one failure, `hello_invalid_marker`, which expected
+  `esphome_noise_process_hello()` to validate a marker byte. It does not, and
+  should not — the 0x01 frame indicator belongs to `esphome_api_server.c`.
+  Following that layering question one function up found a remote
+  pre-authentication buffer overflow: the Hello payload length was a
+  16-bit value off the socket driving `recv()` into a 1KB buffer, with no
+  bound. A failing test is not always a bug in the code under test; sometimes
+  it is a question worth following.
 - `deletion_keeps_collided` in the entity mirror suite is the guard on
   backward-shift deletion. Getting that wrong does not crash — it makes
   colliding entries silently unreachable, so it would surface in the field as
