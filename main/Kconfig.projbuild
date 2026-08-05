@@ -21,9 +21,20 @@ menu "ESP32-C5 Zigbee2MQTT Gateway Configuration"
 
         config WIFI_SCAN_METHOD
             int "WiFi Scan Method"
-            default 0
+            default 1
+            range 0 1
             help
-                WiFi scan method: 0=FAST, 1=ALL_CHANNEL.
+                0 = FAST_SCAN, 1 = ALL_CHANNEL_SCAN.
+
+                Leave this at ALL_CHANNEL unless you know the access point is
+                on a non-DFS channel. FAST_SCAN stops at the first matching AP
+                and probes actively, and active probing is not permitted on DFS
+                channels — so an AP on one of them is never found. This gateway
+                was associating only after minutes of reason-201 failures for
+                exactly that reason; its AP is on channel 100.
+
+                FAST_SCAN associates a little quicker when it does work, which
+                is the only reason to choose it.
 
         config WIFI_CONNECT_GRACE_SEC
             int "Grace period before captive portal (seconds)"

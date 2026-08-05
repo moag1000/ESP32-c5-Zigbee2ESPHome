@@ -361,6 +361,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                     const char *band_str = connected_5ghz ? "5GHz" : "2.4GHz";
                     ESP_LOGI(TAG, "Connected to AP (SSID: %s, Channel: %d, Band: %s, RSSI: %d dBm)",
                              ap_info.ssid, ap_info.primary, band_str, ap_info.rssi);
+
                 } else {
                     ESP_LOGI(TAG, "Connected to AP");
                 }
@@ -464,6 +465,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                 }
 
                 ESP_LOGW(TAG, "Disconnect reason %d (consecutive failures: %d)", event->reason, consecutive_failures);
+
 
                 /* Handle NO_AP_FOUND and BEACON_TIMEOUT: band fallback */
                 bool ap_not_reachable = (event->reason == WIFI_REASON_NO_AP_FOUND ||
@@ -662,9 +664,29 @@ static void ip_event_handler(void *arg, esp_event_base_t event_base,
  * @param label Band description for the log line
  * @return Number of access points found
  */
+/** Dwell time per channel for the passive boot scan.
+ *  Beacons are typically every 100ms; 150 gives margin without
+ *  dragging a full dual-band sweep out too far. */
+#define WIFI_MGR_SCAN_PASSIVE_DWELL_MS 150
+
 static uint16_t scan_and_log(const char *label)
 {
-    esp_err_t ret = esp_wifi_scan_start(NULL, true);  /* blocking, all channels */
+    /* Passive, not active.
+     *
+     * An active scan sends probe requests, which regulations forbid on DFS
+     * channels — so an access point on one of them never answers and the scan
+     * reports nothing. That is exactly what happened here: this gateway's AP
+     * is on channel 100, the diagnostic said "no access points at all" on
+     * every band, and that was read as an RF fault when the radio was fine.
+     * A passive scan just listens for beacons and hears every channel. It
+     * dwells longer, which for a boot diagnostic is the right trade. */
+    wifi_scan_config_t cfg = {
+        .show_hidden = true,
+        .scan_type   = WIFI_SCAN_TYPE_PASSIVE,
+        .scan_time   = { .passive = WIFI_MGR_SCAN_PASSIVE_DWELL_MS },
+    };
+
+    esp_err_t ret = esp_wifi_scan_start(&cfg, true);  /* blocking, all channels */
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "  %s: scan failed: %s", label, esp_err_to_name(ret));
         return 0;
@@ -874,6 +896,12 @@ esp_err_t wifi_manager_init(void)
         if (esp_wifi_get_country_code(cc) == ESP_OK) {
             ESP_LOGI(TAG, "Regulatory domain: %.2s (env '%c')", cc, cc[2]);
         }
+        wifi_country_t country;
+        if (esp_wifi_get_country(&country) == ESP_OK) {
+            ESP_LOGI(TAG, "Channel policy: start=%u count=%u policy=%s",
+                     country.schan, country.nchan,
+                     country.policy == WIFI_COUNTRY_POLICY_AUTO ? "AUTO" : "MANUAL");
+        }
     }
 
 #ifdef CONFIG_WIFI_PREFER_5GHZ
@@ -1059,6 +1087,22 @@ esp_err_t wifi_manager_connect(const char *ssid, const char *password)
             .mbo_enabled = true,   /* Multi-Band Operation */
 #endif
             .listen_interval = WIFI_LISTEN_INTERVAL_PERF,  /* Performance mode for tri-radio coexistence */
+            /* Scan every channel, do not stop at the first hit.
+             *
+             * The default (WIFI_FAST_SCAN, 0) stops at the first matching AP and
+             * probes actively. Active probing is not permitted on DFS channels,
+             * so an access point on one of them is simply not found — this
+             * gateway's AP sits on channel 100. The symptom was association
+             * failing with reason 201 (NO_AP_FOUND) over and over until some
+             * attempt happened to catch a beacon, i.e. "WiFi works, just often
+             * not immediately". ALL_CHANNEL_SCAN covers the DFS channels
+             * passively, which is the only way to hear them.
+             *
+             * Sorting by signal together with threshold.rssi_5g_adjustment is
+             * what expresses the 5 GHz preference. */
+            .scan_method = (CONFIG_WIFI_SCAN_METHOD == 0) ? WIFI_FAST_SCAN
+                                                          : WIFI_ALL_CHANNEL_SCAN,
+            .sort_method = WIFI_CONNECT_AP_BY_SIGNAL,
 #ifdef CONFIG_WIFI_PREFER_5GHZ
             /* Enable 5GHz preference via RSSI adjustment */
             .threshold.rssi_5g_adjustment = CONFIG_WIFI_5GHZ_RSSI_ADJUSTMENT,
@@ -1440,6 +1484,11 @@ esp_err_t wifi_manager_reconnect(void)
             .mbo_enabled = true,
 #endif
             .listen_interval = WIFI_LISTEN_INTERVAL_PERF,
+            /* All channels, sorted by signal — see the connect path for why
+             * FAST_SCAN misses an AP on a DFS channel. */
+            .scan_method = (CONFIG_WIFI_SCAN_METHOD == 0) ? WIFI_FAST_SCAN
+                                                          : WIFI_ALL_CHANNEL_SCAN,
+            .sort_method = WIFI_CONNECT_AP_BY_SIGNAL,
 #ifdef CONFIG_WIFI_PREFER_5GHZ
             .threshold.rssi_5g_adjustment = CONFIG_WIFI_5GHZ_RSSI_ADJUSTMENT,
 #endif
