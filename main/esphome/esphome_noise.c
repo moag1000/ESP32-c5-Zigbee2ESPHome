@@ -600,9 +600,14 @@ static esp_err_t noise_decrypt_aead(const uint8_t *key, uint64_t nonce,
     psa_set_key_type(&attributes, PSA_KEY_TYPE_CHACHA20);
     psa_set_key_bits(&attributes, 256);
 
-    ESP_LOGD(TAG, "Importing decrypt key (first 4 bytes: %02x %02x %02x %02x)",
-             key[0], key[1], key[2], key[3]);
-
+    /* Deliberately no logging of key bytes here.
+     *
+     * This used to log the first four bytes of the session key at DEBUG level
+     * as an import sanity check. mqtt_logger.c installs itself with
+     * esp_log_set_vprintf(), so every log line — including that one — is
+     * eligible to be published to the broker once log forwarding is on. Key
+     * material must not be reachable that way, and a partial key tells a
+     * debugging session nothing that the PSA status code does not. */
     status = psa_import_key(&attributes, key, 32, &key_id);
     if (status != PSA_SUCCESS) {
         ESP_LOGE(TAG, "psa_import_key for decrypt failed: %d (key_type=0x%04x, bits=%d)",
@@ -1100,8 +1105,18 @@ esp_err_t esphome_noise_encrypt(esphome_noise_ctx_t *ctx,
 
     /* Inner frame: [2B msg_type BE][2B payload_len BE][payload] */
     size_t inner_len = 4 + payload_len;
-    if (inner_len > ESPHOME_NOISE_MAX_PAYLOAD) {
-        ESP_LOGE(TAG, "Payload too large: %zu > %d", inner_len, ESPHOME_NOISE_MAX_PAYLOAD);
+
+    /* What has to fit in the frame's 16-bit length field is the *ciphertext*,
+     * which is the inner frame plus the 16-byte MAC — not the inner frame
+     * alone. Comparing inner_len against the full 65535 left a window where
+     * inner_len is accepted but inner_len + 16 wraps, and the header would
+     * then advertise a handful of bytes while the body carried 64K. No caller
+     * can reach it today (esphome_api_server caps messages at
+     * ESPHOME_MAX_MESSAGE_SIZE, 4096), so this is the contract being made
+     * honest rather than a live defect. */
+    if (inner_len > ESPHOME_NOISE_MAX_PAYLOAD - ESPHOME_NOISE_MAC_SIZE) {
+        ESP_LOGE(TAG, "Payload too large: %zu > %d", inner_len,
+                 ESPHOME_NOISE_MAX_PAYLOAD - ESPHOME_NOISE_MAC_SIZE);
         return ESP_ERR_INVALID_SIZE;
     }
 
