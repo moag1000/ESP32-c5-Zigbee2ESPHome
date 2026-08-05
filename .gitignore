@@ -72,3 +72,5 @@ scripts/data/
 # Screen logs
 screenlog.*
 sdkconfig.backup
+build_release/
+build_relwork/

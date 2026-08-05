@@ -36,6 +36,31 @@ What follows from that:
 - **6801 device definitions loaded at runtime** from LittleFS, replaceable
   without recompiling.
 
+## Install
+
+Pre-built images are on the releases page. One file, flashed at offset 0:
+
+```bash
+esptool --chip esp32c5 -p /dev/ttyUSB0 write-flash 0x0 \
+    esp32c5-zigbee-esphome-<version>-merged.bin
+```
+
+That contains bootloader, partition table, firmware and the 6801-device
+converter database. The board then brings up a **captive portal** — join the
+`ESP32-C5-Setup-XXXX` access point and enter your Wi-Fi credentials.
+
+The released images carry **no credentials of any kind**, including no ESPHome
+encryption key. `scripts/release.sh` builds them from a config with every secret
+blanked and refuses to produce anything if it finds one in the output. To use
+the ESPHome API you set `CONFIG_ESPHOME_NOISE_PSK` in `sdkconfig.local` and build
+yourself — see Quick Start.
+
+Updating firmware later without touching the database:
+
+```bash
+esptool --chip esp32c5 -p <port> write-flash 0x20000 <version>-app.bin
+```
+
 ## Hardware
 
 **ESP32-C5 with 8 MB PSRAM and 16 MB flash.** All three matter:
