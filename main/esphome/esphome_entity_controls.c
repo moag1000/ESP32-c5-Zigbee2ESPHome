@@ -1724,6 +1724,19 @@ esp_err_t esphome_encode_switch_list_entry(const esphome_switch_config_t *config
     if (config->disabled_by_default) {
         esphome_encode_bool(&buf, 7, config->disabled_by_default);
     }
+    /* Field 8: entity_category (0=NONE, 1=CONFIG, 2=DIAGNOSTIC)
+     *
+     * Without this Home Assistant shows everything a device exposes as an
+     * equal, primary control — a Fingerbot listed 'Reverse', 'Program
+     * Enable' and 'Down Movement' beside its actual switch. Categorised,
+     * HA folds settings into the device's Configuration section.
+     *
+     * The number is the gap this encoder already left: it writes
+     * disabled_by_default and then skips to the next field, exactly where
+     * api.proto places entity_category. */
+    if (config->entity_category != 0) {
+        esphome_encode_uint32(&buf, 8, (uint32_t)config->entity_category);
+    }
 
     /* Field 10: device_id (sub-device grouping) */
     if (config->device_id != 0) {
@@ -1820,6 +1833,19 @@ esp_err_t esphome_encode_number_list_entry(const esphome_number_config_t *config
     /* Field 9: disabled_by_default (bool) */
     if (config->disabled_by_default) {
         esphome_encode_bool(&buf, 9, config->disabled_by_default);
+    }
+    /* Field 10: entity_category (0=NONE, 1=CONFIG, 2=DIAGNOSTIC)
+     *
+     * Without this Home Assistant shows everything a device exposes as an
+     * equal, primary control — a Fingerbot listed 'Reverse', 'Program
+     * Enable' and 'Down Movement' beside its actual switch. Categorised,
+     * HA folds settings into the device's Configuration section.
+     *
+     * The number is the gap this encoder already left: it writes
+     * disabled_by_default and then skips to the next field, exactly where
+     * api.proto places entity_category. */
+    if (config->entity_category != 0) {
+        esphome_encode_uint32(&buf, 10, (uint32_t)config->entity_category);
     }
 
     /* Field 11: unit_of_measurement (string) */
@@ -1930,6 +1956,19 @@ esp_err_t esphome_encode_select_list_entry(const esphome_select_config_t *config
     /* Field 7: disabled_by_default (bool) */
     if (config->disabled_by_default) {
         esphome_encode_bool(&buf, 7, config->disabled_by_default);
+    }
+    /* Field 8: entity_category (0=NONE, 1=CONFIG, 2=DIAGNOSTIC)
+     *
+     * Without this Home Assistant shows everything a device exposes as an
+     * equal, primary control — a Fingerbot listed 'Reverse', 'Program
+     * Enable' and 'Down Movement' beside its actual switch. Categorised,
+     * HA folds settings into the device's Configuration section.
+     *
+     * The number is the gap this encoder already left: it writes
+     * disabled_by_default and then skips to the next field, exactly where
+     * api.proto places entity_category. */
+    if (config->entity_category != 0) {
+        esphome_encode_uint32(&buf, 8, (uint32_t)config->entity_category);
     }
 
     /* Field 9: device_id (sub-device grouping) */

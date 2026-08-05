@@ -22,6 +22,55 @@
 #include <string.h>
 #include <math.h>
 
+
+/**
+ * @brief Map an expose to a Home Assistant entity category
+ *
+ * 0 = none (a primary control or reading), 1 = config, 2 = diagnostic.
+ *
+ * Without this everything a device exposes lands in one flat list, so a
+ * Fingerbot showed "Down Movement", "Reverse" and "Program Enable" with the
+ * same weight as its actual switch. Categorised, HA folds those into the
+ * device's Configuration section and leaves the controls on top.
+ *
+ * The converter's own category wins. Where it says nothing — which is every
+ * device loaded from the JSON database until that carries categories too —
+ * fall back on what the reading is: housekeeping values are diagnostic, and a
+ * writable setting that is not the device's purpose is configuration.
+ */
+static uint8_t expose_entity_category(const zb_expose_t *expose)
+{
+    if (expose->category) {
+        if (strcmp(expose->category, "config") == 0)     return 1;
+        if (strcmp(expose->category, "diagnostic") == 0) return 2;
+        return 0;
+    }
+
+    static const char *const diagnostic_props[] = {
+        "battery", "voltage", "linkquality", "device_temperature",
+        "power_outage_count", "battery_low", "tamper", "rssi", "lqi",
+    };
+    for (size_t i = 0; i < sizeof(diagnostic_props) / sizeof(diagnostic_props[0]); i++) {
+        if (expose->property && strcmp(expose->property, diagnostic_props[i]) == 0) {
+            return 2;
+        }
+    }
+
+    static const char *const config_props[] = {
+        "sensitivity", "mode", "reverse", "touch_control", "click_control",
+        "program_enable", "repeat_forever", "sustain_time",
+        "down_movement", "up_movement", "power_on_behavior",
+        "child_lock", "motion_sensitivity", "detection_interval",
+    };
+    for (size_t i = 0; i < sizeof(config_props) / sizeof(config_props[0]); i++) {
+        if (expose->property && strcmp(expose->property, config_props[i]) == 0) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 static const char *TAG = "ESPH_EXPOSE";
 
 /* ============================================================================
@@ -413,6 +462,7 @@ static esp_err_t register_expose_sensor(const device_t *dev, const zb_expose_t *
         config.accuracy_decimals = 1;
     }
     config.force_update = false;
+    config.entity_category = expose_entity_category(expose);
     config.disabled_by_default = false;
 
     esp_err_t ret = esphome_entity_register_sensor(&config);
@@ -504,6 +554,7 @@ static esp_err_t register_expose_switch(const device_t *dev, const zb_expose_t *
 
     cfg.key = key;
     cfg.device_id = device_id;
+    cfg.entity_category = expose_entity_category(expose);
     if (expose->name) {
         esphome_adapter_make_expose_name(dev, expose->name, cfg.name, sizeof(cfg.name));
         esphome_adapter_make_expose_unique_id(dev, zb_expose_property(expose), cfg.unique_id, sizeof(cfg.unique_id));
@@ -536,6 +587,7 @@ static esp_err_t register_expose_number(const device_t *dev, const zb_expose_t *
 
     cfg.key = key;
     cfg.device_id = device_id;
+    cfg.entity_category = expose_entity_category(expose);
     esphome_adapter_make_expose_name(dev, expose->name, cfg.name, sizeof(cfg.name));
     esphome_adapter_make_expose_unique_id(dev, zb_expose_property(expose), cfg.unique_id, sizeof(cfg.unique_id));
     if (expose->icon) {
@@ -568,6 +620,7 @@ static esp_err_t register_expose_text(const device_t *dev, const zb_expose_t *ex
 
     cfg.key = key;
     cfg.device_id = device_id;
+    cfg.entity_category = expose_entity_category(expose);
     esphome_adapter_make_expose_name(dev, expose->name, cfg.name, sizeof(cfg.name));
     esphome_adapter_make_expose_unique_id(dev, zb_expose_property(expose), cfg.unique_id, sizeof(cfg.unique_id));
     if (expose->icon) {

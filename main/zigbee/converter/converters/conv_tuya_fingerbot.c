@@ -82,6 +82,7 @@ static const zb_expose_t s_fingerbot_exposes[] = {
     {
         .type = ZB_EXPOSE_SELECT,
         .name = "Mode",
+        .category = "config",
         .property = "mode",
         .access = EA_STATE_SET,
         .icon = "mdi:gesture-tap-button",
@@ -93,6 +94,7 @@ static const zb_expose_t s_fingerbot_exposes[] = {
     {
         .type = ZB_EXPOSE_NUMBER,
         .name = "Down Movement",
+        .category = "config",
         .property = "down_movement",
         .access = EA_STATE_SET,
         .unit = "%",
@@ -105,6 +107,7 @@ static const zb_expose_t s_fingerbot_exposes[] = {
     {
         .type = ZB_EXPOSE_NUMBER,
         .name = "Up Movement",
+        .category = "config",
         .property = "up_movement",
         .access = EA_STATE_SET,
         .unit = "%",
@@ -117,6 +120,7 @@ static const zb_expose_t s_fingerbot_exposes[] = {
     {
         .type = ZB_EXPOSE_NUMBER,
         .name = "Sustain Time",
+        .category = "config",
         .property = "sustain_time",
         .access = EA_STATE_SET,
         .unit = "s",
@@ -131,6 +135,7 @@ static const zb_expose_t s_fingerbot_exposes[] = {
     {
         .type = ZB_EXPOSE_SWITCH,
         .name = "Reverse",
+        .category = "config",
         .property = "reverse",
         .access = EA_STATE_SET,
         .icon = "mdi:swap-vertical",
@@ -141,6 +146,7 @@ static const zb_expose_t s_fingerbot_exposes[] = {
     {
         .type = ZB_EXPOSE_SWITCH,
         .name = "Touch Control",
+        .category = "config",
         .property = "touch_control",
         .access = EA_STATE_SET,
         .icon = "mdi:gesture-tap",
@@ -150,6 +156,7 @@ static const zb_expose_t s_fingerbot_exposes[] = {
     {
         .type = ZB_EXPOSE_SWITCH,
         .name = "Click Control",
+        .category = "config",
         .property = "click_control",
         .access = EA_STATE_SET,
         .icon = "mdi:mouse",
@@ -160,6 +167,7 @@ static const zb_expose_t s_fingerbot_exposes[] = {
     {
         .type = ZB_EXPOSE_SWITCH,
         .name = "Program Enable",
+        .category = "config",
         .property = "program_enable",
         .access = EA_STATE_SET,
         .icon = "mdi:play-circle",
@@ -169,6 +177,7 @@ static const zb_expose_t s_fingerbot_exposes[] = {
     {
         .type = ZB_EXPOSE_SWITCH,
         .name = "Repeat Forever",
+        .category = "config",
         .property = "repeat_forever",
         .access = EA_STATE_SET,
         .icon = "mdi:repeat",
@@ -178,6 +187,7 @@ static const zb_expose_t s_fingerbot_exposes[] = {
     {
         .type = ZB_EXPOSE_SENSOR,
         .name = "Battery",
+        .category = "diagnostic",
         .property = "battery",
         .access = EA_STATE,
         .device_class = "battery",
@@ -189,6 +199,7 @@ static const zb_expose_t s_fingerbot_exposes[] = {
     {
         .type = ZB_EXPOSE_SENSOR,
         .name = "Click Count",
+        .category = "diagnostic",
         .property = "click_count",
         .access = EA_STATE,
         .state_class = "total_increasing",

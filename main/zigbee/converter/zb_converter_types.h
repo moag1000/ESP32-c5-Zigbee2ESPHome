@@ -95,7 +95,12 @@ typedef struct {
     const char *unit;           /**< Unit of measurement (NULL = none) */
     const char *state_class;    /**< HA state_class (NULL = none) */
     const char *icon;           /**< MDI icon (NULL = platform default) */
-    const char *description;    /**< Tooltip / description (NULL = none) */
+    const char *description;
+    /** Home Assistant entity category: NULL, "config" or "diagnostic".
+     *  Decides whether the entity sits among a device's primary controls or
+     *  collapses into its Configuration / Diagnostic section. zigbee2mqtt
+     *  carries the same notion as .withCategory(). */
+    const char *category;    /**< Tooltip / description (NULL = none) */
     union {
         struct {                        /**< NUMBER, SENSOR range info */
             float min, max, step;

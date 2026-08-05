@@ -109,6 +109,7 @@ typedef struct {
     bool disabled_by_default;                           /**< Disabled by default */
     esphome_switch_command_cb_t command_callback;       /**< Command callback */
     uint32_t device_id;                                 /**< Sub-device ID (0=gateway, >0=sub-device) */
+    uint8_t entity_category;                            /**< 0=NONE, 1=CONFIG, 2=DIAGNOSTIC */
 } esphome_switch_config_t;
 
 /**
@@ -176,6 +177,7 @@ typedef struct {
     esphome_number_command_cb_t command_callback;       /**< Command callback */
     bool disabled_by_default;                           /**< Disabled by default */
     uint32_t device_id;                                 /**< Sub-device ID (0=gateway, >0=sub-device) */
+    uint8_t entity_category;                            /**< 0=NONE, 1=CONFIG, 2=DIAGNOSTIC */
 } esphome_number_config_t;
 
 /**
@@ -241,6 +243,7 @@ typedef struct {
     esphome_select_command_cb_t command_callback;                       /**< Command callback */
     bool disabled_by_default;                                           /**< Disabled by default */
     uint32_t device_id;                                                 /**< Sub-device ID (0=gateway, >0=sub-device) */
+    uint8_t entity_category;                            /**< 0=NONE, 1=CONFIG, 2=DIAGNOSTIC */
 } esphome_select_config_t;
 
 /**
@@ -540,6 +543,7 @@ typedef struct {
     esphome_lock_command_cb_t command_callback;         /**< Command callback */
     bool disabled_by_default;                           /**< Disabled by default */
     uint32_t device_id;                                 /**< Sub-device ID (0=gateway, >0=sub-device) */
+    uint8_t entity_category;                            /**< 0=NONE, 1=CONFIG, 2=DIAGNOSTIC */
 } esphome_lock_config_t;
 
 /**
@@ -671,6 +675,7 @@ typedef struct {
     esphome_text_command_cb_t command_callback;         /**< Command callback */
     bool disabled_by_default;                           /**< Disabled by default */
     uint32_t device_id;                                 /**< Sub-device ID (0=gateway, >0=sub-device) */
+    uint8_t entity_category;                            /**< 0=NONE, 1=CONFIG, 2=DIAGNOSTIC */
 } esphome_text_config_t;
 
 /**

@@ -165,7 +165,9 @@ esp_err_t esphome_adapter_diagnostics_register(const device_t *dev)
         esphome_button_config_t cfg = {0};
         cfg.key = make_diag_key(dev->id, DIAG_TYPE_REMOVE);
         cfg.device_id = device_id;
-        snprintf(cfg.name, sizeof(cfg.name), "%s Remove", name);
+        /* No device prefix: HA prepends the device name itself, so "%s Remove"
+         * rendered as the device name twice. */
+        strlcpy(cfg.name, "Remove", sizeof(cfg.name));
         snprintf(cfg.unique_id, sizeof(cfg.unique_id),
                  "0x%016llX_remove", (unsigned long long)dev->id);
         strncpy(cfg.icon, "mdi:delete", sizeof(cfg.icon) - 1);
@@ -181,7 +183,7 @@ esp_err_t esphome_adapter_diagnostics_register(const device_t *dev)
         esphome_button_config_t cfg = {0};
         cfg.key = make_diag_key(dev->id, DIAG_TYPE_RECONFIGURE);
         cfg.device_id = device_id;
-        snprintf(cfg.name, sizeof(cfg.name), "%s Reconfigure", name);
+        strlcpy(cfg.name, "Reconfigure", sizeof(cfg.name));
         snprintf(cfg.unique_id, sizeof(cfg.unique_id),
                  "0x%016llX_reconfigure", (unsigned long long)dev->id);
         strncpy(cfg.icon, "mdi:cog-refresh", sizeof(cfg.icon) - 1);
@@ -197,7 +199,7 @@ esp_err_t esphome_adapter_diagnostics_register(const device_t *dev)
         esphome_button_config_t cfg = {0};
         cfg.key = make_diag_key(dev->id, DIAG_TYPE_IDENTIFY);
         cfg.device_id = device_id;
-        snprintf(cfg.name, sizeof(cfg.name), "%s Identify", name);
+        strlcpy(cfg.name, "Identify", sizeof(cfg.name));
         snprintf(cfg.unique_id, sizeof(cfg.unique_id),
                  "0x%016llX_identify", (unsigned long long)dev->id);
         strncpy(cfg.icon, "mdi:flash-alert", sizeof(cfg.icon) - 1);
