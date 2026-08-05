@@ -25,7 +25,10 @@ static const char *TAG = "CONV_LOAD";
 
 #define CONVERTER_DB_PATH       LITTLEFS_MOUNT_POINT "/converters"
 #define INDEX_FILE_PATH         CONVERTER_DB_PATH "/index.json"
-#define MAX_INDEX_ENTRIES        256
+/* The converter database ships 447 manufacturer files; at 256 the index
+ * silently stopped taking entries ("Index full at 256 entries") and those
+ * devices simply never matched a converter. The table is 8 bytes per entry. */
+#define MAX_INDEX_ENTRIES        2048
 #define MAX_CACHED_CONVERTERS    32
 #define MAX_FZ_PER_DEVICE        16
 #define MAX_TZ_PER_DEVICE        8
@@ -53,7 +56,7 @@ typedef struct {
  * Static state
  * ============================================================================ */
 
-static index_entry_t s_index[MAX_INDEX_ENTRIES];
+static index_entry_t *s_index;   /* PSRAM, allocated in load_index() */
 static size_t s_index_count = 0;
 static size_t s_db_device_count = 0;
 
@@ -116,7 +119,14 @@ static char *read_file_to_psram(const char *path, size_t *out_len)
         return NULL;
     }
 
-    char *buf = mem_alloc((size_t)size + 1, MEM_CAP_DEFAULT);
+    /* PSRAM, as the function name has always claimed.
+     *
+     * This allocated MEM_CAP_DEFAULT — internal RAM — for a buffer that may be
+     * up to 128 KB. Measured on boot, loading the converter index drove
+     * internal free heap from 190 KB down to 32 KB in 60 ms, which was the
+     * firmware's low-water mark for the whole run. The data is read once,
+     * parsed, and freed; it has no business in the scarce heap. */
+    char *buf = mem_alloc((size_t)size + 1, MEM_CAP_PSRAM);
     if (buf == NULL) {
         ESP_LOGE(TAG, "Failed to allocate %ld bytes for %s", size, path);
         fclose(f);
@@ -137,6 +147,14 @@ static char *read_file_to_psram(const char *path, size_t *out_len)
 
 static esp_err_t load_index(void)
 {
+    if (s_index == NULL) {
+        s_index = mem_ng_calloc(MAX_INDEX_ENTRIES, sizeof(index_entry_t), MEM_CAP_PSRAM);
+        if (s_index == NULL) {
+            ESP_LOGE(TAG, "Cannot allocate index table");
+            return ESP_ERR_NO_MEM;
+        }
+    }
+
     size_t len = 0;
     char *json_str = read_file_to_psram(INDEX_FILE_PATH, &len);
     if (json_str == NULL) {

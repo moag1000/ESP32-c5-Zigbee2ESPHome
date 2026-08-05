@@ -467,11 +467,11 @@ Sub-device info is provided in `DeviceInfoResponse` via `esphome_api_handlers.c`
 
 | | |
 |---|---|
-| HP SRAM statisch (Linker) | 236 KB von 321 KB = 73,6 % belegt, **84,7 KB frei** |
-| davon `.bss` / `.text` / `.data` | 115 KB / 90 KB / 31 KB |
+| HP SRAM statisch (Linker) | 179 KB von 321 KB = 55,8 % belegt, **142 KB frei** |
+| davon `.bss` / `.text` / `.data` | 57,8 KB / 90 KB / 31 KB |
 | Interner Heap beim Start | 198 KB gesamt, 147 KB frei |
-| **Interner Heap eingeschwungen** | **67 KB frei** (WiFi + MQTT + Zigbee aktiv) |
-| Tiefststand seit Boot | 30 KB |
+| **Interner Heap eingeschwungen** | **122 KB frei** (WiFi + MQTT + Zigbee aktiv) |
+| **Tiefststand seit Boot** | **121 KB** |
 | PSRAM | 6115 KB gesamt, 6109 KB frei -- praktisch ungenutzt |
 | PSRAM `.bss` statisch | 20 KB |
 | Flash-Image | 2,1 MB, App-Partition zu 47 % frei |
@@ -481,9 +481,43 @@ Sub-device info is provided in `DeviceInfoResponse` via `esphome_api_handlers.c`
 (`max_clients=2`, 0 aktiv). Der ESPHome-Client mit seiner Entity-Registrierung
 ist der groesste Einzelverbraucher; der Wert mit verbundenem HA fehlt noch.
 
-Auffaellig: PSRAM liegt zu 99,9 % brach, waehrend der interne Heap mit 67 KB
-der Engpass ist. Wer Luft braucht, verschiebt Allokationen nach PSRAM
-(`mem_alloc(..., MEM_CAP_PSRAM)`) -- der Weg ist da, er wird nur kaum benutzt.
+### Wie der Tiefstand von 30 KB auf 121 KB kam
+
+Der eingeschwungene Wert und der Tiefstand hatten **verschiedene Ursachen** --
+den Tiefstand zu jagen brauchte einen eigenen Messaufbau: ein Task, der alle
+5 ms den internen Heap abtastet und jedes neue Tief mit Zeitstempel meldet.
+Ergebnis: der Einbruch lag in **60 Millisekunden** bei 3,2 s, von 190 KB auf
+32 KB -- beim Laden des Converter-Index.
+
+Drei Ursachen, alle behoben:
+
+1. `read_file_to_psram()` in `zb_converter_loader.c` allozierte mit
+   `MEM_CAP_DEFAULT` -- also intern, entgegen dem eigenen Namen, fuer einen
+   Puffer bis 128 KB.
+2. cJSON allozierte komplett intern. Es haengt jetzt per `cJSON_InitHooks()`
+   an PSRAM (`route_cjson_to_psram()` in `main.c`, vor jedem cJSON-Aufruf).
+   Sicher, weil cJSON nie aus einer ISR und nie bei abgeschaltetem
+   Flash-Cache benutzt wird.
+3. Die Entity-Tabelle (54 KB) liegt in PSRAM statt in `.bss`.
+
+**Dabei zwei Funktionsfehler gefunden**, die nichts mit Speicher zu tun hatten:
+
+- `MAX_INDEX_ENTRIES` stand auf 256, die DB hat **1109 Hersteller**. Der Index
+  brach mit "Index full at 256 entries" ab und **853 Hersteller fehlten
+  stillschweigend** -- betroffene Geraete fanden nie einen Converter. Jetzt
+  2048 Eintraege, Tabelle in PSRAM.
+- Danach lief der String-Intern-Pool ueber (512 Strings / 16 KB), Converter
+  kamen mit `(null)` als Namen zurueck. Jetzt 4096 / 128 KB, beides in PSRAM.
+  Nebeneffekt: der Index laedt in **3,3 s statt 11,4 s**, weil der Pool nicht
+  mehr durchprobiert wird.
+
+Vorher/nachher am Geraet des Nutzers: `Bound converter: 0x1F0A -> (null)`
+wurde zu `Bound converter: 0x1F0A -> Vibration sensor`.
+
+**Merksatz:** PSRAM lag zu 99,9 % brach, waehrend interner RAM der Engpass war.
+Kandidaten findet man mit `riscv32-esp-elf-nm --print-size --size-sort` ueber
+die ELF-Datei; Bedingung ist nur, dass nichts aus einer ISR oder bei
+abgeschaltetem Cache darauf zugreift.
 
 ## ESP-IDF
 

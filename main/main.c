@@ -22,6 +22,7 @@
 #include "nvs_flash.h"
 #include "esp_event.h"
 #include "esp_heap_caps.h"
+#include "cJSON.h"
 #include "esp_timer.h"
 
 /* Coexistence API for WiFi + 802.15.4 (Zigbee) */
@@ -483,9 +484,43 @@ static void zigbee_stack_start(void)
 #endif
 }
 
+
+/** @brief malloc that prefers PSRAM, falling back to internal on failure. */
+static void *psram_malloc(size_t size)
+{
+    void *p = heap_caps_malloc(size, MALLOC_CAP_SPIRAM);
+    return p ? p : malloc(size);
+}
+
+
+/**
+ * @brief Route cJSON's allocations to PSRAM
+ *
+ * cJSON is this firmware's workhorse for device state, bridge payloads and the
+ * converter database, and every node it builds came out of internal RAM. The
+ * converter index alone drove internal free heap from 190 KB to 32 KB in 60ms
+ * during boot — the low-water mark for the entire run — and the raw file
+ * buffer turned out to be the smaller half of that; the parse tree was the
+ * rest.
+ *
+ * Safe here because cJSON is never touched from an ISR and never with the
+ * flash cache disabled. Must run before any cJSON call, hence this early.
+ */
+static void route_cjson_to_psram(void)
+{
+    static cJSON_Hooks hooks = {
+        .malloc_fn = psram_malloc,
+        .free_fn   = free,
+    };
+    cJSON_InitHooks(&hooks);
+}
+
 void app_main(void)
 {
     esp_err_t ret;
+
+    /* Before anything builds a cJSON node. */
+    route_cjson_to_psram();
 
     /* Suppress noisy WiFi coexistence management frame warnings */
     esp_log_level_set("wifi", ESP_LOG_ERROR);
@@ -624,7 +659,17 @@ void app_main(void)
         ESP_LOGI(TAG_MAIN, "Converter registry initialized");
 
         /* Initialize string interning (PSRAM pool for converter strings) */
-        esp_err_t intern_ret = string_intern_init(512, 16384);
+        /* Sized for the whole converter index, not a sample of it.
+         *
+         * 512 strings / 16 KB was enough only while the index silently
+         * stopped at 256 manufacturers. With the real database indexed
+         * (1109 manufacturers, 5383 devices) the pool overflowed, interning
+         * failed, and converters came back with NULL names —
+         * "Bound converter: 0x1F0A -> (null)".
+         *
+         * Both the entry table and the pool live in PSRAM (see
+         * string_intern.c), so this costs nothing scarce. */
+        esp_err_t intern_ret = string_intern_init(4096, 128 * 1024);
         if (intern_ret != ESP_OK) {
             ESP_LOGW(TAG_MAIN, "String intern init failed: %s (converter loader will use raw strings)",
                      esp_err_to_name(intern_ret));
