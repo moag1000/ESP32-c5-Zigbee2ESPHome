@@ -1,0 +1,1 @@
+{"devices":[{"m":"MLI-404011/MLI-404049","mf":"_TZ3000_bdbb0fon","v":"Müller Licht","d":"Tint remote control","src":"z2m","pri":2,"fz":[{"c":6,"a":0,"k":"action","fn":"fz_on_off"},{"c":8,"a":0,"k":"action","fn":"fz_brightness"},{"c":768,"a":0,"k":"action","fn":"fz_color_hs"}],"_compat":true}]}

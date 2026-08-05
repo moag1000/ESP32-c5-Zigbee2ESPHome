@@ -1,1 +1,1 @@
-{"devices":[{"m":"openlumi.gw_router.jn5169","mf":"OpenLumi","v":"OpenLumi","d":"Lumi Router (JN5169)","fz":[{"c":0,"a":65535,"k":"generic","fn":"fz_generic_attr"}],"e":[{"t":2,"ac":5,"n":"device_temperature","p":"device_temperature","dc":"temperature","u":"°C"}]}]}
+{"devices":[{"m":"GWRJN5169","mf":"OpenLumi","v":"OpenLumi","d":"Lumi Router (JN5169)","src":"z2m","pri":2,"fz":[{"c":2,"a":0,"k":"device_temperature","fn":"fz_device_temperature"}],"e":[{"t":2,"f":0,"dc":"temperature","u":"°C","sc":"measurement","p":"device_temperature","ac":1}],"_compat":true}]}

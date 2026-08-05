@@ -1,0 +1,1 @@
+{"devices":[{"m":"TS0601_6gang_switch","mf":"_TZE204_y8ficeai","v":"Tuya","d":"6 gang touch panel switch with backlight and child lock","src":"z2m","pri":2,"fz":[{"c":61184,"a":65535,"k":"tuya_dp","fn":"fz_tuya_dp"}],"tz":[{"k":"tuya_dp","c":61184,"fn":"tz_tuya_dp"}],"_compat":true}]}

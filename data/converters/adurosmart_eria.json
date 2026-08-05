@@ -1,0 +1,1 @@
+{"devices":[{"m":"81868","mf":"AduroSmart Eria","v":"AduroSmart","d":"Siren","src":"z2m","pri":2,"fz":[{"c":1,"a":33,"k":"battery","fn":"fz_battery"}],"tz":[{"k":"warning","c":1282,"fn":"tz_warning"}],"_compat":true}]}

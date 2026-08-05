@@ -1,0 +1,1 @@
+{"devices":[{"m":"ZG-101Z/D","mf":"_TZ3000_abrsvsou","v":"Tuya","d":"Smart knob","src":"z2m","pri":2,"fz":[{"c":61184,"a":65535,"k":"tuya_dp","fn":"fz_tuya_dp"},{"c":1,"a":33,"k":"battery","fn":"fz_battery"}],"tz":[{"k":"tuya_dp","c":61184,"fn":"tz_tuya_dp"}],"e":[{"t":2,"f":0,"dc":"battery","u":"%","sc":"measurement","p":"battery","ac":1}],"_compat":true}]}

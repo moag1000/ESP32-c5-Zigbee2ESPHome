@@ -663,13 +663,13 @@ void app_main(void)
          *
          * 512 strings / 16 KB was enough only while the index silently
          * stopped at 256 manufacturers. With the real database indexed
-         * (1109 manufacturers, 5383 devices) the pool overflowed, interning
+         * (1339 manufacturers, 6801 devices) the pool overflowed, interning
          * failed, and converters came back with NULL names —
          * "Bound converter: 0x1F0A -> (null)".
          *
          * Both the entry table and the pool live in PSRAM (see
          * string_intern.c), so this costs nothing scarce. */
-        esp_err_t intern_ret = string_intern_init(4096, 128 * 1024);
+        esp_err_t intern_ret = string_intern_init(8192, 256 * 1024);
         if (intern_ret != ESP_OK) {
             ESP_LOGW(TAG_MAIN, "String intern init failed: %s (converter loader will use raw strings)",
                      esp_err_to_name(intern_ret));

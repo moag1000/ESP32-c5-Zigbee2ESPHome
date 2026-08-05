@@ -1,1 +1,1 @@
-{"devices":[{"m":"Overflow","mf":"Quirky","v":"Quirky","d":"Smart water leak sensor","fz":[{"c":0,"a":65535,"k":"generic","fn":"fz_generic_attr"}],"e":[{"t":3,"ac":1,"n":"water_leak","p":"water_leak","dc":"moisture","bin":{"von":"True","voff":"False"}},{"t":3,"ac":1,"n":"battery_low","p":"battery_low","bin":{"von":"True","voff":"False"}}]}]}
+{"devices":[{"m":"POFLW-WH02","mf":"Quirky","v":"Quirky","d":"Smart water leak sensor","src":"z2m","pri":2,"fz":[{"c":1280,"a":2,"k":"alarm","fn":"fz_ias_zone_status"}],"e":[{"t":3,"f":0,"p":"alarm","ac":1}],"_compat":true}]}

@@ -1,0 +1,1 @@
+{"devices":[{"m":"ZHT-002","mf":"_TZE204_xalsoe3m","v":"Moes","d":"ZHT series thermostat","src":"z2m","pri":2,"fz":[{"c":61184,"a":65535,"k":"tuya_dp","fn":"fz_tuya_dp"}],"tz":[{"k":"tuya_dp","c":61184,"fn":"tz_tuya_dp"}],"_compat":true}]}

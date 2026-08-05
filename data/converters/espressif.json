@@ -1,1 +1,1 @@
-{"devices":[{"m":"ZigbeeRangeExtender","mf":"Espressif","v":"Espressif","d":"ESP32-C6/H2 router"}]}
+{"devices":[{"m":"Espressif-ZigbeeRangeExtender","mf":"Espressif","v":"Espressif","d":"ESP32-C6/H2 router","src":"z2m","pri":2,"fz":[],"_compat":true}]}

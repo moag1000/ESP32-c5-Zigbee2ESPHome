@@ -1,0 +1,1 @@
+{"devices":[{"m":"TOWSMR1","mf":"_TZE284_432zhuwe","v":"Tongou","d":"Single-phase multifunction RCBO (DIN Module)","src":"z2m","pri":2,"fz":[{"c":61184,"a":65535,"k":"tuya_dp","fn":"fz_tuya_dp"}],"tz":[{"k":"tuya_dp","c":61184,"fn":"tz_tuya_dp"}],"_compat":true}]}

@@ -1,0 +1,1 @@
+{"devices":[{"m":"LPC-V1","mf":"Pulsar LLC","v":"Pulsar LLC","d":"Leak protection controller","src":"z2m","pri":2,"fz":[{"c":1280,"a":2,"k":"alarm","fn":"fz_ias_zone_status"},{"c":6,"a":0,"k":"state","fn":"fz_on_off"}],"tz":[{"k":"state","c":6,"fn":"tz_on_off"}],"e":[{"t":3,"f":0,"p":"alarm","ac":1},{"t":1,"f":0,"p":"state","ac":3}],"_compat":true}]}

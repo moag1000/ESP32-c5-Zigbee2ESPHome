@@ -1,0 +1,1 @@
+{"devices":[{"m":"ZIS-03","mf":"_TZE204_f2rflfa6","v":"Novato","d":"24 GHz radar human presence sensor with relay output","src":"z2m","pri":2,"fz":[{"c":61184,"a":65535,"k":"tuya_dp","fn":"fz_tuya_dp"}],"tz":[{"k":"tuya_dp","c":61184,"fn":"tz_tuya_dp"}],"_compat":true}]}

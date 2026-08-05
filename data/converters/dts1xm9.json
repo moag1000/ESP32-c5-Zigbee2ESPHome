@@ -1,0 +1,1 @@
+{"devices":[{"m":"ZG-109TDS","mf":"DTS1XM9","v":"Excellux","d":"Probe Temperature with EC && TDS && Salinity && SG && ht(humidity and temperature) Sensor","src":"z2m","pri":2,"fz":[{"c":61184,"a":65535,"k":"tuya_dp","fn":"fz_tuya_dp"}],"tz":[{"k":"tuya_dp","c":61184,"fn":"tz_tuya_dp"}],"_compat":true}]}

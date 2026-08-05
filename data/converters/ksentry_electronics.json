@@ -1,1 +1,1 @@
-{"devices":[{"m":"Lamp_01","mf":"Ksentry Electronics","v":"Ksentry Electronics","d":"Zigbee on/off controller","fz":[{"c":6,"a":0,"k":"state","fn":"fz_on_off"}],"tz":[{"k":"state","c":6,"fn":"tz_on_off"}],"e":[{"t":1,"ac":1}]}]}
+{"devices":[{"m":"KS-SM001","mf":"Ksentry Electronics","v":"Ksentry Electronics","d":"Zigbee on/off controller","src":"z2m","pri":2,"fz":[{"c":6,"a":0,"k":"state","fn":"fz_on_off"}],"tz":[{"k":"state","c":6,"fn":"tz_on_off"}],"e":[{"t":1,"f":0,"p":"state","ac":3}],"_compat":true}]}

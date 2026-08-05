@@ -1,0 +1,1 @@
+{"devices":[{"m":"TS0205","mf":"_TZ3210_up3pngle","v":"Tuya","d":"Smoke sensor","src":"z2m","pri":2,"fz":[{"c":1,"a":33,"k":"battery","fn":"fz_battery"},{"c":1280,"a":2,"k":"alarm","fn":"fz_ias_zone_status"}],"e":[{"t":2,"f":0,"dc":"battery","u":"%","sc":"measurement","p":"battery","ac":1},{"t":3,"f":0,"p":"alarm","ac":1}],"_compat":true}]}

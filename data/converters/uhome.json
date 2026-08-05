@@ -1,1 +1,1 @@
-{"devices":[{"m":"TWV","mf":"UHome","v":"UHome","d":"Smart valve","fz":[{"c":6,"a":0,"k":"state","fn":"fz_on_off"},{"c":1,"a":33,"k":"battery","fn":"fz_battery"}],"tz":[{"k":"state","c":6,"fn":"tz_on_off"}],"e":[{"t":2,"ac":1,"n":"battery","p":"battery","dc":"battery","u":"%","sc":"measurement"},{"t":1,"ac":1}]}]}
+{"devices":[{"m":"TWV","mf":"UHome","v":"UHome","d":"Smart valve","src":"z2m","pri":2,"fz":[{"c":6,"a":0,"k":"state","fn":"fz_on_off"},{"c":1,"a":33,"k":"battery","fn":"fz_battery"}],"tz":[{"k":"state","c":6,"fn":"tz_on_off"}],"_compat":true}]}

@@ -420,6 +420,11 @@ zb_converter_def_t *zb_converter_loader_parse_device(const cJSON *dev_json)
                 cJSON *dc = cJSON_GetObjectItem(item, "dc");
                 cJSON *u = cJSON_GetObjectItem(item, "u");
                 cJSON *sc = cJSON_GetObjectItem(item, "sc");
+                /* "cat": Home Assistant entity category, mirroring
+                 * zigbee2mqtt's .withCategory(). Absent for now on most
+                 * entries; esphome_adapter_exposes.c falls back to a
+                 * property-name heuristic when it is. */
+                cJSON *cat = cJSON_GetObjectItem(item, "cat");
 
                 exposes[i].type = (t && cJSON_IsNumber(t)) ?
                     map_expose_type((int)cJSON_GetNumberValue(t)) : ZB_EXPOSE_SENSOR;
@@ -439,6 +444,8 @@ zb_converter_def_t *zb_converter_loader_parse_device(const cJSON *dev_json)
                     string_intern(cJSON_GetStringValue(u)) : NULL;
                 exposes[i].state_class = (sc && cJSON_IsString(sc)) ?
                     string_intern(cJSON_GetStringValue(sc)) : NULL;
+                exposes[i].category = (cat && cJSON_IsString(cat)) ?
+                    string_intern(cJSON_GetStringValue(cat)) : NULL;
 
                 cJSON *icon_j = cJSON_GetObjectItem(item, "icon");
                 cJSON *desc_exp = cJSON_GetObjectItem(item, "desc");

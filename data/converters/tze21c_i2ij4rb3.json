@@ -1,0 +1,1 @@
+{"devices":[{"m":"1-ZB-WSD","mf":"_TZE21C_i2ij4rb3","v":"Scimagic","d":"Smart temperature and humidity switch (thermostat/hygrostat)","src":"z2m","pri":2,"fz":[{"c":61184,"a":65535,"k":"tuya_dp","fn":"fz_tuya_dp"}],"tz":[{"k":"tuya_dp","c":61184,"fn":"tz_tuya_dp"}],"_compat":true}]}

@@ -1061,6 +1061,19 @@ def parse_extend_call(call_str):
             if result["e"]:
                 result["e"][0]["f"] = result["e"][0].get("f", 0) | opt["feature_add"]
 
+    # Home Assistant entity category, as declared upstream.
+    #
+    # zigbee2mqtt marks settings and housekeeping values with
+    # entityCategory: "config" / "diagnostic" (or .withCategory() on explicit
+    # exposes). Without carrying that across, every value a device exposes
+    # arrives in Home Assistant as an equal, primary control — a Fingerbot
+    # listed "Reverse" and "Program Enable" beside its actual switch.
+    if args_str:
+        cat_m = re.search(r'entityCategory\s*:\s*["\']([a-z]+)["\']', args_str)
+        if cat_m and cat_m.group(1) in ("config", "diagnostic"):
+            for e in result["e"]:
+                e["cat"] = cat_m.group(1)
+
     return result, "FULL_MATCH", tuya_dp
 
 

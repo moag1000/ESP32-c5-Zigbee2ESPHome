@@ -1,1 +1,1 @@
-{"devices":[{"m":"dqhome.re4","mf":"DQHOME","v":"DQHOME","d":"DQSmart Switch 4 Gang","fz":[{"c":6,"a":0,"k":"state","fn":"fz_on_off"}],"e":[{"t":1,"ac":1},{"t":1,"ac":1},{"t":1,"ac":1},{"t":1,"ac":1}],"q":512}]}
+{"devices":[{"m":"dqhome.re4","mf":"DQHOME","v":"DQHOME","d":"DQSmart Switch 4 Gang","src":"z2m","pri":2,"fz":[{"c":6,"a":0,"k":"state","fn":"fz_on_off"}],"tz":[{"k":"state","c":6,"fn":"tz_on_off"}],"e":[{"t":1,"f":0,"p":"state","ac":3}],"_compat":true}]}

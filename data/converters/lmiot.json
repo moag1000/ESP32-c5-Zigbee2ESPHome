@@ -1,0 +1,1 @@
+{"devices":[{"m":"JS-SLK2-ZB","mf":"Lmiot","v":"JAVIS","d":"Intelligent biometric digital lock","src":"z2m","pri":2,"fz":[{"c":1,"a":33,"k":"battery","fn":"fz_battery"}],"_compat":true},{"m":"JS-MC-SENSOR-ZB","mf":"Lmiot","v":"JAVIS","d":"Microwave sensor","src":"z2m","pri":2,"fz":[],"_compat":true}]}
