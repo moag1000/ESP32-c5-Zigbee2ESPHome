@@ -71,3 +71,4 @@ scripts/data/
 
 # Screen logs
 screenlog.*
+sdkconfig.backup

@@ -102,8 +102,35 @@ part — knowing what a device *is*:
 
 Full notices in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-<!-- If you want your own funding link, add a .github/FUNDING.yml and reference
-     it here. Left out deliberately rather than guessed at. -->
+## How this was built
+
+The code was written by an AI assistant (Claude). The direction was not.
+
+Every design decision here came from someone actually running a smart home and
+being annoyed by something. The central one:
+
+> MQTT is a fine vehicle. But going straight into ESPHome — into Home
+> Assistant — is so much more practical.
+
+That is the entire premise, and it came from use, not from architecture
+astronomy. So did most of what followed: pairing a Fingerbot and wanting its
+*settings* in Home Assistant rather than just an on/off switch; noticing that a
+one-second sustain time held the switch for ten; asking why Wi-Fi took minutes
+when every other device in the house connects instantly — which turned out to
+be a coexistence call in the wrong place and is now the single biggest fix in
+the project.
+
+Several conclusions in this repository were wrong until a practical objection
+overturned them. The Wi-Fi problem was diagnosed as broken hardware and closed;
+one sentence — "Wi-Fi works, just often not immediately" — reopened it and led
+to the actual cause. Bluetooth was disabled for a reason that turned out to be a
+symptom of that same bug.
+
+If you find this useful, the credit for it being *the right thing to build*
+belongs to the person who kept asking why.
+
+<!-- If you want a funding link of your own, add .github/FUNDING.yml and
+     reference it here. Left out rather than guessed at. -->
 
 ## Hardware Requirements
 
