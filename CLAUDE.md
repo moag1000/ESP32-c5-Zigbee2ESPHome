@@ -301,6 +301,59 @@ nicht immer ein Fehler im Pruefling.
 Alle uebrigen `recv()`-Aufrufe in `esphome_api_server.c` wurden mitgeprueft und
 sind begrenzt.
 
+## Uebertragbar auf andere ESP32-C5-Projekte
+
+Was hier gelernt wurde und anderswo genauso gilt:
+
+1. **Koexistenz zuerst einschalten.** `esp_coex_wifi_i154_enable()` gehoert vor
+   den ersten WLAN-Verbindungsversuch, nicht danach. Ohne sie hoert die Station
+   praktisch nichts -- siehe oben, 371 s gegen 27 s. Das ist der wichtigste
+   Einzelbefund dieses Projekts.
+
+2. **`esp_log_level_set("wifi", ESP_LOG_ERROR)` verbirgt die Diagnose.** Der
+   Treiber protokolliert Kanal fuer Kanal, aktiv/passiv, und wann ein AP
+   erstmals gehoert wird. Auf `VERBOSE` stellen, sobald WLAN sich seltsam
+   verhaelt.
+
+3. **PSRAM liegt meist brach, waehrend interner RAM der Engpass ist.** Hier:
+   6 MB PSRAM zu 99,9 % frei gegen 67 KB internen Heap. Ein einziges Objekt
+   (die Entity-Tabelle, 54 KB) nach PSRAM zu verschieben hat den freien
+   internen Heap auf 121 KB gebracht. Kandidaten findet man so:
+
+   ```bash
+   riscv32-esp-elf-nm --print-size --size-sort --radix=d build/<app>.elf \
+     | awk '$3=="b" || $3=="B" {print $2, $4}' | sort -rn | head -20
+   ```
+
+   Bedingung: kein Zugriff aus einer ISR und keiner mit abgeschaltetem
+   Flash-Cache. Task-Kontext mit Mutex ist unproblematisch.
+
+4. **Der Tiefstand liegt woanders als der Dauerwert.**
+   `heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL)` blieb hier bei 30 KB,
+   obwohl der eingeschwungene Wert sich verdoppelte -- der engste Moment liegt
+   frueh im Boot (Stack-Initialisierung), nicht im Betrieb. Wer Luft schaffen
+   will, muss dort messen.
+
+5. **`esp_coex_preference_set()` wird oft vergessen.** Dieses Projekt ruft es
+   nicht; bei Dreifachfunk (WiFi + BLE + 802.15.4) legt es fest, wer im
+   Zweifel gewinnt.
+
+### BLE: die Abschaltung ist neu zu bewerten
+
+BLE ist hier deaktiviert mit der Begruendung, der C5 halte "unter
+WiFi+Zigbee-Koexistenzlast keine stabilen GATT-Verbindungen". Diese Beobachtung
+stammt aus einer Zeit, in der **WLAN selbst kaputt war**, weil die Koexistenz
+erst spaet im Boot eingeschaltet wurde. Die Diagnose koennte also die Folge
+statt der Ursache getroffen haben.
+
+Dafuer spricht ausserdem: der Speicher, der BLE damals zu teuer machte
+(~30 KB intern), ist inzwischen da -- 121 KB statt 67 KB frei.
+
+**Nicht nachgewiesen.** Ein sauberer Gegentest waere: BLE einschalten,
+Koexistenz weiterhin vor dem Verbindungsfenster, `esp_coex_preference_set()`
+bewusst setzen, und GATT ueber Stunden beobachten. Bis dahin bleibt es eine
+begruendete Vermutung.
+
 ## Konfigurations-Kette
 
 `CMakeLists.txt` setzt `SDKCONFIG_DEFAULTS` auf **zwei** Dateien:
