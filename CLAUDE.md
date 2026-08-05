@@ -197,80 +197,60 @@ Budget, das aus `CONFIG_WIFI_CAPTIVE_PORTAL_TIMEOUT_SEC` **abgeleitet** ist; ein
 geratener Festwert (3 min) war 118 s zu kurz und hat den Fix wirkungslos
 gemacht.
 
-## WiFi: assoziiert, aber erst nach ~6 Minuten (gemessen 2026-08-05)
+## WiFi braucht aktivierte Koexistenz (geloest 2026-08-05)
 
-**Korrektur einer frueheren Aussage in dieser Datei.** Hier stand, die Ursache
-liege unterhalb der Software und sei ein Fall fuer Antenne oder Boardtausch.
-Das war falsch. WLAN funktioniert -- es dauert nur lange.
+**Die Station assoziiert kaum, solange `esp_coex_wifi_i154_enable()` nicht
+gelaufen ist.** Das war die Ursache fuer alles, was hier vorher als
+"WLAN dauert 6 Minuten" stand.
 
-Zweimal hintereinander gemessen, Zahlen praktisch identisch:
+Gefunden durch Korrelation ueber vier Mitschnitte -- die Verbindung kam jedes
+Mal 21-36 s **nach** `zigbee_stack_start()`, und in Laeufen, die vorher endeten,
+nie:
 
-    boot1: Assoziation bei 371.761 ms, 11 Fehlversuche
-    boot2: Assoziation bei 372.386 ms, 11 Fehlversuche
-    Connected to AP (Channel: 64, Band: 5GHz, RSSI: -43 dBm)
+    zigbee_stack_start()   Assoziation   Delta
+         335.160             370.742     35,6 s
+         335.165             370.763     35,6 s
+         335.182             356.974     21,8 s
+         455.394             484.662     29,3 s
+       nie gestartet          keine        --
 
-Also rund **6 Minuten und 11 vergebliche Versuche** bei einem Signal von
--43 dBm. Der AP wurde auf Kanal 64 und auf Kanal 100 beobachtet -- **beides
-DFS-Kanaele**, auf denen eine Station nicht aktiv proben darf und auf ein
-Beacon warten muss. Danach laeuft die Verbindung stundenlang stabil
-(`hunt.log`: RSSI -46 bei ~7 h Uptime).
+Wirkung des Vorziehens, Boot bis verbunden:
 
-**Warum die frueheren Scans nichts fanden:** ein aktiver Scan sendet Probe
-Requests, die auf DFS-Kanaelen verboten sind -- der AP antwortet nicht. Die
-Boot-Diagnose scannte aktiv und meldete "no access points at all" auf jedem
-Band. Das las sich wie ein Funkdefekt und war keiner. Sie scannt jetzt passiv.
+    vorher:  371 s, 11 Fehlversuche
+    nachher:  27 s,  0 Fehlversuche
 
-**Was ausprobiert wurde und nachweislich nichts brachte** (deshalb wieder
-entfernt, nicht ausgeliefert):
+Bis dahin scannt der Treiber **fehlerfrei** -- er stimmt jeden Kanal ab, passiv
+auf den DFS-Kanaelen (52-64, 100-144) und aktiv sonst, exakt regelkonform -- und
+hoert **gar nichts**, auch keine Nachbarnetze, waehrend der AP mit -41 dBm
+danebensteht.
 
-- *Kanal-Hinweis*: den zuletzt erfolgreichen Kanal in NVS merken und beim
-  naechsten Verbinden als Startpunkt setzen. Ergebnis: boot2 mit korrektem
-  Hinweis auf Kanal 64 brauchte **exakt gleich lang** wie boot1 ohne. Selbst
-  mit dem richtigen Kanal scheitern die Versuche -- es ist also kein
-  Suchproblem. Zurueckgebaut.
-- *Laenderpolitik MANUAL* (`ieee80211d_enabled = false`): kein messbarer
-  Effekt, auf den IDF-Default zurueckgesetzt.
+`main.c` ruft `zigbee_stack_start()` daher **vor** dem WiFi-Verbindungsfenster.
+Ein frueherer Kommentar an derselben Stelle behauptete das Gegenteil -- die
+Koexistenz waehrend der Assoziation einzuschalten wuerde diese stoeren, das
+Funkteil solle der Station gehoeren. Das war geraten und war verkehrt herum.
 
-**Was geblieben ist**, weil es fuer sich verteidigbar ist:
-`WIFI_ALL_CHANNEL_SCAN` statt `WIFI_FAST_SCAN` samt
-`sort_method = WIFI_CONNECT_AP_BY_SIGNAL`. `CONFIG_WIFI_SCAN_METHOD` existierte
-als Kconfig-Option, wurde aber **nirgends gelesen** -- effektiv galt FAST_SCAN,
-das beim ersten Treffer abbricht. Ob das die 6 Minuten verkuerzt, ist **nicht
-belegt**.
+### Sackgassen, jede einzeln gemessen
 
-**Das Portal startet nicht mehr, wenn die Zugangsdaten schon einmal
-funktioniert haben.** Das ist der eigentliche Fix. Eine feste Gnadenfrist kann
-"falsches Passwort" nicht von "langsamer AP" trennen -- die Assoziationszeit
-streute hier von 7 s ueber 356-372 s bis ueber 450 s, bei durchgehend
-korrekten Zugangsdaten. Die Frage "hat diese SSID uns je authentifiziert" kann
-es. `wifi_manager` merkt sich das nach der ersten erfolgreichen Assoziation in
-NVS (`wifi_mgr/ssid_ok`), und `main.c` ueberspringt das Portal dann.
+Falls das Thema wieder aufkommt -- diese sechs waren es **nicht**:
 
-Verifiziert ueber zwei Boots:
+| Verdacht | Test | Ergebnis |
+|----------|------|----------|
+| Ergebnisabholung kaputt | `SCAN_DONE`-Ereignis direkt gelesen | Treiber meldet selbst `number=0 status=0` |
+| Kanalspringen zu schnell | 1500 ms fest auf einem Kanal | 0 |
+| DFS-Kanal falsch behandelt | Kanal->Modus aus dem Treiberlog | lehrbuchgenau richtig |
+| Power-Save schlaeft | `PS=NONE` vor dem Scan | 0 |
+| HF nicht gesettelt | 5 s Wartezeit nach STA-Start | 0 |
+| Passive Verweilzeit zu kurz | `esp_wifi_set_scan_parameters()`, 1000 ms | **schlechter** (51 s statt 27 s) |
 
-    I (779218) WIFI_MGR: Credentials for '...' recorded as known-good
-    -- Neustart --
-    W (455806) WIFI: WiFi not up yet, but '...' has connected before —
-                     not starting the portal.
+Ebenfalls gemessen und verworfen: Kanal-Hinweis in NVS (kein Unterschied, und
+`.channel` allein laesst den Treiber weiter aktiv proben), Laenderpolitik
+MANUAL (kein Effekt), Reconnect-Backoff von 30 s auf 5 s (23 statt 11 Versuche
+bei gleicher Wanduhrzeit).
 
-Das Portal bleibt fuer den Fall, fuer den es gedacht ist: ein frisches oder
-falsch konfiguriertes Geraet.
-
-**Was gemessen wurde und nichts brachte:** den Reconnect-Backoff von 30 s auf
-5 s zu deckeln ergab **23 statt 11 Versuche bei gleicher Wanduhrzeit**
-(356.974 ms gegenueber 371.761 ms). Das Warten ist zeitgesteuert, nicht
-versuchsgesteuert -- haerter nachfassen kostet nur Funkzeit. Zurueckgebaut.
-
-**Scannen ist auf diesem Board praktisch blind.** Ein reiner Scan-Lauf ohne
-jeden Verbindungsversuch, passiv, 200 ms je Kanal, zehn Runden ueber 300 s:
-jedes Mal `aps=0` bei exakt 8500 ms Dauer -- kein einziges Beacon, auch keine
-Nachbarnetze, waehrend dasselbe Board bei -43 dBm assoziiert. Verlasse dich
-also nicht auf Scan-Ergebnisse (z. B. eine Netzwerkliste im Captive Portal).
-
-**Offen:** warum genau der zwoelfte Versuch gelingt. Die Abstaende sind ab dem
-vierten Fehlschlag konstant 38,3 s (30 s Backoff + 8,3 s Versuchsdauer), der
-erfolgreiche Versuch dauert 16,8 s statt 8,3 s. Das deutet auf etwas
-AP-seitiges oder auf DFS-Timing, nicht auf die Retry-Logik hier.
+**Wichtig fuer die Fehlersuche:** `esp_log_level_set("wifi", ESP_LOG_ERROR)` in
+`main.c` drosselt den Treiber. Zum Diagnostizieren auf `ESP_LOG_VERBOSE` --
+dort steht, welcher Kanal wie gescannt wird und wann der AP erstmals gehoert
+wird (`rsn valid ... mac=`, `ap found, mac=`).
 
 ## Der Boot-Scan war kaputt (und hat in die Irre gefuehrt)
 

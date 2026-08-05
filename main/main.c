@@ -795,6 +795,35 @@ void app_main(void)
     led_status_manager_set_condition(LED_COND_WIFI_CONNECTING, true);
 #endif
 
+    /* Zigbee first — and with it esp_coex_wifi_i154_enable().
+     *
+     * This is not about Zigbee. It is that the WiFi station on this ESP32-C5
+     * barely associates until WiFi/802.15.4 coexistence has been enabled.
+     * Found by correlating four captures:
+     *
+     *     zigbee_stack_start()   association    delta
+     *          335,160             370,742      35.6s
+     *          335,165             370,763      35.6s
+     *          335,182             356,974      21.8s
+     *          455,394             484,662      29.3s
+     *     never started          never          -
+     *
+     * The station associated 21-36s after that call in every run, and never in
+     * runs that ended before it. Until then the driver scans correctly —
+     * tuning each channel, passive on the DFS ones, active elsewhere, exactly
+     * per regulation — and hears nothing at all, not even neighbouring
+     * networks, while the access point sits at -41 dBm.
+     *
+     * Measured effect of moving it here, boot to associated:
+     *
+     *     before:  371s and 11 failed attempts
+     *     after:    27s and 0 failed attempts
+     *
+     * A previous version of this comment argued the opposite: that enabling
+     * coexistence during association would disturb it, so the radio should be
+     * left to the station. That was a guess, and it was backwards. */
+    zigbee_stack_start();
+
     /* Connect to WiFi */
     bool wifi_connected = false;
     ret = wifi_manager_connect(wifi_config.ssid, wifi_config.password);
@@ -902,10 +931,6 @@ void app_main(void)
             }
         }
     }
-
-    /* Zigbee comes up here, before MQTT and before the captive portal.
-     * See zigbee_stack_start() for why. */
-    zigbee_stack_start();
 
     /* Phase 3: MQTT Client Initialization */
     ESP_LOGI(TAG_MAIN, "[PHASE 3] MQTT Client Initialization");
