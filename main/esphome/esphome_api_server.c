@@ -285,6 +285,22 @@ esp_err_t esphome_api_handle_noise_handshake(esphome_client_t *client, uint8_t c
 
     /* Parse 2-byte big-endian payload length */
     size_t hello_payload_len = (client->rx_buffer[1] << 8) | client->rx_buffer[2];
+
+    /* Bound it before it is used as a receive target.
+     *
+     * This length is attacker-controlled and 16 bits wide, so it reaches 65535
+     * while rx_buffer is ESPHOME_RX_BUFFER_SIZE (1024). Without this check the
+     * read loop below hands recv() a count derived from it and writes straight
+     * past the buffer, over rx_buffer_len and the noise_ctx pointer that follow
+     * it in esphome_client_t. Hello is the first message of the connection, so
+     * that was reachable before any authentication — the PSK is not consulted
+     * until the handshake. The handshake path a few lines down has always had
+     * the equivalent check; this one did not. */
+    if (hello_payload_len > sizeof(client->rx_buffer) - ESPHOME_NOISE_FRAME_HEADER_SIZE) {
+        ESP_LOGE(TAG, "Hello message too large: %zu", hello_payload_len);
+        return ESP_ERR_NO_MEM;
+    }
+
     size_t hello_total = ESPHOME_NOISE_FRAME_HEADER_SIZE + hello_payload_len;
 
     ESP_LOGD(TAG, "Hello frame: payload=%zu, total=%zu", hello_payload_len, hello_total);

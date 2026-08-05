@@ -57,6 +57,11 @@ set(TEST_SRCS
     # truncated topic silently names the wrong device.
     "../unit/test_mqtt_topics.c"
     "../../main/mqtt/mqtt_topics.c"
+
+    # esphome_noise.c pulls in mbedtls/PSA and esp_random, all of which the
+    # test app already links, plus memory_manager_ng which is listed above.
+    "../unit/test_esphome_noise.c"
+    "../../main/esphome/esphome_noise.c"
 )
 
 idf_component_register(
@@ -80,6 +85,7 @@ idf_component_register(
         esp_timer
         espressif__cjson
         espressif__esp-zigbee-lib
+        mbedtls
 )
 
 target_compile_options(${COMPONENT_LIB} PRIVATE
@@ -100,6 +106,7 @@ target_compile_definitions(${COMPONENT_LIB} PRIVATE
     TEST_SUITE_ESPHOME_PROTOCOL=1
     TEST_SUITE_ESPHOME_ENTITY_MIRROR=1
     TEST_SUITE_MQTT_TOPICS=1
+    TEST_SUITE_ESPHOME_NOISE=1
 
     # The mirror's header compiles to no-op stubs unless this is set, and the
     # test project has no Kconfig entry for it. Define it here so the real
