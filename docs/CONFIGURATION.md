@@ -1,5 +1,11 @@
 # Configuration Guide
 
+<!-- staleness-banner -->
+> **Stand 2026-08-05.** Die BLE-Optionen sind wirkungslos, solange `CONFIG_BT_ENABLED=n` gilt (Default).
+>
+> Aktuell gepflegt wird `CLAUDE.md` im Projektwurzelverzeichnis.
+
+
 This guide covers configuration options for the ESP32-C5 gateway, including compile-time (Kconfig), runtime (NVS), and MQTT-based configuration.
 
 > ⚠️ Last reviewed 2026-07-31.

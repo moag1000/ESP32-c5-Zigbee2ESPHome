@@ -1,5 +1,12 @@
 # Code Style Guidelines
 
+<!-- staleness-banner -->
+> **Stand 2026-08-05.** Die BLE-Beispiele beziehen sich auf abgeschalteten Code. Die Stilregeln selbst
+> gelten unveraendert.
+>
+> Aktuell gepflegt wird `CLAUDE.md` im Projektwurzelverzeichnis.
+
+
 > **Authoritative Source**: This document is the comprehensive reference for all coding standards in the ESP32-C5 Unified Gateway project. [CLAUDE.md](../CLAUDE.md) provides a quick reference summary.
 
 This document defines the coding standards and best practices for the ESP32-C5 Zigbee2MQTT Gateway project. All contributors must adhere to these guidelines to maintain code consistency and quality.

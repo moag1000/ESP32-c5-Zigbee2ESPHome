@@ -1,5 +1,14 @@
 # WiFi/Bluetooth/Zigbee Coexistence Guide
 
+<!-- staleness-banner -->
+> **Stand 2026-08-05.** Die 22 BLE-Erwaehnungen beschreiben einen abgeschalteten Funk: BLE ist
+> projektweit aus (`CONFIG_BT_ENABLED=n`), die Koexistenz laeuft nur zwischen
+> WiFi und 802.15.4 ueber `esp_coex_wifi_i154_enable()`. Der zwischenzeitliche
+> `core/coex_manager.c` wurde am 2026-08-05 geloescht (nie initialisiert).
+>
+> Aktuell gepflegt wird `CLAUDE.md` im Projektwurzelverzeichnis.
+
+
 > **Authoritative Source**: This document is the comprehensive reference for WiFi/Bluetooth/Zigbee coexistence configuration and optimization.
 
 Complete guide to operating WiFi, Bluetooth LE, and Zigbee simultaneously on the ESP32-C5.

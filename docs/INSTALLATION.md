@@ -1,5 +1,11 @@
 # Installation Guide
 
+<!-- staleness-banner -->
+> **Stand 2026-08-05.** Die BLE-Erwaehnung betrifft abgeschalteten Code.
+>
+> Aktuell gepflegt wird `CLAUDE.md` im Projektwurzelverzeichnis.
+
+
 This guide walks you through setting up the development environment, building the firmware, and flashing it to your ESP32-C5 device.
 
 > **Toolchain as of 2026-07-31: ESP-IDF v6.0.2.** If a version below says v6.0,

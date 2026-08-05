@@ -1,5 +1,11 @@
 # User Stories - ESP32-C5 Unified Gateway
 
+<!-- staleness-banner -->
+> **Stand 2026-08-05.** Teilweise veraltet: BLE ist abgeschaltet, `cluster_state_ng` geloescht.
+>
+> Aktuell gepflegt wird `CLAUDE.md` im Projektwurzelverzeichnis.
+
+
 ## Personas
 
 | Persona | Beschreibung | Technisches Level |

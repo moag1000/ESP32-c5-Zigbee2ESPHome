@@ -1,5 +1,11 @@
 # Development Guide
 
+<!-- staleness-banner -->
+> **Stand 2026-08-05.** Enthaelt einen Verweis auf das entfernte `zb_device_handler`.
+>
+> Aktuell gepflegt wird `CLAUDE.md` im Projektwurzelverzeichnis.
+
+
 Guide for developers contributing to or extending the ESP32-C5 gateway.
 
 > ⚠️ Last reviewed 2026-07-31. Toolchain is ESP-IDF **v6.0.2**. Bluetooth is

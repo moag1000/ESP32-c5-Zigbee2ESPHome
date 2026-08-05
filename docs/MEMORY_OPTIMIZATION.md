@@ -1,5 +1,14 @@
 # Memory Optimization Guide
 
+<!-- staleness-banner -->
+> **Stand 2026-08-05.** Die BLE-Zahlen sind ueberholt — BLE ist aus, was rund 30KB internes RAM
+> freigibt (auf Hardware nicht nachgemessen). `core/memory_pool.c` wurde am
+> 2026-08-05 geloescht; die genutzten Pools sind `buffer_pool_t` aus
+> `memory_manager_ng`.
+>
+> Aktuell gepflegt wird `CLAUDE.md` im Projektwurzelverzeichnis.
+
+
 > **Authoritative Source**: This document is the comprehensive reference for memory optimization in the ESP32-C5 Unified Gateway. [CLAUDE.md](../CLAUDE.md#memory-constraints) provides a brief summary.
 
 Guide to understanding and optimizing memory usage in the ESP32-C5 Unified Gateway (Zigbee2MQTT + Bluetooth + ESPHome API).

@@ -1,5 +1,14 @@
 # Aktionsplan: Von "NG" zu echtem Next Generation
 
+<!-- staleness-banner -->
+> **Stand 2026-08-05.** Historisch. Der Plan wurde weitgehend ausgefuehrt: `zb_device_handler.c` ist
+> eliminiert (~1.750 Zeilen), `cluster_state_ng.c` am 2026-08-05 geloescht, weil
+> es nie aufgerufen wurde. Die 16 Verweise auf `zb_device_handler` und 2 auf
+> `cluster_state_ng` beschreiben Code, den es nicht mehr gibt.
+>
+> Aktuell gepflegt wird `CLAUDE.md` im Projektwurzelverzeichnis.
+
+
 **Status:** Re-Audit vom 2026-02-19 mit gleicher Kritikfähigkeit wie Original-Review.
 AP-1 bis AP-6 großteils erledigt, aber ehrliche Nachprüfung deckt neue systemische Defizite auf.
 AP-7 definiert die verbleibenden Fixes für echte NG-Legitimität.

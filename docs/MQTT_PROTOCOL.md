@@ -1,5 +1,13 @@
 # MQTT Protocol Reference
 
+<!-- staleness-banner -->
+> **Stand 2026-08-05.** Die BLE-Topics sind inaktiv (BLE aus). Unter `CONFIG_ESPHOME_PRIMARY_INTEGRATION`
+> (Default) publiziert der MQTT-Adapter ohnehin keine Geraetezustaende — MQTT ist
+> dort Bridge-Management und Debug.
+>
+> Aktuell gepflegt wird `CLAUDE.md` im Projektwurzelverzeichnis.
+
+
 Complete reference for MQTT topics, message formats, and protocols used by the ESP32-C5 Unified Gateway (Zigbee2MQTT + Bluetooth).
 
 ## Table of Contents

@@ -1,5 +1,11 @@
 # Foundation System Integration Guide
 
+<!-- staleness-banner -->
+> **Stand 2026-08-05.** Die BLE-Erwaehnung betrifft abgeschalteten Code.
+>
+> Aktuell gepflegt wird `CLAUDE.md` im Projektwurzelverzeichnis.
+
+
 This document explains how to integrate the new foundation system (`foundation_init.h`) into the existing `main.c`.
 
 ## Overview

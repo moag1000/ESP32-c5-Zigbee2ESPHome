@@ -1,5 +1,13 @@
 # Hybrid Architecture Plan: ESPHome Native API + MQTT
 
+<!-- staleness-banner -->
+> **Stand 2026-08-05.** Historisch — der Plan ist umgesetzt. Die Erwaehnung von `cluster_state_ng`
+> beschreibt ein Modul, das am 2026-08-05 geloescht wurde (nie aufgerufen,
+> funktional durch `device_registry_set_state()` ersetzt).
+>
+> Aktuell gepflegt wird `CLAUDE.md` im Projektwurzelverzeichnis.
+
+
 ## Vision
 
 Das ESP32-C5 nutzt **ESPHome Native API als primäre HA-Integration** für alle

@@ -1,5 +1,12 @@
 # API Reference
 
+<!-- staleness-banner -->
+> **Stand 2026-08-05.** Teilweise veraltet: 5 Verweise auf `zb_device_handler`, das waehrend der
+> NG-Migration entfernt wurde. Aktuell ist `device_registry` / `device_t`.
+>
+> Aktuell gepflegt wird `CLAUDE.md` im Projektwurzelverzeichnis.
+
+
 Complete API reference for all public modules in the ESP32-C5 Unified Gateway (Zigbee2MQTT + Bluetooth + ESPHome API).
 
 ## Table of Contents

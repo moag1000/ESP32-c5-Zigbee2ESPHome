@@ -1,7 +1,9 @@
 # Architecture Documentation
 
-> ⚠️ **Partially outdated (last reviewed 2026-07-31).** This document still
-> carries the fork state from 2026-02-19. Two structural changes are missing:
+<!-- staleness-banner -->
+
+> ⚠️ **Partially outdated (last reviewed 2026-08-05).** This document still
+> carries the fork state from 2026-02-19. Four structural changes are missing:
 > 1. **Bluetooth is disabled** (`CONFIG_BT_ENABLED=n`). `BT_SRCS` in
 >    `main/CMakeLists.txt` is only added when BT is enabled, so the entire
 >    `main/bluetooth/` tree and `esphome_ble_proxy.c` are not compiled. Every
@@ -12,8 +14,21 @@
 >    Note that `zb_converter_find()` therefore performs file I/O — it must not
 >    be called while holding `s_mutex` in `zb_interview.c`.
 >
+> 3. **Zigbee no longer waits for the uplink.** `zigbee_stack_start()` in
+>    `main.c` brings the coordinator up before the MQTT phase, and the captive
+>    portal timeout no longer restarts the device. The boot order described
+>    below (WiFi -> MQTT -> Zigbee) is the one that left the gateway dead with
+>    no access point.
+> 4. **Modules removed.** `cluster_state_ng.c`, `core/memory_pool.c` and
+>    `core/coex_manager.c` were deleted on 2026-08-05 — each was superseded by
+>    something already in use. The 4 references to `zb_device_handler` below
+>    describe code eliminated during the NG migration. Scenes, Touchlink and
+>    Zigbee OTA are now behind Kconfig flags, default off.
+>
 > Also newer than this document: `main/mmwave/` (S3KM1110 presence sensor),
-> `esphome_services.c`, `esphome_ota.c` and `zb_quirk_engine.c`.
+> `esphome_services.c`, `esphome_ota.c`, `zb_quirk_engine.c` and
+> `esphome_entity_mirror.c` (entity state no longer lives in the device
+> registry).
 >
 > `CLAUDE.md` in the repository root is the current source of truth.
 

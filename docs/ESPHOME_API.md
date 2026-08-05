@@ -1,5 +1,13 @@
 # ESPHome Native API Guide
 
+<!-- staleness-banner -->
+> **Stand 2026-08-05.** Der BLE-Proxy ist inaktiv (BLE projektweit aus). Neu seit diesem Dokument:
+> die Entity-Zustaende liegen in `esphome_entity_mirror.c` mit eigener
+> Kapazitaet, nicht mehr als virtuelle Geraete in der Device-Registry.
+>
+> Aktuell gepflegt wird `CLAUDE.md` im Projektwurzelverzeichnis.
+
+
 Complete guide to ESPHome Native API integration for the ESP32-C5 gateway.
 
 > **Status**: active — this is the **primary** Home Assistant integration

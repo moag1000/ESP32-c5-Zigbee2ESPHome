@@ -1,5 +1,11 @@
 # Usage Guide
 
+<!-- staleness-banner -->
+> **Stand 2026-08-05.** Die BLE-Erwaehnung betrifft abgeschalteten Code.
+>
+> Aktuell gepflegt wird `CLAUDE.md` im Projektwurzelverzeichnis.
+
+
 This guide covers daily operation of the ESP32-C5 Unified Gateway (Zigbee2MQTT + Bluetooth + ESPHome API), including device pairing, MQTT control, Home Assistant integration, and OTA updates.
 
 ## Table of Contents

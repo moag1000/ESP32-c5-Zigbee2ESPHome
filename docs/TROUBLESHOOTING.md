@@ -1,5 +1,13 @@
 # Troubleshooting Guide
 
+<!-- staleness-banner -->
+> **Stand 2026-08-05.** Die BLE-Abschnitte betreffen abgeschalteten Code. Fuer WiFi-Probleme steht der
+> aktuelle Stand in `CLAUDE.md` — inklusive des Befunds, dass der WiFi-Empfaenger
+> dieses Boards auf keinem Band Access Points sieht, waehrend 802.15.4 laeuft.
+>
+> Aktuell gepflegt wird `CLAUDE.md` im Projektwurzelverzeichnis.
+
+
 This guide helps diagnose and resolve common issues with the ESP32-C5 gateway.
 
 > ⚠️ Last reviewed 2026-07-31. BLE troubleshooting sections no longer apply —

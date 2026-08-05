@@ -1,5 +1,13 @@
 # Hardware Setup Guide
 
+<!-- staleness-banner -->
+> **Stand 2026-08-05.** Die BLE-Abschnitte betreffen abgeschalteten Code. Fuer dieses Board gilt
+> zusaetzlich: der WiFi-Empfaenger sieht auf keinem Band Access Points,
+> waehrend 802.15.4 einwandfrei laeuft — siehe `CLAUDE.md`.
+>
+> Aktuell gepflegt wird `CLAUDE.md` im Projektwurzelverzeichnis.
+
+
 This guide provides detailed information about the ESP32-C5 hardware requirements, pin configurations, and physical setup for the Unified Gateway (Zigbee2MQTT + Bluetooth + ESPHome API).
 
 ## Table of Contents

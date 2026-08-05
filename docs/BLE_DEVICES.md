@@ -1,5 +1,12 @@
 # Supported BLE Devices
 
+<!-- staleness-banner -->
+> **Stand 2026-08-05.** **BLE ist projektweit abgeschaltet** — siehe `BLUETOOTH_GATEWAY.md`. Die hier
+> beschriebenen Geraetetreiber werden nicht kompiliert.
+>
+> Aktuell gepflegt wird `CLAUDE.md` im Projektwurzelverzeichnis.
+
+
 Comprehensive list of supported Bluetooth LE devices for the ESP32-C5 Unified Gateway.
 
 > 🔴 **INACTIVE as of 2026-07-31.** Bluetooth is switched off project-wide

@@ -1,5 +1,14 @@
 # Bluetooth Gateway Guide
 
+<!-- staleness-banner -->
+> **Stand 2026-08-05.** **BLE ist projektweit abgeschaltet.** Der Code liegt im Baum, wird aber nicht
+> kompiliert (`BT_SRCS` haengt an `CONFIG_BT_ENABLED=n`). Grund: der C5 haelt
+> unter WiFi+Zigbee-Koexistenzlast keine stabilen GATT-Verbindungen. Dieses
+> Dokument beschreibt, was der Code kann, nicht was laeuft.
+>
+> Aktuell gepflegt wird `CLAUDE.md` im Projektwurzelverzeichnis.
+
+
 Complete guide to the Bluetooth LE Gateway functionality of the ESP32-C5 Unified Gateway.
 
 > 🔴 **INACTIVE as of 2026-07-31.** Bluetooth is switched off project-wide

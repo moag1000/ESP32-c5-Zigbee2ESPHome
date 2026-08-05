@@ -1,5 +1,15 @@
 # Koexistenz-Manager Konzept: Zigbee / BLE / ESPHome / WiFi
 
+<!-- staleness-banner -->
+> **Stand 2026-08-05.** Dieses Konzept ist weiterhin gueltig, aber es gab zwischenzeitlich eine
+> Implementierung (`core/coex_manager.c`, 787 Zeilen), die **nie initialisiert
+> wurde** und am 2026-08-05 geloescht wurde. Was heute laeuft, ist
+> `esp_coex_wifi_i154_enable()` aus `main.c`. Wer das hier umsetzt, faengt bei
+> der Verdrahtung an, nicht beim Code.
+>
+> Aktuell gepflegt wird `CLAUDE.md` im Projektwurzelverzeichnis.
+
+
 > **Status**: Konzeptidee / Draft — noch nicht implementiert
 
 ## Motivation
