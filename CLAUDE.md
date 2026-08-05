@@ -371,6 +371,29 @@ Koexistenz weiterhin vor dem Verbindungsfenster, `esp_coex_preference_set()`
 bewusst setzen, und GATT ueber Stunden beobachten. Bis dahin bleibt es eine
 begruendete Vermutung.
 
+## Woher die Geraetekenntnis kommt
+
+Das Gateway ist nur deshalb mehr als ein Zigbee-Adapter, weil zwei fremde
+Projekte die Arbeit gemacht haben, ein Geraet zu *kennen*:
+
+- **zigbee-herdsman-converters** (MIT, Koen Kanters) -- der Grund, warum ein
+  gepairtes Geraet als "Fingerbot Plus" mit Mode-Auswahl und Sustain Time
+  erscheint statt als Adresse mit ein paar Clustern. Quellen unter
+  `tools/zhc/`, daraus erzeugt `tools/z2m_converter_extract.py` die Daten in
+  `data/converters/`.
+- **zha-device-handlers** (Apache-2.0) -- deckt ab, was z2m nicht hat.
+  `tools/zhaquirks/` -> `data/converters_zhaquirks/`.
+
+Beide Lizenzen verlangen erhaltene Hinweise; die Upstream-Lizenzdateien liegen
+neben den jeweiligen Quellen und duerfen dort nicht verschwinden. Vollstaendige
+Aufstellung in `THIRD_PARTY_NOTICES.md`, eigene Lizenz in `LICENSE`
+(Apache-2.0 -- die Dateikoepfe behaupteten das seit jeher, die Datei fehlte).
+
+`index.json` haelt seit 2026-08-05 die tatsaechliche Upstream-Version fest
+(`"version": "26.91.0"`) statt `"commit": "unknown"`. Vorher liess sich nicht
+sagen, ob ein Geraet fehlt, weil Upstream es nicht kennt oder weil die
+Extraktion alt ist.
+
 ## Konfigurations-Kette
 
 `CMakeLists.txt` setzt `SDKCONFIG_DEFAULTS` auf **zwei** Dateien:

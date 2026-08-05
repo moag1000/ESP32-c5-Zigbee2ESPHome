@@ -1013,6 +1013,22 @@ def _parse_js_lookup(lookup_str):
     return result if result else None
 
 
+
+def _vendored_version(source_dir):
+    """Version of the vendored zigbee-herdsman-converters checkout, or "unknown"."""
+    import pathlib
+    p = pathlib.Path(source_dir)
+    for _ in range(4):
+        pkg = p / "package.json"
+        if pkg.is_file():
+            try:
+                return json.loads(pkg.read_text()).get("version", "unknown")
+            except Exception:
+                return "unknown"
+        p = p.parent
+    return "unknown"
+
+
 def parse_extend_call(call_str):
     """Parse a single ModernExtend call like 'm.light({colorTemp: {range: [250, 454]}})'.
 
@@ -1763,7 +1779,13 @@ def main():
     index = {
         "version": 2,
         "sources": {
-            "z2m": {"ts": date.today().isoformat(), "commit": "unknown"},
+            # Record which upstream release this was generated from.
+            # "unknown" made the shipped database untraceable: there was no way
+            # to tell whether a device was missing because upstream lacked it or
+            # because the extraction was old. Read from the vendored
+            # package.json, which is what the sources actually are.
+            "z2m": {"ts": date.today().isoformat(),
+                    "version": _vendored_version(args.source)},
         },
         "manufacturers": manuf_info,
         "total_devices": total_devices,

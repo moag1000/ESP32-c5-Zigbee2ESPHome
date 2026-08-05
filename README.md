@@ -48,7 +48,10 @@ Implemented but not compiled (`CONFIG_BT_ENABLED=n`). Kept for reference:
 #### Converter Database
 - Device definitions are **loaded at runtime** from a JSON database in LittleFS,
   not compiled into the firmware
-- Transpiled from zigbee-herdsman-converters and zha-device-handlers by the host
+- Transpiled from zigbee-herdsman-converters (MIT, Koen Kanters) and
+  zha-device-handlers (Apache-2.0) by the host tooling. Those two projects
+  are what turns a paired address into a named device with working
+  controls — see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
   tools in `tools/`
 - The database can be replaced at runtime over MQTT
   (`zigbee2mqtt/bridge/request/converter_db/update`)
