@@ -34,6 +34,9 @@
 #include "cJSON.h"
 #include <string.h>
 
+/** @brief Largest sustain time DP 103 accepts, in seconds (per zigbee2mqtt). */
+#define TUYA_FINGERBOT_SUSTAIN_MAX_SEC 10
+
 static const char *TAG = "TUYA_FINGERBOT";
 
 /* ============================================================================
@@ -64,7 +67,7 @@ static tuya_fingerbot_state_t *find_or_create_state(uint16_t short_addr)
             memset(&s_fingerbot_states[i], 0, sizeof(tuya_fingerbot_state_t));
             s_fingerbot_states[i].short_addr = short_addr;
             s_fingerbot_states[i].valid = true;
-            s_fingerbot_states[i].sustain_time = 3;      /* Default 300ms */
+            s_fingerbot_states[i].sustain_time = 0;      /* Seconds; the device reports its own on join */
             s_fingerbot_states[i].down_movement = 100;    /* Default 100% */
             return &s_fingerbot_states[i];
         }
@@ -149,7 +152,7 @@ static esp_err_t fingerbot_process_dp(uint16_t short_addr, const tuya_dp_t *dp)
 
         case TUYA_DP_FINGERBOT_SUSTAIN_TIME:
             state->sustain_time = (uint8_t)dp->value.int_value;
-            ESP_LOGI(TAG, "Fingerbot 0x%04X sustain_time: %d (x100ms)",
+            ESP_LOGI(TAG, "Fingerbot 0x%04X sustain_time: %d s",
                      short_addr, state->sustain_time);
             break;
 
@@ -296,20 +299,36 @@ static esp_err_t fingerbot_handle_command(uint16_t short_addr, uint8_t endpoint,
         }
     }
 
-    /* Handle sustain_time: {"sustain_time": 0-25} in seconds, DP unit = 100ms */
+    /* Handle sustain_time: {"sustain_time": 0-10} in seconds.
+     *
+     * DP 103 carries seconds directly — no scaling. This used to multiply by
+     * ten on the belief that the unit was 100ms, so a requested 1s held the
+     * switch for 10s. zigbee2mqtt agrees the value is raw:
+     *
+     *     e.numeric("delay", ea.STATE_SET).withValueMin(0).withValueMax(10)
+     *      .withValueStep(1).withUnit("s").withDescription("Sustain time")
+     *
+     * and the device's own quirk file in data/converters_zhaquirks/
+     * tz3210_dse8ogfy.json lists DP 103 as a plain int with no divisor. The
+     * 100ms idea most likely came from lincukoo's click_sustain_time, which
+     * does use divideBy10 — but that is a different product.
+     *
+     * The range was 0-25, which fed the device values up to 250 for a field
+     * that tops out at 10. */
     cJSON *sustain_json = cJSON_GetObjectItem(json, "sustain_time");
     if (cJSON_IsNumber(sustain_json)) {
         int sustain_sec = (int)cJSON_GetNumberValue(sustain_json);
-        if (sustain_sec >= 0 && sustain_sec <= 25) {
-            uint8_t dp_value = (uint8_t)(sustain_sec * 10);
-            ret = zb_tuya_fingerbot_set_sustain_time(short_addr, endpoint, dp_value);
+        if (sustain_sec >= 0 && sustain_sec <= TUYA_FINGERBOT_SUSTAIN_MAX_SEC) {
+            ret = zb_tuya_fingerbot_set_sustain_time(short_addr, endpoint,
+                                                     (uint8_t)sustain_sec);
             if (ret == ESP_OK) {
-                ESP_LOGI(TAG, "Set Fingerbot sustain_time: 0x%04X -> %ds (DP=%d)",
-                         short_addr, sustain_sec, dp_value);
+                ESP_LOGI(TAG, "Set Fingerbot sustain_time: 0x%04X -> %d s",
+                         short_addr, sustain_sec);
                 handled = true;
             }
         } else {
-            ESP_LOGW(TAG, "Invalid sustain_time: %d (valid: 0-25s)", sustain_sec);
+            ESP_LOGW(TAG, "Invalid sustain_time: %d (valid: 0-%d s)",
+                     sustain_sec, TUYA_FINGERBOT_SUSTAIN_MAX_SEC);
         }
     }
 
@@ -897,7 +916,11 @@ static cJSON *fingerbot_build_state_json(uint16_t short_addr)
     /* Movement settings */
     cJSON_AddNumberToObject(json, "down_movement", state->down_movement);
     cJSON_AddNumberToObject(json, "up_movement", state->up_movement);
-    cJSON_AddNumberToObject(json, "sustain_time", (state->sustain_time + 5) / 10);
+    /* Raw seconds, same as the DP carries. This used to divide by ten, the
+     * mirror of the multiply on the command path — together they cancelled out
+     * in round-trips through this gateway while the device actually held the
+     * switch ten times too long. */
+    cJSON_AddNumberToObject(json, "sustain_time", state->sustain_time);
     cJSON_AddBoolToObject(json, "reverse", state->reverse);
     cJSON_AddBoolToObject(json, "touch_control", state->touch_control);
     cJSON_AddBoolToObject(json, "click_control", state->click_control);
