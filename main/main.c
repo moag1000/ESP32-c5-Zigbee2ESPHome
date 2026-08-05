@@ -912,8 +912,27 @@ void app_main(void)
 
     if (!wifi_connected) {
 #if CONFIG_WIFI_CAPTIVE_PORTAL_ENABLE
-        ESP_LOGW(TAG_WIFI, "WiFi failed - starting captive portal");
-        esp_err_t portal_ret = captive_portal_start(portal_subsystem_callback);
+        /* The portal is for obtaining credentials, not for waiting out a slow
+         * access point. If this SSID has authenticated us before, the
+         * credentials are not the problem and the portal is the wrong answer:
+         * it disables auto-reconnect, stops ESPHome and puts the radio into AP
+         * mode, all while the station would have connected on its own.
+         *
+         * Measured here: association took 7s on one boot, 356-372s on several,
+         * and had not happened within 450s on another — with correct
+         * credentials throughout. No fixed grace period separates that from a
+         * wrong password; "has this ever worked" does. */
+        esp_err_t portal_ret;
+        if (wifi_manager_credentials_known_good(wifi_config.ssid)) {
+            ESP_LOGW(TAG_WIFI, "WiFi not up yet, but '%s' has connected before — "
+                                "not starting the portal. wifi_manager keeps "
+                                "retrying in the background.", wifi_config.ssid);
+            portal_ret = ESP_ERR_NOT_SUPPORTED;   /* Neither started nor needed */
+        } else {
+            ESP_LOGW(TAG_WIFI, "WiFi failed - starting captive portal");
+            portal_ret = captive_portal_start(portal_subsystem_callback);
+        }
+
         if (portal_ret == ESP_OK) {
             /* Portal succeeded - check if we're connected now */
             wifi_connected = wifi_manager_is_connected();

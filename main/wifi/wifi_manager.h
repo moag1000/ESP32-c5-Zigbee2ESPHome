@@ -163,6 +163,19 @@ wifi_state_t wifi_manager_get_state(void);
 bool wifi_manager_is_connected(void);
 
 /**
+ * @brief Whether this SSID has ever authenticated this device
+ *
+ * Recorded in NVS on the first successful association. Lets the boot path tell
+ * "the credentials are wrong" apart from "the access point is being slow",
+ * which a timeout cannot: measured association on this gateway ranged from 7s
+ * to over 450s with correct credentials throughout.
+ *
+ * @param[in] ssid SSID to check
+ * @return true if @p ssid has previously connected successfully
+ */
+bool wifi_manager_credentials_known_good(const char *ssid);
+
+/**
  * @brief Get current IP address
  *
  * Retrieves the current IP address as a string.

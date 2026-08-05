@@ -238,6 +238,35 @@ als Kconfig-Option, wurde aber **nirgends gelesen** -- effektiv galt FAST_SCAN,
 das beim ersten Treffer abbricht. Ob das die 6 Minuten verkuerzt, ist **nicht
 belegt**.
 
+**Das Portal startet nicht mehr, wenn die Zugangsdaten schon einmal
+funktioniert haben.** Das ist der eigentliche Fix. Eine feste Gnadenfrist kann
+"falsches Passwort" nicht von "langsamer AP" trennen -- die Assoziationszeit
+streute hier von 7 s ueber 356-372 s bis ueber 450 s, bei durchgehend
+korrekten Zugangsdaten. Die Frage "hat diese SSID uns je authentifiziert" kann
+es. `wifi_manager` merkt sich das nach der ersten erfolgreichen Assoziation in
+NVS (`wifi_mgr/ssid_ok`), und `main.c` ueberspringt das Portal dann.
+
+Verifiziert ueber zwei Boots:
+
+    I (779218) WIFI_MGR: Credentials for '...' recorded as known-good
+    -- Neustart --
+    W (455806) WIFI: WiFi not up yet, but '...' has connected before —
+                     not starting the portal.
+
+Das Portal bleibt fuer den Fall, fuer den es gedacht ist: ein frisches oder
+falsch konfiguriertes Geraet.
+
+**Was gemessen wurde und nichts brachte:** den Reconnect-Backoff von 30 s auf
+5 s zu deckeln ergab **23 statt 11 Versuche bei gleicher Wanduhrzeit**
+(356.974 ms gegenueber 371.761 ms). Das Warten ist zeitgesteuert, nicht
+versuchsgesteuert -- haerter nachfassen kostet nur Funkzeit. Zurueckgebaut.
+
+**Scannen ist auf diesem Board praktisch blind.** Ein reiner Scan-Lauf ohne
+jeden Verbindungsversuch, passiv, 200 ms je Kanal, zehn Runden ueber 300 s:
+jedes Mal `aps=0` bei exakt 8500 ms Dauer -- kein einziges Beacon, auch keine
+Nachbarnetze, waehrend dasselbe Board bei -43 dBm assoziiert. Verlasse dich
+also nicht auf Scan-Ergebnisse (z. B. eine Netzwerkliste im Captive Portal).
+
 **Offen:** warum genau der zwoelfte Versuch gelingt. Die Abstaende sind ab dem
 vierten Fehlschlag konstant 38,3 s (30 s Backoff + 8,3 s Versuchsdauer), der
 erfolgreiche Versuch dauert 16,8 s statt 8,3 s. Das deutet auf etwas

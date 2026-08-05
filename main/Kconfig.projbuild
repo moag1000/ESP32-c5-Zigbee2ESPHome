@@ -38,7 +38,7 @@ menu "ESP32-C5 Zigbee2MQTT Gateway Configuration"
 
         config WIFI_CONNECT_GRACE_SEC
             int "Grace period before captive portal (seconds)"
-            default 300
+            default 420
             range 0 900
             help
                 After the initial connection attempts fail, keep the normal
@@ -52,12 +52,25 @@ menu "ESP32-C5 Zigbee2MQTT Gateway Configuration"
                 does happen, e.g. with WPA2/WPA3 mesh setups where the first
                 association attempts are refused and a later one succeeds.
 
-                The default is sized to let the reconnect backoff schedule run
-                to completion: wifi_manager retries up to 10 times with
-                exponential backoff (1, 2, 4, 8, 16, then 30s), and each failed
-                association itself takes ~13s, which adds up to roughly four to
-                five minutes. A shorter window cuts the retries off partway and
-                starts the portal while the radio would still have been trying.
+                The default is sized from measurement, not from the retry
+                schedule. On this gateway association consistently completes
+                between 356s and 372s after boot, and the grace window starts
+                at ~35s, so anything under ~340s starts the portal while the
+                connection was about to succeed. At the previous default of
+                300s that happened on every single boot:
+
+                    grace begins   ~35s
+                    portal starts  ~336s
+                    would connect  ~358-372s
+
+                — the portal was launched 22 to 36 seconds too early, every
+                time, and it is the disruptive path: it disables auto-reconnect,
+                stops ESPHome and puts the radio into AP mode.
+
+                Note the delay is time-based, not attempt-based. Capping the
+                reconnect backoff at 5s was measured too: 23 attempts instead of
+                11, and the same wall-clock time to associate. Retrying harder
+                does not help, so the window has to be long enough to wait.
 
                 Set to 0 to start the portal immediately, as before.
 

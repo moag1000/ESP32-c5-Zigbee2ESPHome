@@ -18,6 +18,8 @@
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_log.h"
+#include "nvs_flash.h"
+#include "nvs.h"
 #include "esp_netif.h"
 #include "esp_timer.h"
 #include "esp_sntp.h"
@@ -116,6 +118,56 @@ static struct {
 };
 
 /* Forward declarations */
+/* ============================================================================
+ * "These credentials have worked before"
+ *
+ * The captive portal exists to obtain credentials, not to wait out a slow
+ * access point. Measured on this gateway, association is wildly variable —
+ * 7s on one boot, 356-372s on several, and not at all within 450s on another —
+ * while the credentials were correct the whole time. A fixed grace period
+ * cannot separate those cases, so it is the wrong question. Whether the SSID
+ * has ever authenticated us is the right one.
+ * ============================================================================ */
+
+#define WIFI_KNOWN_GOOD_NVS_NS  "wifi_mgr"
+#define WIFI_KNOWN_GOOD_NVS_KEY "ssid_ok"
+
+bool wifi_manager_credentials_known_good(const char *ssid)
+{
+    if (ssid == NULL || ssid[0] == '\0') {
+        return false;
+    }
+
+    nvs_handle_t h;
+    if (nvs_open(WIFI_KNOWN_GOOD_NVS_NS, NVS_READONLY, &h) != ESP_OK) {
+        return false;
+    }
+
+    char stored[WIFI_SSID_MAX_LEN + 1] = {0};
+    size_t len = sizeof(stored);
+    esp_err_t ret = nvs_get_str(h, WIFI_KNOWN_GOOD_NVS_KEY, stored, &len);
+    nvs_close(h);
+
+    return (ret == ESP_OK) && (strcmp(stored, ssid) == 0);
+}
+
+/** @brief Record that @p ssid authenticated us. Best effort. */
+static void mark_credentials_known_good(const char *ssid)
+{
+    if (ssid == NULL || ssid[0] == '\0' || wifi_manager_credentials_known_good(ssid)) {
+        return;                  /* Unchanged — do not wear the flash */
+    }
+
+    nvs_handle_t h;
+    if (nvs_open(WIFI_KNOWN_GOOD_NVS_NS, NVS_READWRITE, &h) != ESP_OK) {
+        return;
+    }
+    nvs_set_str(h, WIFI_KNOWN_GOOD_NVS_KEY, ssid);
+    nvs_commit(h);
+    nvs_close(h);
+    ESP_LOGI(TAG, "Credentials for '%s' recorded as known-good", ssid);
+}
+
 static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                                int32_t event_id, void *event_data);
 static void ip_event_handler(void *arg, esp_event_base_t event_base,
@@ -361,6 +413,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                     const char *band_str = connected_5ghz ? "5GHz" : "2.4GHz";
                     ESP_LOGI(TAG, "Connected to AP (SSID: %s, Channel: %d, Band: %s, RSSI: %d dBm)",
                              ap_info.ssid, ap_info.primary, band_str, ap_info.rssi);
+                    mark_credentials_known_good((const char *)ap_info.ssid);
 
                 } else {
                     ESP_LOGI(TAG, "Connected to AP");
