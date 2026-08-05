@@ -102,7 +102,16 @@ typedef struct esphome_noise_ctx {
 
     /* Pre-shared key (PSK) */
     uint8_t psk[ESPHOME_NOISE_KEY_SIZE];    /**< Pre-shared key (from Base64 config) */
-    bool has_psk;                           /**< True if PSK is configured */
+    /**
+     * @brief True if a PSK was supplied to esphome_noise_create()
+     *
+     * Informational only — nothing in this module reads it, so it is NOT the
+     * interlock it looks like. An empty PSK is refused earlier, by the
+     * CONFIG_ESPHOME_NOISE_REQUIRE_PSK check in esphome_api_server.c, before a
+     * context is ever created. Do not add a code path that relies on this flag
+     * to decide whether encryption is trustworthy.
+     */
+    bool has_psk;
 
     /* Symmetric state (during handshake) */
     uint8_t ck[ESPHOME_NOISE_HASH_SIZE];    /**< Chaining key */
