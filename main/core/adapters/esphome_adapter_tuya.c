@@ -10,6 +10,7 @@
  */
 
 #include "esphome_adapter_tuya.h"
+#include "core/memory/memory_manager_ng.h"
 #include "esphome_adapter.h"
 #include "esphome_adapter_internal.h"
 #include "core/device/device_registry.h"
@@ -38,7 +39,23 @@ typedef struct {
     tuya_entity_type_t entity_type;
 } tuya_key_cache_entry_t;
 
-static tuya_key_cache_entry_t s_tuya_key_cache[TUYA_KEY_CACHE_MAX];
+/* 3 KB that internal RAM does not have to spare — allocated on first use, in
+ * PSRAM. Only reached from task context (entity registration and state
+ * updates), never from an ISR. */
+static tuya_key_cache_entry_t *s_tuya_key_cache = NULL;
+
+static bool tuya_key_cache_ready(void)
+{
+    if (s_tuya_key_cache == NULL) {
+        s_tuya_key_cache = mem_ng_calloc(TUYA_KEY_CACHE_MAX,
+                                         sizeof(tuya_key_cache_entry_t), MEM_CAP_PSRAM);
+        if (s_tuya_key_cache == NULL) {
+            ESP_LOGE(TAG, "Failed to allocate Tuya key cache");
+            return false;
+        }
+    }
+    return true;
+}
 static uint8_t s_tuya_key_cache_count = 0;
 
 static uint32_t make_tuya_entity_key(device_id_t id, const char *field_name)
@@ -57,6 +74,10 @@ static uint32_t make_tuya_entity_key(device_id_t id, const char *field_name)
 static void tuya_key_cache_add(esphome_entity_key_t key, device_id_t id,
                                 const char *field_name, tuya_entity_type_t type)
 {
+    if (!tuya_key_cache_ready()) {
+        return;
+    }
+
     for (uint8_t i = 0; i < s_tuya_key_cache_count; i++) {
         if (s_tuya_key_cache[i].key == key) {
             return;
@@ -76,6 +97,10 @@ static void tuya_key_cache_add(esphome_entity_key_t key, device_id_t id,
 
 static tuya_key_cache_entry_t *tuya_key_cache_find(esphome_entity_key_t key)
 {
+    if (s_tuya_key_cache == NULL) {
+        return NULL;
+    }
+
     for (uint8_t i = 0; i < s_tuya_key_cache_count; i++) {
         if (s_tuya_key_cache[i].key == key) {
             return &s_tuya_key_cache[i];
@@ -554,6 +579,10 @@ void esphome_adapter_tuya_update_states(const device_t *dev, cJSON *state)
 void esphome_adapter_tuya_remove_device(device_id_t id)
 {
     uint8_t dst = 0;
+    if (s_tuya_key_cache == NULL) {
+        return;
+    }
+
     for (uint8_t src = 0; src < s_tuya_key_cache_count; src++) {
         if (s_tuya_key_cache[src].device_id != id) {
             if (dst != src) {

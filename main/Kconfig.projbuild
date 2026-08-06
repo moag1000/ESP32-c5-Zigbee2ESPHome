@@ -1002,11 +1002,18 @@ menu "ESP32-C5 Zigbee2MQTT Gateway Configuration"
         config ESPHOME_API_MAX_CLIENTS
             int "Maximum API Clients"
             depends on ESPHOME_API_ENABLE
-            default 2
-            range 1 4
+            default 4
+            range 1 8
             help
                 Maximum number of simultaneous client connections.
-                Keep low (1-2) for memory-constrained devices.
+
+                Each slot costs about 1 KB of internal RAM for its receive
+                buffer; the 8 KB handler task stack comes from PSRAM.
+
+                Two is not enough in practice: Home Assistant holds one, and a
+                single connection that stops responding takes the other, at
+                which point every further attempt is rejected until a slot
+                times out.
 
         config ESPHOME_MDNS_ENABLE
             bool "Enable mDNS Announcement"

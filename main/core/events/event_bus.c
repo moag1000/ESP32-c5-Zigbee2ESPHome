@@ -84,8 +84,15 @@ static psram_task_handle_t s_dispatcher_task = {0};
 /** Mutex for subscriber array modifications */
 static SemaphoreHandle_t s_subscriber_mutex = NULL;
 
-/** Subscriber arrays - one per event type */
-static subscriber_list_t s_subscribers[EVT_COUNT];
+/** Subscriber arrays - one per event type, in PSRAM
+ *
+ * 7.6 KB, the largest single static buffer this project owns, and internal RAM
+ * is the scarce one: 54 KB free at the low-water mark against 6 MB of PSRAM
+ * sitting idle. Only ever touched from task context — event_publish_prio_from_isr()
+ * does nothing but xQueueSendFromISR() and never reads this table — so the rule
+ * for PSRAM placement (no ISR access, no access with the flash cache disabled)
+ * holds. */
+static subscriber_list_t *s_subscribers = NULL;
 
 /** Whether event bus is initialized */
 static bool s_initialized = false;
@@ -249,6 +256,9 @@ static void event_dispatch(const event_item_t *event)
     }
 
     /* Copy active handlers to local array */
+    if (s_subscribers == NULL) {
+        return;
+    }
     subscriber_list_t *list = &s_subscribers[event->type];
     for (size_t i = 0; i < MAX_SUBSCRIBERS && handler_count < MAX_SUBSCRIBERS; i++) {
         subscriber_entry_t *entry = &list->entries[i];
@@ -347,13 +357,20 @@ esp_err_t event_bus_init(void)
         return ESP_ERR_INVALID_STATE;
     }
 
-    /* Initialize subscriber arrays */
-    memset(s_subscribers, 0, sizeof(s_subscribers));
+    /* Allocate subscriber arrays */
+    s_subscribers = mem_ng_calloc(EVT_COUNT, sizeof(subscriber_list_t), MEM_CAP_PSRAM);
+    if (s_subscribers == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate %zu bytes for subscribers",
+                 EVT_COUNT * sizeof(subscriber_list_t));
+        return ESP_ERR_NO_MEM;
+    }
 
     /* Create subscriber mutex */
     s_subscriber_mutex = xSemaphoreCreateMutex();
     if (s_subscriber_mutex == NULL) {
         ESP_LOGE(TAG, "Failed to create subscriber mutex");
+        mem_ng_free(s_subscribers);
+        s_subscribers = NULL;
         return ESP_ERR_NO_MEM;
     }
 
@@ -459,8 +476,11 @@ esp_err_t event_bus_deinit(void)
         s_subscriber_mutex = NULL;
     }
 
-    /* Clear subscriber arrays */
-    memset(s_subscribers, 0, sizeof(s_subscribers));
+    /* Release subscriber arrays */
+    if (s_subscribers != NULL) {
+        mem_ng_free(s_subscribers);
+        s_subscribers = NULL;
+    }
 
     s_initialized = false;
 
@@ -499,6 +519,10 @@ esp_err_t event_subscribe_filtered(event_type_t type, event_handler_t handler,
         return ESP_ERR_TIMEOUT;
     }
 
+    if (s_subscribers == NULL) {
+        xSemaphoreGive(s_subscriber_mutex);
+        return ESP_ERR_INVALID_STATE;
+    }
     subscriber_list_t *list = &s_subscribers[type];
     esp_err_t ret = ESP_ERR_NO_MEM;
 

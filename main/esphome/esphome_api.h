@@ -42,7 +42,7 @@ typedef struct {
     char device_name[ESPHOME_MAX_NAME_LEN];         /**< Device name for discovery */
     char friendly_name[ESPHOME_MAX_NAME_LEN];       /**< Friendly name for display */
     char mac_address[18];                           /**< MAC address (auto-filled if empty) */
-    uint8_t max_clients;                            /**< Max concurrent clients (1-2) */
+    uint8_t max_clients;                            /**< Max concurrent clients (see ESPHOME_MAX_CLIENTS) */
     bool use_mdns;                                  /**< Enable mDNS announcement */
     uint32_t keepalive_ms;                          /**< Keepalive interval in ms */
 } esphome_api_config_t;

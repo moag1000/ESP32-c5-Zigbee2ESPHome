@@ -83,7 +83,16 @@ extern "C" {
 #define ESPHOME_API_PORT                6053
 
 /** @brief Maximum simultaneous client connections */
+/* Follows the Kconfig knob. It used to be a hardcoded 2 while
+ * ESPHOME_API_MAX_CLIENTS offered a range of 1-4, and esphome_api_init() then
+ * clamped the configured value back down — so setting 4 silently gave you 2.
+ * Two is genuinely tight: Home Assistant plus one connection that has stopped
+ * responding fills both slots and locks everything else out. */
+#ifdef CONFIG_ESPHOME_API_MAX_CLIENTS
+#define ESPHOME_MAX_CLIENTS             CONFIG_ESPHOME_API_MAX_CLIENTS
+#else
 #define ESPHOME_MAX_CLIENTS             2
+#endif
 
 /** @brief Socket receive buffer size */
 #define ESPHOME_RX_BUFFER_SIZE          1024

@@ -407,6 +407,8 @@ esp_err_t esphome_api_init(const esphome_api_config_t *config)
 
     /* Validate configuration */
     if (s_api.config.max_clients > ESPHOME_MAX_CLIENTS) {
+        ESP_LOGW(TAG, "Requested %u client slots, this build has room for %d",
+                 s_api.config.max_clients, ESPHOME_MAX_CLIENTS);
         s_api.config.max_clients = ESPHOME_MAX_CLIENTS;
     }
     if (s_api.config.max_clients == 0) {
