@@ -900,6 +900,53 @@ esp_err_t zb_tuya_query_dp(uint16_t short_addr, uint8_t endpoint)
     return ESP_OK;
 }
 
+esp_err_t zb_tuya_refresh_datapoints(uint16_t short_addr, uint8_t endpoint)
+{
+    /* Ask nicely first. Plenty of Tuya devices answer cmd 0x03 with their whole
+     * datapoint set, and it costs one frame. */
+    zb_tuya_query_dp(short_addr, endpoint);
+
+    /* The Fingerbot Plus does not. Hardware testing (see the notes at the top of
+     * zb_tuya.h) found it answers dataQuery with a Default Response and no
+     * datapoints, and dumps its values only after pairing or a mode change.
+     * That is why its battery, sustain time and movement limits read as unknown
+     * after a reboot and never fill in on their own.
+     *
+     * So rewrite the mode — but only the mode the device itself last reported,
+     * taken from the persisted state. Writing a guessed mode would silently
+     * reconfigure someone's device to get a reading, which is not a trade worth
+     * making. If nothing is known, the query above is all we do and the caller
+     * is told so. */
+    device_t *dev = device_registry_get_by_short_addr(short_addr);
+    if (dev == NULL) {
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    cJSON *state = device_registry_state_dup(dev->id);
+    if (state == NULL) {
+        ESP_LOGW(TAG, "0x%04X: no known mode to rewrite — datapoint query sent, "
+                 "but this device only dumps after a mode change", short_addr);
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    cJSON *mode_item = cJSON_GetObjectItem(state, "mode");
+    fingerbot_mode_t mode;
+    esp_err_t ret = ESP_ERR_NOT_FOUND;
+
+    if (cJSON_IsString(mode_item) &&
+        zb_tuya_fingerbot_mode_from_string(mode_item->valuestring, &mode) == ESP_OK) {
+        ESP_LOGI(TAG, "0x%04X: rewriting last reported mode '%s' to trigger a "
+                 "datapoint dump", short_addr, mode_item->valuestring);
+        ret = zb_tuya_fingerbot_set_mode(short_addr, endpoint, mode);
+    } else {
+        ESP_LOGW(TAG, "0x%04X: no mode in the stored state — datapoint query "
+                 "sent, nothing else is safe to do", short_addr);
+    }
+
+    cJSON_Delete(state);
+    return ret;
+}
+
 esp_err_t zb_tuya_fingerbot_send_program(uint16_t short_addr, uint8_t endpoint,
                                           const char *program_str)
 {

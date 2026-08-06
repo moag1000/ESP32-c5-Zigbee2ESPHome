@@ -552,6 +552,22 @@ esp_err_t zb_tuya_fingerbot_set_click_control(uint16_t short_addr, uint8_t endpo
 esp_err_t zb_tuya_query_dp(uint16_t short_addr, uint8_t endpoint);
 
 /**
+ * @brief Ask a Tuya device to re-send its datapoints
+ *
+ * Sends the datapoint query, and for devices that ignore it (the Fingerbot
+ * Plus does) additionally rewrites the mode the device last reported, which is
+ * the only known trigger for a full dump. The mode comes from the persisted
+ * state, never from a guess — writing a mode nobody read would reconfigure the
+ * device just to obtain a reading.
+ *
+ * @param[in] short_addr Device short address
+ * @param[in] endpoint Target endpoint
+ * @return ESP_OK if a dump was triggered
+ * @return ESP_ERR_NOT_FOUND if only the query could be sent (no mode known)
+ */
+esp_err_t zb_tuya_refresh_datapoints(uint16_t short_addr, uint8_t endpoint);
+
+/**
  * @brief Set Fingerbot program enable (DP 121)
  *
  * Activates or deactivates program mode. Must be set to true before

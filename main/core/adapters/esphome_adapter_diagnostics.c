@@ -10,10 +10,11 @@
  *   - RSSI (Sensor)          — Signal Strength (dBm)
  *   - Last Seen (TextSensor) — human-readable timestamp
  *   - Zigbee Info (TextSensor)— endpoint/cluster summary (disabled_by_default)
+ *   - Refresh Values (Button) — Tuya devices only, asks for a datapoint dump
  *
  * Key scheme: 0x5XXXXXXX
  *   Bits 31-28: 0x5 (diagnostic prefix)
- *   Bits 27-23: diagnostic type index (0-6)
+ *   Bits 27-23: diagnostic type index (0-7)
  *   Bits 22-0:  lower 23 bits of device ID hash
  */
 
@@ -23,6 +24,7 @@
 #include "core/device/device_registry.h"
 #include "zigbee/zb_interview.h"
 #include "zigbee/zb_leave_helper.h"
+#include "zigbee/zb_tuya.h"
 #include "zigbee/converter/zb_converter_std.h"
 #include "cJSON.h"
 #include "esp_log.h"
@@ -46,7 +48,8 @@ static const char *TAG = "diag_ent";
 #define DIAG_TYPE_RSSI          4
 #define DIAG_TYPE_LAST_SEEN     5
 #define DIAG_TYPE_ZIGBEE_INFO   6
-#define DIAG_TYPE_COUNT         7
+#define DIAG_TYPE_REFRESH_DP    7
+#define DIAG_TYPE_COUNT         8
 
 /* ============================================================================
  * Key Generation
@@ -187,6 +190,26 @@ static esp_err_t diag_identify_press(esphome_entity_key_t key)
     return ret;
 }
 
+static esp_err_t diag_refresh_dp_press(esphome_entity_key_t key)
+{
+    device_t *dev = find_device_for_diag_key(key, DIAG_TYPE_REFRESH_DP);
+    if (!dev) {
+        ESP_LOGW(TAG, "Refresh: device not found for key 0x%08lX", (unsigned long)key);
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    ESP_LOGI(TAG, "Refreshing Tuya datapoints of 0x%04X", dev->proto.zigbee.short_addr);
+
+    esp_err_t ret = zb_tuya_refresh_datapoints(dev->proto.zigbee.short_addr,
+                                               dev->proto.zigbee.endpoint);
+    if (ret == ESP_ERR_NOT_FOUND) {
+        /* The query went out; there was just no safe way to force a dump. Not
+         * an error the user needs to see as a failure. */
+        return ESP_OK;
+    }
+    return ret;
+}
+
 /* ============================================================================
  * Registration
  * ============================================================================ */
@@ -234,6 +257,28 @@ esp_err_t esphome_adapter_diagnostics_register(const device_t *dev)
         cfg.entity_category = 1;  /* CONFIG */
         cfg.disabled_by_default = false;
         cfg.press_callback = diag_reconfigure_press;
+        esphome_entity_register_button(&cfg);
+    }
+
+    /* --- Refresh Values Button (CONFIG category, Tuya devices only) ---
+     *
+     * Tuya devices carry their data in datapoints rather than ZCL attributes,
+     * and some only send them when something changes. The Fingerbot Plus is the
+     * extreme case: after a reboot its battery, sustain time and movement
+     * limits read as unknown and never fill in on their own. This asks for
+     * them. Only registered where there is a Tuya cluster to ask. */
+    if (device_zigbee_has_cluster(dev, ZB_TUYA_CLUSTER_ID)) {
+        esphome_button_config_t cfg = {0};
+        cfg.key = make_diag_key(dev->id, DIAG_TYPE_REFRESH_DP);
+        cfg.device_id = device_id;
+        strlcpy(cfg.name, "Refresh Values", sizeof(cfg.name));
+        snprintf(cfg.unique_id, sizeof(cfg.unique_id),
+                 "0x%016llX_refresh_dp", (unsigned long long)dev->id);
+        strncpy(cfg.icon, "mdi:database-refresh", sizeof(cfg.icon) - 1);
+        cfg.device_class = ESPHOME_BUTTON_CLASS_NONE;
+        cfg.entity_category = 1;  /* CONFIG */
+        cfg.disabled_by_default = false;
+        cfg.press_callback = diag_refresh_dp_press;
         esphome_entity_register_button(&cfg);
     }
 
