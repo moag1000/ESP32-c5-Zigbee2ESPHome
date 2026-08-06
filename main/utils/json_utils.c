@@ -63,11 +63,10 @@ cJSON* json_create_device_state_ng(const device_t *device)
                           (source & ZB_POWER_SOURCE_DISPOSABLE_BATTERY);
 
         if (is_battery) {
-            uint8_t battery_pct = device_power_level_to_percent(
-                device->proto.zigbee.power_info.current_power_source_level);
-            cJSON_AddNumberToObject(root, "battery", battery_pct);
-
-            /* Add battery_low indicator (critical level) */
+            /* No "battery" percentage here — the node power descriptor only
+             * distinguishes critical/33/66/100 and would present a guess as a
+             * measurement. See device_state_publish_battery() for the full
+             * reasoning. Real levels come from genPowerCfg or a Tuya datapoint. */
             bool battery_low = (device->proto.zigbee.power_info.current_power_source_level == 0);
             cJSON_AddBoolToObject(root, "battery_low", battery_low);
         }

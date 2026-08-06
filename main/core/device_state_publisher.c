@@ -806,11 +806,22 @@ esp_err_t device_state_publish_battery(uint16_t short_addr)
                       (source & ZB_POWER_SOURCE_DISPOSABLE_BATTERY);
 
     if (is_battery) {
-        uint8_t battery_pct = device_power_level_to_percent(
-            device->proto.zigbee.power_info.current_power_source_level);
-        cJSON_AddNumberToObject(root, "battery", battery_pct);
-
-        /* Add battery_low indicator (level 0 = critical) */
+        /* Deliberately NOT published as "battery".
+         *
+         * current_power_source_level comes from the ZDO node power descriptor,
+         * which has exactly four states: critical, 33%, 66%, 100%. Feeding it
+         * into the battery sensor puts a number in front of the user that looks
+         * like a measurement and is not one — a brand new cell reads 66% simply
+         * because that is the level the descriptor happens to report, and many
+         * devices never update the field at all.
+         *
+         * Real battery levels come from genPowerCfg batteryPercentageRemaining
+         * or, on Tuya devices, from a datapoint (the Fingerbot uses DP 105).
+         * When neither has arrived the entity stays unknown, which is the
+         * truthful answer.
+         *
+         * The critical flag is kept: level 0 genuinely means the device is
+         * telling us its battery is nearly flat. */
         bool battery_low =
             (device->proto.zigbee.power_info.current_power_source_level == 0);
         cJSON_AddBoolToObject(root, "battery_low", battery_low);
