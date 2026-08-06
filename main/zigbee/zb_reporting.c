@@ -716,11 +716,27 @@ static void provision_restored_task(void *arg)
 
     vTaskDelay(pdMS_TO_TICKS(ZB_REPORTING_PROVISION_DELAY_MS));
 
-    provision_slot_t slots[ZB_REPORTING_PROVISION_MAX_DEVICES];
-    size_t slot_count = 0;
-
+    /* Sized from the registry, not from a constant.
+     *
+     * A fixed 32-entry array silently dropped every device past the 32nd: no
+     * binding, no reporting, no battery, and not one line in the log saying so.
+     * The network is configured for far more than 32 devices, so that was a
+     * quiet cap on a gateway that looked like it had provisioned everything. */
     size_t count = device_registry_count();
-    for (size_t i = 0; i < count && slot_count < ZB_REPORTING_PROVISION_MAX_DEVICES; i++) {
+    if (count == 0) {
+        vTaskDelete(NULL);
+        return;
+    }
+
+    provision_slot_t *slots = mem_ng_calloc(count, sizeof(provision_slot_t), MEM_CAP_DEFAULT);
+    if (slots == NULL) {
+        ESP_LOGE(TAG, "Cannot provision %zu device(s): out of memory", count);
+        vTaskDelete(NULL);
+        return;
+    }
+
+    size_t slot_count = 0;
+    for (size_t i = 0; i < count; i++) {
         device_t *dev = device_registry_get_by_index(i);
         if (!dev || dev->protocol != DEV_PROTOCOL_ZIGBEE) {
             continue;
@@ -796,9 +812,10 @@ static void provision_restored_task(void *arg)
         }
     }
 
-    ESP_LOGI(TAG, "Provisioning pass finished: %zu done, %zu still open",
-             provisioned, still_open);
+    ESP_LOGI(TAG, "Provisioning pass finished: %zu of %zu device(s) done, %zu still open",
+             provisioned, slot_count, still_open);
 
+    mem_ng_free(slots);
     vTaskDelete(NULL);
 }
 

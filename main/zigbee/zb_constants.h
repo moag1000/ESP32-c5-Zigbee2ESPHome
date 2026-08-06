@@ -146,9 +146,6 @@
 /** @brief Delay before provisioning devices restored from NVS at boot */
 #define ZB_REPORTING_PROVISION_DELAY_MS         30000
 
-/** @brief Devices tracked in one provisioning pass */
-#define ZB_REPORTING_PROVISION_MAX_DEVICES      32
-
 /** @brief Retry rounds before giving up on a device that never wakes */
 #define ZB_REPORTING_PROVISION_ROUNDS           20
 
