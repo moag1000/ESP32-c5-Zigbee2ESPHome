@@ -112,8 +112,58 @@ oder nach einem Moduswechsel. Ein Moduswechsel in HA holt sie also zurueck --
 automatisch machen wir das nicht, weil wir den aktuellen Modus nach einem
 Neustart nicht kennen und ihn sonst blind ueberschreiben wuerden.
 
-`zb_groups_init()` hat ebenfalls keinen Aufrufer. Nicht angefasst, weil fuer
-diesen Fehler nicht noetig -- aber die Feature-Tabelle unten behauptet "done".
+### Der Rest des Sweeps (2026-08-06)
+
+`zb_groups_init()` und `zb_backup_init()` sind jetzt ebenfalls verdrahtet.
+Backup war der schaedliche Fall: `bridge_request_handler` erreicht
+`zb_backup_process_mqtt_*()` ueber die MQTT-Bridge, und jeder dieser Aufrufe
+lief ins `ESP_ERR_INVALID_STATE`. Groups ist die Abhaengigkeit -- das Backup
+stellt Gruppenmitgliedschaften wieder her.
+
+Adapter (`mqtt_adapter_init`, `zigbee_adapter_init`, `ble_adapter_init`) sahen im
+Sweep tot aus, sind es aber nicht: sie stehen als `.init = ...` in einer
+`adapter_ops_t`-Tabelle **in derselben Datei** und werden ueber den Zeiger
+gerufen. Ein Sweep, der die eigene Datei ausschliesst, uebersieht das --
+derselbe Fehler in beide Richtungen wie beim Map-vs-grep-Vergleich weiter oben.
+
+Echt unbenutzt bleiben (keine Initialisierung *und* kein einziger anderer
+Aufruf): `zb_green_power`, `zb_multi_pan`, `zb_hvac_dehumid`, `ble_security`,
+`ble_gatt_discovery`, `ble_battery_service`, `ble_esphome_bridge`. Tote Ketten,
+keine Reparatur ohne einen Anwendungsfall. `zb_zcl_helpers_init()` loggt nur --
+die Funktionen des Moduls werden benutzt und brauchen keine Initialisierung.
+
+### GATT war nie an -- der Lifecycle hat es nur behauptet
+
+`sync_service_states()` markierte `SERVICE_BLE_GATT` als RUNNING, sobald der
+**BLE-Manager** initialisiert war. GATT-Client ist aber ein eigenes Modul, und
+`ble_gatt_client_init()` ruft niemand. Jeder Phasenwechsel versuchte daher, einen
+nie gestarteten Dienst zu stoppen:
+
+    I LIFECYCLE: Stopping ble_gatt (not needed in PAIRING)
+    W BLE_GATT: GATT client not initialized
+    E LIFECYCLE: Failed to stop ble_gatt: ESP_ERR_INVALID_STATE
+
+Jetzt wird `ble_gatt_client_is_initialized()` gefragt. **Das aendert die offene
+GATT-Frage:** hier stand, GATT sei ungetestet, weil kein Geraet bereitstand --
+tatsaechlich war der Client nie initialisiert. Ein GATT-Test braucht also zuerst
+einen Aufruf von `ble_gatt_client_init()`, nicht nur ein Testgeraet.
+
+### Sockets gehoeren dem Task, der aus ihnen liest
+
+`esphome_api_disconnect_all_clients()` lief aus `handle_device_interviewed()` --
+also auf dem Event-Dispatcher -- und rief `close()` auf Deskriptoren, in denen
+der jeweilige Client-Task gerade in `recv()` stand. Das zerlegt lwIPs interne
+Queues; sichtbar als Load access fault in `xQueueGenericSend()` auf dem
+tcpip-Thread.
+
+Der Fehler war alt, aber selten: er braucht ein Interview waehrend eine
+HA-Verbindung steht. Die neue Provisionierung loest Re-Interviews absichtlich
+aus und hat ihn damit zum Dauerzustand gemacht -- zwei Abstuerze in 75 s.
+
+Jetzt setzt `disconnect_requested` nur ein Flag, und der Client-Task schliesst
+seinen eigenen Socket. Das `recv()` hat ohnehin ein Timeout, die Reaktion kommt
+also binnen Sekunden. Nachgemessen: 195 s ohne Absturz, danach ein Lauf mit
+0 Abstuerzen und **0 Zeilen auf Fehlerstufe**.
 
 ## Toter Code: aufgeraeumt (gemessen 2026-08-05)
 

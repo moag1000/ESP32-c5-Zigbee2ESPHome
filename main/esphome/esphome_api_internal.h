@@ -78,6 +78,13 @@ typedef struct esphome_noise_ctx esphome_noise_ctx_t;
  */
 typedef struct {
     int socket;                                     /**< Client socket (-1 if unused) */
+    /** Set by another task to ask this client's own handler to hang up.
+     *
+     * The socket must only ever be closed by the task that reads from it.
+     * close() on a descriptor another task is blocked in recv() on corrupts
+     * lwIP's internal queues — it showed up as a load access fault inside
+     * xQueueGenericSend() on the tcpip thread. */
+    volatile bool disconnect_requested;
     esphome_client_state_t state;                   /**< Connection state */
     bool subscribed_states;                         /**< Subscribed to state updates */
     bool subscribed_logs;                           /**< Subscribed to log messages */

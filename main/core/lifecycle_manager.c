@@ -384,6 +384,12 @@ static void sync_service_states(void)
 #if CONFIG_BT_SCANNER_ENABLED
     if (ble_manager_is_initialized()) {
         s_services[SERVICE_BLE_SCANNER].state = SERVICE_STATE_RUNNING;
+    }
+    /* Ask the GATT client, not the BLE manager. They are separate modules and
+     * nothing calls ble_gatt_client_init() — so marking GATT as running because
+     * the manager came up made every phase transition try to stop a service
+     * that had never started, and log an error doing it. */
+    if (ble_gatt_client_is_initialized()) {
         s_services[SERVICE_BLE_GATT].state = SERVICE_STATE_RUNNING;
     }
 #endif
@@ -486,6 +492,17 @@ static esp_err_t start_service_internal(lifecycle_service_t service)
 static esp_err_t stop_service_internal(lifecycle_service_t service)
 {
     esp_err_t ret = ESP_OK;
+
+    /* Stopping something that was never started is not a failure. Phase
+     * transitions stop every service the new phase does not need, so entering
+     * PAIRING logged "Failed to stop ble_gatt: ESP_ERR_INVALID_STATE" every
+     * single time — an error-level line for the entirely normal case of a
+     * service that is compiled in but not running. */
+    if (s_services[service].state == SERVICE_STATE_STOPPED) {
+        ESP_LOGD(TAG, "%s already stopped", s_services[service].name);
+        return ESP_OK;
+    }
+
     s_services[service].state = SERVICE_STATE_STOPPING;
 
     switch (service) {

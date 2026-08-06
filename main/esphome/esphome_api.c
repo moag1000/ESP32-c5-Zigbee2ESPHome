@@ -181,6 +181,7 @@ void esphome_api_close_client(esphome_client_t *client, uint8_t client_id)
 
         /* Clear buffers */
         client->rx_buffer_len = 0;
+        client->disconnect_requested = false;
         memset(client->client_info, 0, sizeof(client->client_info));
 
 #ifdef CONFIG_ESPHOME_NOISE_ENCRYPTION
@@ -796,7 +797,8 @@ esp_err_t esphome_api_disconnect_client(uint8_t client_id)
         return ESP_ERR_TIMEOUT;
     }
 
-    esphome_api_close_client(&s_api.clients[client_id], client_id);
+    /* Ask, do not close: see disconnect_requested in esphome_api_internal.h. */
+    s_api.clients[client_id].disconnect_requested = true;
 
     xSemaphoreGive(s_api.mutex);
     return ESP_OK;
@@ -812,7 +814,9 @@ esp_err_t esphome_api_disconnect_all_clients(void)
     }
 
     for (int i = 0; i < s_api.config.max_clients; i++) {
-        esphome_api_close_client(&s_api.clients[i], i);
+        if (s_api.clients[i].socket >= 0) {
+            s_api.clients[i].disconnect_requested = true;
+        }
     }
 
     xSemaphoreGive(s_api.mutex);

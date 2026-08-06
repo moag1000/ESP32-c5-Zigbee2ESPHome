@@ -515,6 +515,11 @@ void esphome_api_client_task(void *pvParameters)
 #endif /* CONFIG_ESPHOME_NOISE_ENCRYPTION */
 
     while (client->socket >= 0 && state->running) {
+        if (client->disconnect_requested) {
+            ESP_LOGI(TAG, "Client %d: disconnect requested by another task", client_id);
+            goto disconnect;
+        }
+
         /* Receive data */
         ssize_t received = recv(client->socket,
                                &client->rx_buffer[client->rx_buffer_len],

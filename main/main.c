@@ -33,6 +33,8 @@
 /* Zigbee includes - coordinator or router based on config */
 #include "zigbee/zb_coordinator.h"
 #include "zigbee/zb_binding.h"
+#include "zigbee/zb_groups.h"
+#include "zigbee/zb_backup.h"
 #include "zigbee/zb_reporting.h"
 #include "zigbee/zb_topology.h"
 #include "zigbee/zb_router.h"
@@ -438,6 +440,20 @@ static void zigbee_stack_start(void)
      * cluster to the coordinator before configuring reporting, and a device
      * only delivers reports to the entries in its binding table. This module
      * had no caller either, so every bind attempt returned INVALID_STATE. */
+    /* Groups and backup were never initialized either. Backup is the one that
+     * bites: bridge_request_handler reaches zb_backup_process_mqtt_*() from the
+     * MQTT bridge, and every one of those calls returned INVALID_STATE. Groups
+     * is its dependency — zb_backup restores group membership. */
+    ret = zb_groups_init();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG_ZIGBEE, "Groups init failed: %s (continuing)", esp_err_to_name(ret));
+    }
+
+    ret = zb_backup_init();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG_ZIGBEE, "Backup init failed: %s (continuing)", esp_err_to_name(ret));
+    }
+
     ret = zb_binding_init();
     if (ret != ESP_OK) {
         ESP_LOGW(TAG_ZIGBEE, "Binding init failed: %s (continuing)", esp_err_to_name(ret));
