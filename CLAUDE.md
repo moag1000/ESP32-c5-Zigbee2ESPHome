@@ -715,6 +715,14 @@ LittleFS.
       write-flash 0x921000 build/spiffs.bin
   ```
 
+  **Achtung: das loescht die Geraetezustaende.** `state_persistence.c` legt seine
+  Datei in dieselbe LittleFS-Partition. Nach einem DB-Flash meldet der naechste
+  Boot `No persisted state file found`, und jedes Geraet steht in Home Assistant
+  auf "unbekannt", bis es das naechste Mal von sich aus meldet -- bei einem
+  Fingerbot, der nur nach Pairing oder Moduswechsel meldet, also faktisch nie.
+  Der Zustand kommt danach von selbst zurueck (verifiziert 2026-08-06:
+  `Published cached state for 2 devices`), aber erst nach dem naechsten Report.
+
   Der MQTT-Weg (`tools/upload_converters.py`) bleibt fuer Teilupdates. Ueber die
   ESPHome-API geht es **nicht** sinnvoll -- sie kennt keinen Dateitransfer, nur
   base64-Stueckelung durch Service-Aufrufe, was bei 4,9 MB unbrauchbar ist.
