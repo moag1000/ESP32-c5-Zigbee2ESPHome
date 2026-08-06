@@ -11,6 +11,7 @@
 
 #include "device_registry.h"
 #include "memory_manager_ng.h"
+#include "core/state_persistence.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -741,6 +742,15 @@ esp_err_t device_registry_set_state(device_id_t id, cJSON *state)
 
     /* If device not found, caller still owns state - they should free it */
     mutex_release();
+
+    /* Every state write has to mark the cache, not just the ones that happen to
+     * go through device_state_publisher. Converter-driven reports merge here and
+     * publish their own event, so they used to bypass the dirty flag entirely —
+     * the values sat in the registry, were never written to LittleFS, and were
+     * gone after the next reboot. */
+    if (ret == ESP_OK) {
+        state_persistence_mark_dirty();
+    }
     return ret;
 }
 
@@ -847,6 +857,11 @@ esp_err_t device_registry_merge_state(device_id_t id, cJSON *partial)
     }
 
     mutex_release();
+
+    /* See device_registry_set_state() — a merge is a state write too. */
+    if (ret == ESP_OK) {
+        state_persistence_mark_dirty();
+    }
     return ret;
 }
 

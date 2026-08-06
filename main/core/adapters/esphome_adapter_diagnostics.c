@@ -26,6 +26,9 @@
 #include "zigbee/converter/zb_converter_std.h"
 #include "cJSON.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -109,6 +112,33 @@ static esp_err_t diag_remove_press(esphome_entity_key_t key)
     return ESP_OK;
 }
 
+typedef struct {
+    device_id_t ieee;
+    uint16_t short_addr;
+} reconfigure_req_t;
+
+/**
+ * @brief Run a re-interview away from the caller's task
+ *
+ * The press callback runs on the ESPHome API server task — the one holding the
+ * Home Assistant connection. zb_interview_start() used to be called there
+ * directly and blocked it long enough that Home Assistant dropped the
+ * connection on every press.
+ */
+static void reconfigure_task(void *arg)
+{
+    reconfigure_req_t *req = (reconfigure_req_t *)arg;
+
+    esp_err_t ret = zb_interview_start(req->ieee, req->short_addr);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Re-interview of 0x%04X failed to start: %s",
+                 req->short_addr, esp_err_to_name(ret));
+    }
+
+    free(req);
+    vTaskDelete(NULL);
+}
+
 static esp_err_t diag_reconfigure_press(esphome_entity_key_t key)
 {
     device_t *dev = find_device_for_diag_key(key, DIAG_TYPE_RECONFIGURE);
@@ -120,7 +150,20 @@ static esp_err_t diag_reconfigure_press(esphome_entity_key_t key)
     ESP_LOGI(TAG, "Re-interview device 0x%016llX (0x%04X)",
              (unsigned long long)dev->id, dev->proto.zigbee.short_addr);
 
-    return zb_interview_start(dev->id, dev->proto.zigbee.short_addr);
+    reconfigure_req_t *req = malloc(sizeof(*req));
+    if (!req) {
+        return ESP_ERR_NO_MEM;
+    }
+    req->ieee = dev->id;
+    req->short_addr = dev->proto.zigbee.short_addr;
+
+    if (xTaskCreate(reconfigure_task, "zb_reconf", 4096, req, 4, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to start re-interview task");
+        free(req);
+        return ESP_ERR_NO_MEM;
+    }
+
+    return ESP_OK;
 }
 
 static esp_err_t diag_identify_press(esphome_entity_key_t key)

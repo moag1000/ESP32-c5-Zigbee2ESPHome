@@ -17,6 +17,7 @@
 #include "zb_constants.h"
 #include "zb_binding.h"
 #include "zb_tuya.h"
+#include "zb_interview.h"
 #include "gateway_defaults.h"
 #include "core/memory/memory_manager_ng.h"
 #include "esp_log.h"
@@ -615,6 +616,25 @@ esp_err_t zb_reporting_provision_device(uint16_t short_addr)
     ESP_LOGI(TAG, "Provisioned 0x%04X: %zu cluster binding(s), %zu attribute(s)",
              short_addr, bound_count, configured);
 
+    if (configured == 0) {
+        /* Worth naming the clusters rather than just the count: "0 attributes"
+         * on a device that clearly has clusters means the interview recorded a
+         * list that shares nothing with s_defaults, and without the actual ids
+         * there is no way to tell that from a device that was never
+         * interviewed. */
+        char list[128];
+        size_t used = 0;
+        for (uint16_t i = 0; i < device->proto.zigbee.cluster_count && used < sizeof(list) - 8; i++) {
+            int n = snprintf(list + used, sizeof(list) - used, "%s0x%04X",
+                             used ? " " : "", device->proto.zigbee.clusters[i]);
+            if (n <= 0) break;
+            used += (size_t)n;
+        }
+        ESP_LOGW(TAG, "Nothing to configure on 0x%04X — its %u cluster(s): %s",
+                 short_addr, device->proto.zigbee.cluster_count,
+                 used ? list : "(none recorded)");
+    }
+
     return configured > 0 ? ESP_OK : ESP_ERR_NOT_FOUND;
 }
 
@@ -668,48 +688,116 @@ static void handle_device_interviewed(event_type_t type, void *data,
  * Reporting configuration lives on the device itself and survives our reboots,
  * so a device that already has entries in our NVS table is left alone.
  */
+typedef struct {
+    uint64_t ieee;
+    uint16_t short_addr;
+    uint32_t last_seen_at_try;  /**< dev->last_seen when we last sent something */
+    bool interview_requested;
+    bool done;
+} provision_slot_t;
+
+/**
+ * @brief Provision devices restored from NVS, retrying while they are asleep
+ *
+ * A single pass at boot only works for mains-powered devices. A sleepy end
+ * device — the Aqara vibration sensor here — is not listening when the pass
+ * runs, so its interview never completes, its cluster list stays empty and
+ * device_zigbee_has_cluster() answers no to everything, which leaves it with
+ * zero bindings and zero configured attributes forever.
+ *
+ * So this retries, and only when there is a point: a device is poked again once
+ * its last_seen has advanced, which means it woke up and talked to us. Devices
+ * with no cluster list get a re-interview first — provisioning cannot do
+ * anything useful until the interview has told us which clusters exist.
+ */
 static void provision_restored_task(void *arg)
 {
     (void)arg;
 
-    /* Give the restored devices a moment to be reachable again. Sending ZCL the
-     * instant the network forms mostly produces timeouts, and sleepy devices
-     * need to poll us at least once first. */
     vTaskDelay(pdMS_TO_TICKS(ZB_REPORTING_PROVISION_DELAY_MS));
 
-    size_t count = device_registry_count();
-    size_t provisioned = 0;
+    provision_slot_t slots[ZB_REPORTING_PROVISION_MAX_DEVICES];
+    size_t slot_count = 0;
 
-    for (size_t i = 0; i < count; i++) {
+    size_t count = device_registry_count();
+    for (size_t i = 0; i < count && slot_count < ZB_REPORTING_PROVISION_MAX_DEVICES; i++) {
         device_t *dev = device_registry_get_by_index(i);
         if (!dev || dev->protocol != DEV_PROTOCOL_ZIGBEE) {
             continue;
         }
+        slots[slot_count++] = (provision_slot_t){
+            .ieee = dev->id,
+            .short_addr = dev->proto.zigbee.short_addr,
+            .last_seen_at_try = 0,
+            .interview_requested = false,
+            .done = false,
+        };
+    }
 
-        bool has_config = false;
-        xSemaphoreTake(s_reporting_mutex, GW_TIMEOUT_LONG_TICKS);
-        for (size_t e = 0; e < ZB_REPORTING_MAX_ENTRIES; e++) {
-            if (s_entries[e].active && s_entries[e].device_ieee == dev->id) {
-                has_config = true;
-                break;
+    size_t provisioned = 0;
+
+    for (int round = 0; round < ZB_REPORTING_PROVISION_ROUNDS; round++) {
+        size_t remaining = 0;
+
+        for (size_t i = 0; i < slot_count; i++) {
+            provision_slot_t *slot = &slots[i];
+            if (slot->done) {
+                continue;
+            }
+
+            device_t *dev = device_registry_get(slot->ieee);
+            if (!dev) {
+                slot->done = true;
+                continue;
+            }
+
+            /* Only spend a transmission when the device has shown a sign of
+             * life since the last attempt. Round 0 is the exception — that is
+             * the first attempt and there is nothing to compare against. */
+            if (round > 0 && dev->last_seen == slot->last_seen_at_try) {
+                remaining++;
+                continue;
+            }
+            slot->last_seen_at_try = dev->last_seen;
+
+            if (dev->proto.zigbee.cluster_count == 0) {
+                ESP_LOGI(TAG, "Device 0x%04X has no cluster list — re-interviewing "
+                         "before provisioning (round %d)", slot->short_addr, round + 1);
+                slot->interview_requested = true;
+                /* Completion publishes EVT_DEVICE_INTERVIEWED, which provisions
+                 * the device through handle_device_interviewed(). */
+                zb_interview_start(slot->ieee, slot->short_addr);
+                remaining++;
+                continue;
+            }
+
+            ESP_LOGI(TAG, "Provisioning restored device 0x%04X (round %d)",
+                     slot->short_addr, round + 1);
+            if (zb_reporting_provision_device(slot->short_addr) == ESP_OK) {
+                provisioned++;
+                slot->done = true;
+            } else {
+                remaining++;
             }
         }
-        xSemaphoreGive(s_reporting_mutex);
 
-        if (has_config) {
-            continue;
+        if (remaining == 0) {
+            break;
         }
+        vTaskDelay(pdMS_TO_TICKS(ZB_REPORTING_PROVISION_RETRY_MS));
+    }
 
-        ESP_LOGI(TAG, "Restored device 0x%04X has no reporting configuration yet",
-                 dev->proto.zigbee.short_addr);
-        if (zb_reporting_provision_device(dev->proto.zigbee.short_addr) == ESP_OK) {
-            provisioned++;
+    size_t still_open = 0;
+    for (size_t i = 0; i < slot_count; i++) {
+        if (!slots[i].done) {
+            still_open++;
+            ESP_LOGW(TAG, "Device 0x%04X still unprovisioned — it never woke up "
+                     "within the retry window", slots[i].short_addr);
         }
     }
 
-    if (provisioned > 0) {
-        ESP_LOGI(TAG, "Provisioned %zu restored device(s)", provisioned);
-    }
+    ESP_LOGI(TAG, "Provisioning pass finished: %zu done, %zu still open",
+             provisioned, still_open);
 
     vTaskDelete(NULL);
 }
@@ -1865,27 +1953,44 @@ static zb_reporting_pending_t* find_pending_request(uint16_t short_addr,
                                                      uint16_t cluster_id,
                                                      uint16_t attr_id)
 {
+    zb_reporting_pending_t *cluster_match = NULL;
+
     for (int i = 0; i < ZB_REPORTING_MAX_PENDING; i++) {
-        if (s_pending_requests[i].pending &&
-            s_pending_requests[i].short_addr == short_addr &&
-            s_pending_requests[i].cluster_id == cluster_id &&
-            s_pending_requests[i].attr_id == attr_id) {
+        if (!s_pending_requests[i].pending ||
+            s_pending_requests[i].short_addr != short_addr ||
+            s_pending_requests[i].cluster_id != cluster_id) {
+            continue;
+        }
+
+        if (s_pending_requests[i].attr_id == attr_id) {
             return &s_pending_requests[i];
         }
+
+        if (cluster_match == NULL) {
+            cluster_match = &s_pending_requests[i];
+        }
     }
+
+    /* ZCL 2.5.7.2: on complete success the device sends a response with no
+     * attribute records at all, which surfaces here as attr_id 0xFFFF. Matching
+     * strictly on the attribute id therefore failed for every successful
+     * configuration and logged "No pending configure request" — burying any
+     * response that had genuinely failed under identical noise. Fall back to
+     * the cluster, which is unambiguous because one record is sent at a time. */
+    if (attr_id == 0xFFFF) {
+        return cluster_match;
+    }
+
     return NULL;
 }
 
 static void remove_pending_request(uint16_t short_addr, uint16_t cluster_id,
                                     uint16_t attr_id)
 {
-    for (int i = 0; i < ZB_REPORTING_MAX_PENDING; i++) {
-        if (s_pending_requests[i].pending &&
-            s_pending_requests[i].short_addr == short_addr &&
-            s_pending_requests[i].cluster_id == cluster_id &&
-            s_pending_requests[i].attr_id == attr_id) {
-            s_pending_requests[i].pending = false;
-            return;
-        }
+    /* Same 0xFFFF fallback as find_pending_request() — without it a successful
+     * configuration never cleared its slot and the pending table filled up. */
+    zb_reporting_pending_t *entry = find_pending_request(short_addr, cluster_id, attr_id);
+    if (entry != NULL) {
+        entry->pending = false;
     }
 }

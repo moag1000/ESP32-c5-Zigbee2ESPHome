@@ -18,10 +18,13 @@ set(TEST_SRCS
     # device_registry has a shallow dependency chain — memory_manager_ng and
     # unified_device, both of which only need esp_log/heap/FreeRTOS. No Zigbee
     # stack is dragged in, which is what makes this one testable at all.
+    # state_persistence_mark_dirty() is the one exception and is stubbed: the
+    # real module needs LittleFS and a task to set a boolean.
     "../unit/test_device_registry.c"
     "../../main/core/device/device_registry.c"
     "../../main/core/device/unified_device.c"
     "../../main/core/memory/memory_manager_ng.c"
+    "../mocks/mock_state_persistence.c"
 
     # zb_diagnostics needs the event bus, and event_bus.c calls exactly one
     # perf_metrics symbol. The real perf_metrics.c would pull in task_manager,
