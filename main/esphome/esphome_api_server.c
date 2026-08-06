@@ -189,8 +189,27 @@ bool esphome_api_check_client_keepalive(esphome_client_t *client)
     uint32_t now = esphome_api_get_timestamp_ms();
     uint32_t keepalive_ms = state->config.keepalive_ms;
 
-    /* Skip if keepalive disabled or client not authenticated */
-    if (keepalive_ms == 0 || client->state != ESPHOME_CLIENT_AUTHENTICATED) {
+    if (keepalive_ms == 0) {
+        return false;
+    }
+
+    /* A client that never finishes authenticating also has to be timed out.
+     *
+     * Keepalive only covered AUTHENTICATED clients, so a connection that opened
+     * and then went quiet — a crashed client, a dropped Wi-Fi link, a half-open
+     * TCP session — held its slot forever. With ESPHOME_API_MAX_CLIENTS at 2,
+     * two such connections lock Home Assistant out permanently: every further
+     * attempt is answered with "Max clients reached, rejecting connection", and
+     * only a reboot clears it. Observed here after aborted test clients.
+     *
+     * The window is deliberately short. Hello and handshake arrive together in
+     * the same packet from aioesphomeapi, so a client with nothing to say for
+     * this long is not mid-handshake, it is gone. */
+    if (client->state != ESPHOME_CLIENT_AUTHENTICATED) {
+        if ((now - client->last_activity) > ESPHOME_HANDSHAKE_IDLE_TIMEOUT_MS) {
+            ESP_LOGW(TAG, "Client dropped before authenticating - reclaiming slot");
+            return true;
+        }
         return false;
     }
 
@@ -211,6 +230,15 @@ bool esphome_api_check_client_keepalive(esphome_client_t *client)
         if (esphome_api_send_ping_request(client) == ESP_OK) {
             client->last_ping_sent = now;
             client->ping_pending = true;
+        } else {
+            /* A ping we cannot even write is the end of the connection, not
+             * something to retry. This branch used to fall through, leaving
+             * ping_pending false — so the timeout below was never reached and a
+             * client whose socket was already dead (errno 104, connection reset
+             * by peer) kept its slot indefinitely. That is how both slots ended
+             * up occupied and every new connection was rejected. */
+            ESP_LOGW(TAG, "Keepalive ping could not be sent - dropping client");
+            return true;
         }
     }
 

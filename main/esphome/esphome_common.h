@@ -97,6 +97,9 @@ extern "C" {
 /** @brief Connection keepalive interval in seconds */
 #define ESPHOME_KEEPALIVE_INTERVAL      30
 
+/** @brief How long a client may sit unauthenticated before its slot is reclaimed */
+#define ESPHOME_HANDSHAKE_IDLE_TIMEOUT_MS   15000
+
 /** @brief Maximum connection idle time before disconnect (seconds) */
 #define ESPHOME_MAX_IDLE_TIME           120
 
