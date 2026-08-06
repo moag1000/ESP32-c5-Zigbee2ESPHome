@@ -503,6 +503,27 @@ esp_err_t state_persistence_load_and_publish(void)
         /* Remove the internal _friendly_name field before publishing */
         cJSON_DeleteItemFromObject(item, "_friendly_name");
 
+        /* Drop a battery reading nothing can ever refresh.
+         *
+         * Until 2026-08-06 the gateway published the ZDO node power descriptor
+         * level as "battery" — a four-state field (critical/33/66/100) dressed
+         * up as a percentage. That writer is gone, but the value it wrote is in
+         * the state file, and persistence now faithfully restores it forever: a
+         * Fingerbot with a brand new cell kept reading 66%.
+         *
+         * A device with genPowerCfg gets real readings from that cluster, so
+         * its stored value is left alone. Without it the only possible source
+         * is a Tuya datapoint — and if the device does send one, the next
+         * report simply puts the key back. Measured on the Fingerbot Plus: a
+         * real mode change dumps datapoints 101, 103, 104 and 106, and never
+         * 105, the one carrying the battery. */
+        if (!device_zigbee_has_cluster(dev, 0x0001) &&
+            cJSON_GetObjectItem(item, "battery") != NULL) {
+            ESP_LOGI(TAG, "%s: dropping stale battery reading (device has no "
+                     "genPowerCfg; a datapoint report will restore it)", friendly_name);
+            cJSON_DeleteItemFromObject(item, "battery");
+        }
+
         /* Merge cached state back into device registry so ESPHome adapter
          * (and other consumers of device_registry_get_state()) can access
          * it immediately after boot without waiting for a Zigbee report. */

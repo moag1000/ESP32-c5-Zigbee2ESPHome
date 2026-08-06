@@ -45,6 +45,10 @@
  *   - Time sync (cmd 0x06/0x24) fixed: uses Unix timestamps, not year/month/day
  *   - Program mode (DP 101=2) requires working time sync
  *   - Without time sync, program mode blocks normal push operation
+ *   - DP 105 (battery): never sent. A real mode change dumps DP 101, 103, 104
+ *     and 106 (measured 2026-08-06) and nothing else — this device reports no
+ *     battery level at all, by datapoint or by cluster. Its Battery entity
+ *     stays unknown, and that is the honest answer.
  *   - DP 106 (up_movement): verified, ~25% = arm doesn't return fully to top
  *   - DP 107 (touch_control): verified OFF disables touch surface on top
  *   - DP 104 (reverse): no observable effect when toggled (needs more testing)

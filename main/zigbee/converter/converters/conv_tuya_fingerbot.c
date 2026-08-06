@@ -195,7 +195,7 @@ static const zb_expose_t s_fingerbot_exposes[] = {
         .state_class = "measurement",
     },
 
-    /* Click Count — DP 105 (alt) */
+    /* Click Count — DP 111 */
     {
         .type = ZB_EXPOSE_SENSOR,
         .name = "Click Count",
