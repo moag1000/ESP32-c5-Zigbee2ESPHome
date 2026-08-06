@@ -32,7 +32,10 @@
  *   - cmd 0x10 (mcuVersionRequest): Default Response OK, no version
  *   - cmd 0x25 (gatewayConnectionStatus): Default Response OK, no effect
  *   - Device reports spontaneously via cmd 0x05 after pairing only
- *   - Mode change (DP 101) triggers full DP dump — use as "query all DPs"
+ *   - Mode CHANGE (DP 101) triggers full DP dump — a rewrite of the value the
+ *     device already holds does not (measured 2026-08-06: writing push while
+ *     already in push returns cmd 0x05 with DP 101 alone). So there is no way
+ *     to refresh the datapoints without actually changing something.
  *   - Outgoing payload must NOT include status byte (causes frame shift)
  *   - Adding status byte: device accepts frame but ignores DP content
  *   - DP 102 (down_movement): range 51-100, values <51 rejected silently

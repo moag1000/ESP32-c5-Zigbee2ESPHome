@@ -100,6 +100,7 @@ extern const zb_converter_def_t *conv_generic_for_capabilities(uint32_t caps);
 
 /* NG Architecture Foundation */
 #include "core/foundation_init.h"
+#include "core/adapters/esphome_adapter.h"
 #include "core/memory/module_manager.h"
 #include "core/memory/graceful_degradation.h"
 #include "core/memory/memory_manager_ng.h"
@@ -1432,6 +1433,29 @@ skip_mqtt:
                     esp_err_t sp_ret = state_persistence_load_and_publish();
                     if (sp_ret == ESP_OK) {
                         ESP_LOGI(TAG_MAIN, "Cached device states published");
+
+                        /* Publishing is not enough on an ESPHome-primary build.
+                         * The restore is hooked to the MQTT bridge coming up —
+                         * a leftover from when MQTT was the primary integration
+                         * — and that moment has nothing to do with whether the
+                         * ESPHome entities exist yet. Measured on hardware: the
+                         * restore fired at 31.80 s and the entity manager
+                         * initialized at 31.73 s, seventy milliseconds apart,
+                         * so the restored values landed in a void and every
+                         * device read "unknown" in Home Assistant until it
+                         * happened to report again.
+                         *
+                         * Syncing afterwards removes the ordering question
+                         * entirely: sync_all_devices() registers whatever is
+                         * missing and then applies each device's current
+                         * registry state, which the restore has just filled in.
+                         * It is idempotent, so doing it here costs nothing when
+                         * the entities were already up to date. */
+                        esp_err_t sync_ret = esphome_adapter_sync_all_devices();
+                        if (sync_ret != ESP_OK) {
+                            ESP_LOGW(TAG_MAIN, "Entity resync after restore failed: %s",
+                                     esp_err_to_name(sync_ret));
+                        }
                     } else if (sp_ret != ESP_ERR_NOT_FOUND) {
                         ESP_LOGW(TAG_MAIN, "State restore failed: %s", esp_err_to_name(sp_ret));
                     }

@@ -909,14 +909,18 @@ esp_err_t zb_tuya_refresh_datapoints(uint16_t short_addr, uint8_t endpoint)
     /* The Fingerbot Plus does not. Hardware testing (see the notes at the top of
      * zb_tuya.h) found it answers dataQuery with a Default Response and no
      * datapoints, and dumps its values only after pairing or a mode change.
-     * That is why its battery, sustain time and movement limits read as unknown
-     * after a reboot and never fill in on their own.
      *
-     * So rewrite the mode — but only the mode the device itself last reported,
-     * taken from the persisted state. Writing a guessed mode would silently
-     * reconfigure someone's device to get a reading, which is not a trade worth
-     * making. If nothing is known, the query above is all we do and the caller
-     * is told so. */
+     * So rewrite the mode the device itself last reported, taken from the
+     * persisted state. Writing a guessed mode would silently reconfigure
+     * someone's device to obtain a reading, which is not a trade worth making.
+     *
+     * Measured limit, 2026-08-06: rewriting the mode the device already holds
+     * makes it answer with that one datapoint and nothing else — only a real
+     * change produces the full dump. This therefore refreshes the mode
+     * reliably and the rest only when the device feels like it. Getting more
+     * would mean changing the user's mode and changing it back, and a failed
+     * write-back leaves their Fingerbot in the wrong mode. Not worth it for a
+     * battery reading. */
     device_t *dev = device_registry_get_by_short_addr(short_addr);
     if (dev == NULL) {
         return ESP_ERR_NOT_FOUND;
@@ -935,8 +939,9 @@ esp_err_t zb_tuya_refresh_datapoints(uint16_t short_addr, uint8_t endpoint)
 
     if (cJSON_IsString(mode_item) &&
         zb_tuya_fingerbot_mode_from_string(mode_item->valuestring, &mode) == ESP_OK) {
-        ESP_LOGI(TAG, "0x%04X: rewriting last reported mode '%s' to trigger a "
-                 "datapoint dump", short_addr, mode_item->valuestring);
+        ESP_LOGI(TAG, "0x%04X: rewriting last reported mode '%s' — refreshes the "
+                 "mode, and whatever else the device chooses to send",
+                 short_addr, mode_item->valuestring);
         ret = zb_tuya_fingerbot_set_mode(short_addr, endpoint, mode);
     } else {
         ESP_LOGW(TAG, "0x%04X: no mode in the stored state — datapoint query "

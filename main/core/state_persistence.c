@@ -325,11 +325,29 @@ esp_err_t state_persistence_save(void)
         device_t *dev = device_registry_get(ids[i]);
         if (dev == NULL) continue;
 
-        char *state_json = device_state_to_json(dev);
-        if (state_json == NULL) continue;
-
-        cJSON *state_obj = cJSON_Parse(state_json);
-        free(state_json);
+        /* The device's real state, not a summary of it.
+         *
+         * This used to serialise device_state_to_json(), which builds a fresh
+         * object out of device_t fields — link quality, last seen, power source
+         * — and never touches the cJSON state the registry actually holds. So
+         * every measured value was excluded from the file by construction: two
+         * devices came to 311 bytes, and after a reboot Home Assistant read
+         * "unknown" for everything until each device happened to report again.
+         * For a Fingerbot, which only sends its datapoints after a mode change,
+         * that is never.
+         *
+         * The registry state already carries the metadata anyway — publishers
+         * merge linkquality and friends into it — so it is the better base.
+         * device_state_to_json() stays as the fallback for a device that has
+         * not reported anything yet.
+         */
+        cJSON *state_obj = device_registry_state_dup(dev->id);
+        if (state_obj == NULL) {
+            char *state_json = device_state_to_json(dev);
+            if (state_json == NULL) continue;
+            state_obj = cJSON_Parse(state_json);
+            free(state_json);
+        }
         if (state_obj == NULL) continue;
 
         char ieee_key[20];
