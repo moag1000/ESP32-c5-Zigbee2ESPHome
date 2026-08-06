@@ -498,6 +498,46 @@ static esp_err_t register_expose_text_sensor(const device_t *dev, const zb_expos
     return ret;
 }
 
+/* ============================================================================
+ * Numbers the device only accepts a few values for
+ * ============================================================================ */
+
+/**
+ * @brief Is this expose a number in name only?
+ *
+ * The Aqara vibration sensor's sensitivity is declared upstream as
+ * numeric(1..21) with the description "1 = highest, 21 = lowest", but the device
+ * accepts exactly three values: 1, 11 and 21. Rendering that as a slider asks
+ * the user to pick from twenty-one options of which eighteen do nothing, with
+ * no indication which way is "more sensitive".
+ *
+ * These are presented as a select instead. Nothing else changes: the setter
+ * (tz_xiaomi_sensitivity) has always accepted "high"/"medium"/"low" alongside
+ * the raw number, and register_expose_select() already knows the option list
+ * for a select named "sensitivity".
+ */
+static bool expose_is_levelled_numeric(const zb_expose_t *expose)
+{
+    const char *prop = zb_expose_property(expose);
+    if (!prop || !expose->name) {
+        return false;
+    }
+
+    return strcmp(prop, "sensitivity") == 0 &&
+           expose->ext.numeric.min == 1.0f &&
+           expose->ext.numeric.max == 21.0f;
+}
+
+/**
+ * @brief Map a raw level onto its label, picking the nearest supported value
+ */
+static const char *levelled_numeric_label(double value)
+{
+    if (value <= 6.0)  return "high";
+    if (value <= 16.0) return "medium";
+    return "low";
+}
+
 static esp_err_t register_expose_select(const device_t *dev, const zb_expose_t *expose,
                                          uint32_t key, uint32_t device_id)
 {
@@ -537,9 +577,12 @@ static esp_err_t register_expose_select(const device_t *dev, const zb_expose_t *
     esp_err_t ret = esphome_entity_register_select(&config);
     if (ret == ESP_OK) {
         stats->entities_registered++;
-        if (config.option_count > 0) {
-            esphome_entity_update_select(config.key, config.options[0]);
-        }
+        /* Deliberately no initial value. Seeding the entity with options[0]
+         * showed "low" for a sensitivity the device had never reported and
+         * "push" for a Fingerbot mode nobody had read — a default presented as
+         * the device's actual setting. Unknown until the device says otherwise
+         * is the honest state, and it is what makes a wrong value noticeable
+         * instead of plausible. */
         ESP_LOGD(TAG, "Registered expose select: %s (key=0x%08lX)",
                  config.name, (unsigned long)config.key);
     }
@@ -715,7 +758,11 @@ uint32_t esphome_adapter_exposes_register(const device_t *dev,
 
         case ZB_EXPOSE_NUMBER:
             if (expose->name) {
-                register_expose_number(dev, expose, key, device_id, writable);
+                if (writable && expose_is_levelled_numeric(expose)) {
+                    register_expose_select(dev, expose, key, device_id);
+                } else {
+                    register_expose_number(dev, expose, key, device_id, writable);
+                }
             }
             break;
 
@@ -919,7 +966,16 @@ void esphome_adapter_exposes_update_states(const device_t *dev, cJSON *state)
 
         case ZB_EXPOSE_NUMBER:
             if (cJSON_IsNumber(item)) {
-                esphome_entity_update_number(key, (float)item->valuedouble);
+                if (expose_is_levelled_numeric(expose)) {
+                    /* Registered as a select, so the state has to arrive as one
+                     * of its options — the device still reports the raw number. */
+                    esphome_entity_update_select(key, levelled_numeric_label(item->valuedouble));
+                } else {
+                    esphome_entity_update_number(key, (float)item->valuedouble);
+                }
+                stats->state_updates_sent++;
+            } else if (cJSON_IsString(item) && expose_is_levelled_numeric(expose)) {
+                esphome_entity_update_select(key, item->valuestring);
                 stats->state_updates_sent++;
             }
             break;
