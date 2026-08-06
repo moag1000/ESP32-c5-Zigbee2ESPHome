@@ -58,4 +58,21 @@ idf_build_set_property(COMPILE_OPTIONS "$<$<COMPILE_LANGUAGE:C>:-std=gnu23>" APP
 #   esptool --chip esp32c5 -p <port> write-flash 0x921000 build/spiffs.bin
 #
 # The image root must contain converters/, which is CONVERTER_DB_PATH.
-littlefs_create_partition_image(spiffs "${CMAKE_CURRENT_LIST_DIR}/build/lfs_root")
+#
+# Populated here rather than by hand. The root lives under build/, so
+# `idf.py fullclean` takes it with everything else and the next build died with
+# "FileNotFoundError: build/lfs_root" — which is what a fresh clone hits on its
+# very first build. Copying at configure time costs one directory walk and
+# makes the tree buildable without reading the documentation first.
+set(LFS_ROOT "${CMAKE_CURRENT_BINARY_DIR}/lfs_root")
+file(MAKE_DIRECTORY "${LFS_ROOT}/converters")
+file(GLOB CONVERTER_DB_FILES "${CMAKE_CURRENT_LIST_DIR}/data/converters_merged/*.json")
+if(CONVERTER_DB_FILES)
+    file(COPY ${CONVERTER_DB_FILES} DESTINATION "${LFS_ROOT}/converters")
+else()
+    message(WARNING "No converter database in data/converters_merged — "
+                    "the LittleFS image will be empty and devices will fall back "
+                    "to capability-only entities.")
+endif()
+
+littlefs_create_partition_image(spiffs "${LFS_ROOT}")

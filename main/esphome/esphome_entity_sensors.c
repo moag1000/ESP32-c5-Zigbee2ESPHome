@@ -42,7 +42,7 @@ esp_err_t esphome_entity_register_sensor(const esphome_sensor_config_t *config)
 
     /* Check for duplicate key */
     if (find_sensor(config->key)) {
-        ESP_LOGW(ENTITY_TAG, "Sensor with key %lu already exists", config->key);
+        ESP_LOGD(ENTITY_TAG, "Sensor with key %lu already exists", config->key);
         ret = ESP_ERR_INVALID_ARG;
         goto done;
     }
@@ -220,6 +220,12 @@ done:
  */
 size_t esphome_entity_get_sensor_count(void)
 {
+    /* The entity table lives in PSRAM and is allocated during init;
+     * Zigbee reports start ~26 s before that. Reading through a null
+     * base is what crashed the gateway once already. */
+    if (!s_entities) {
+        return 0;
+    }
     return s_entities->sensor_count;
 }
 
@@ -249,7 +255,7 @@ esp_err_t esphome_entity_register_binary_sensor(const esphome_binary_sensor_conf
 
     /* Check for duplicate key */
     if (find_binary_sensor(config->key)) {
-        ESP_LOGW(ENTITY_TAG, "Binary sensor with key %lu already exists", config->key);
+        ESP_LOGD(ENTITY_TAG, "Binary sensor with key %lu already exists", config->key);
         ret = ESP_ERR_INVALID_ARG;
         goto done;
     }
@@ -429,6 +435,12 @@ done:
  */
 size_t esphome_entity_get_binary_sensor_count(void)
 {
+    /* The entity table lives in PSRAM and is allocated during init;
+     * Zigbee reports start ~26 s before that. Reading through a null
+     * base is what crashed the gateway once already. */
+    if (!s_entities) {
+        return 0;
+    }
     return s_entities->binary_sensor_count;
 }
 
@@ -458,7 +470,7 @@ esp_err_t esphome_entity_register_text_sensor(const esphome_text_sensor_config_t
 
     /* Check for duplicate key */
     if (find_text_sensor(config->key)) {
-        ESP_LOGW(ENTITY_TAG, "Text sensor with key %lu already exists", config->key);
+        ESP_LOGD(ENTITY_TAG, "Text sensor with key %lu already exists", config->key);
         ret = ESP_ERR_INVALID_ARG;
         goto done;
     }
@@ -642,6 +654,12 @@ done:
  */
 size_t esphome_entity_get_text_sensor_count(void)
 {
+    /* The entity table lives in PSRAM and is allocated during init;
+     * Zigbee reports start ~26 s before that. Reading through a null
+     * base is what crashed the gateway once already. */
+    if (!s_entities) {
+        return 0;
+    }
     return s_entities->text_sensor_count;
 }
 

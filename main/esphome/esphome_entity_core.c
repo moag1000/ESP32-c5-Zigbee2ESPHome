@@ -182,6 +182,9 @@ esp_err_t esphome_entities_set_state_callback(esphome_state_change_cb_t callback
     if (!s_entities) {
         return ESP_ERR_INVALID_STATE;
     }
+    if (!s_entities) {
+        return ESP_ERR_INVALID_STATE;
+    }
     s_entities->state_callback = callback;
     return ESP_OK;
 }
@@ -470,6 +473,12 @@ done:
  */
 size_t esphome_entities_get_total_count(void)
 {
+    /* The entity table lives in PSRAM and is allocated during init;
+     * Zigbee reports start ~26 s before that. Reading through a null
+     * base is what crashed the gateway once already. */
+    if (!s_entities) {
+        return 0;
+    }
     return s_entities->sensor_count + s_entities->binary_sensor_count + s_entities->switch_count +
            s_entities->text_sensor_count + s_entities->number_count + s_entities->button_count +
            s_entities->select_count + s_entities->light_count + s_entities->cover_count +

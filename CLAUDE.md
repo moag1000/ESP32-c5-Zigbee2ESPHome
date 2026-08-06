@@ -626,12 +626,22 @@ Sub-device info is provided in `DeviceInfoResponse` via `esphome_api_handlers.c`
 | HP SRAM statisch (Linker) | 179 KB von 321 KB = 55,8 % belegt, **142 KB frei** |
 | davon `.bss` / `.text` / `.data` | 57,8 KB / 90 KB / 31 KB |
 | Interner Heap beim Start | 198 KB gesamt, 147 KB frei |
-| **Interner Heap eingeschwungen** | **122 KB frei** (WiFi + MQTT + Zigbee aktiv) |
-| **Tiefststand seit Boot** | **121 KB** |
+| **Interner Heap eingeschwungen** | **59-60 KB frei** (Stand 2026-08-06, BLE an) |
+| **Tiefststand seit Boot** | **58 KB** |
+| davon durch BLE | rund 59 KB (ohne BLE waren es 122 KB) |
+| davon durch Groups/Backup/Binding | rund 6 KB (2026-08-06 dazugekommen) |
 | PSRAM | 6115 KB gesamt, 6109 KB frei -- praktisch ungenutzt |
 | PSRAM `.bss` statisch | 20 KB |
 | Flash-Image | 2,1 MB, App-Partition zu 47 % frei |
 | CPU eingeschwungen | 30-36 % |
+
+**Zur Zahl 122 KB, die hier lange stand:** sie wurde **ohne BLE** gemessen. Mit
+eingeschaltetem BLE waren es schon damals 65 KB (siehe BLE-Abschnitt oben), die
+Tabelle nannte aber weiter den BLE-freien Wert -- ein Vergleich, den niemand
+gewinnen konnte. Die 59-60 KB von heute sind also keine Verschlechterung um
+63 KB, sondern um rund 6 KB gegenueber dem passenden Vergleichswert: Groups,
+Backup und Binding sind neu dazugekommen. Ueber 300 s gemessen bleibt der Wert
+stabil (kein Leck), CPU 31 %.
 
 **Caveat:** waehrend der Messung war **kein Home-Assistant-Client verbunden**
 (`max_clients=2`, 0 aktiv). Der ESPHome-Client mit seiner Entity-Registrierung

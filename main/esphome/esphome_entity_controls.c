@@ -42,7 +42,7 @@ esp_err_t esphome_entity_register_switch(const esphome_switch_config_t *config)
 
     /* Check for duplicate key */
     if (find_switch(config->key)) {
-        ESP_LOGW(ENTITY_TAG, "Switch with key %lu already exists", config->key);
+        ESP_LOGD(ENTITY_TAG, "Switch with key %lu already exists", config->key);
         ret = ESP_ERR_INVALID_ARG;
         goto done;
     }
@@ -185,6 +185,12 @@ done:
  */
 size_t esphome_entity_get_switch_count(void)
 {
+    /* The entity table lives in PSRAM and is allocated during init;
+     * Zigbee reports start ~26 s before that. Reading through a null
+     * base is what crashed the gateway once already. */
+    if (!s_entities) {
+        return 0;
+    }
     return s_entities->switch_count;
 }
 
@@ -250,7 +256,7 @@ esp_err_t esphome_entity_register_number(const esphome_number_config_t *config)
 
     /* Check for duplicate key */
     if (find_number(config->key)) {
-        ESP_LOGW(ENTITY_TAG, "Number with key %lu already exists", config->key);
+        ESP_LOGD(ENTITY_TAG, "Number with key %lu already exists", config->key);
         ret = ESP_ERR_INVALID_ARG;
         goto done;
     }
@@ -429,6 +435,12 @@ done:
  */
 size_t esphome_entity_get_number_count(void)
 {
+    /* The entity table lives in PSRAM and is allocated during init;
+     * Zigbee reports start ~26 s before that. Reading through a null
+     * base is what crashed the gateway once already. */
+    if (!s_entities) {
+        return 0;
+    }
     return s_entities->number_count;
 }
 
@@ -493,7 +505,7 @@ esp_err_t esphome_entity_register_select(const esphome_select_config_t *config)
 
     /* Check for duplicate key */
     if (find_select(config->key)) {
-        ESP_LOGW(ENTITY_TAG, "Select with key %lu already exists", config->key);
+        ESP_LOGD(ENTITY_TAG, "Select with key %lu already exists", config->key);
         ret = ESP_ERR_INVALID_ARG;
         goto done;
     }
@@ -667,6 +679,12 @@ done:
  */
 size_t esphome_entity_get_select_count(void)
 {
+    /* The entity table lives in PSRAM and is allocated during init;
+     * Zigbee reports start ~26 s before that. Reading through a null
+     * base is what crashed the gateway once already. */
+    if (!s_entities) {
+        return 0;
+    }
     return s_entities->select_count;
 }
 
@@ -735,7 +753,7 @@ esp_err_t esphome_entity_register_light(const esphome_light_config_t *config)
 
     /* Check for duplicate key */
     if (find_light(config->key)) {
-        ESP_LOGW(ENTITY_TAG, "Light with key %lu already exists", config->key);
+        ESP_LOGD(ENTITY_TAG, "Light with key %lu already exists", config->key);
         ret = ESP_ERR_INVALID_ARG;
         goto done;
     }
@@ -892,6 +910,12 @@ done:
  */
 size_t esphome_entity_get_light_count(void)
 {
+    /* The entity table lives in PSRAM and is allocated during init;
+     * Zigbee reports start ~26 s before that. Reading through a null
+     * base is what crashed the gateway once already. */
+    if (!s_entities) {
+        return 0;
+    }
     return s_entities->light_count;
 }
 
@@ -994,7 +1018,7 @@ esp_err_t esphome_entity_register_cover(const esphome_cover_config_t *config)
 
     /* Check for duplicate key */
     if (find_cover(config->key)) {
-        ESP_LOGW(ENTITY_TAG, "Cover with key %lu already exists", config->key);
+        ESP_LOGD(ENTITY_TAG, "Cover with key %lu already exists", config->key);
         ret = ESP_ERR_INVALID_ARG;
         goto done;
     }
@@ -1138,6 +1162,12 @@ done:
  */
 size_t esphome_entity_get_cover_count(void)
 {
+    /* The entity table lives in PSRAM and is allocated during init;
+     * Zigbee reports start ~26 s before that. Reading through a null
+     * base is what crashed the gateway once already. */
+    if (!s_entities) {
+        return 0;
+    }
     return s_entities->cover_count;
 }
 
@@ -1235,7 +1265,7 @@ esp_err_t esphome_entity_register_fan(const esphome_fan_config_t *config)
 
     /* Check for duplicate key */
     if (find_fan(config->key)) {
-        ESP_LOGW(ENTITY_TAG, "Fan with key %lu already exists", config->key);
+        ESP_LOGD(ENTITY_TAG, "Fan with key %lu already exists", config->key);
         ret = ESP_ERR_INVALID_ARG;
         goto done;
     }
@@ -1378,6 +1408,12 @@ done:
  */
 size_t esphome_entity_get_fan_count(void)
 {
+    /* The entity table lives in PSRAM and is allocated during init;
+     * Zigbee reports start ~26 s before that. Reading through a null
+     * base is what crashed the gateway once already. */
+    if (!s_entities) {
+        return 0;
+    }
     return s_entities->fan_count;
 }
 
@@ -1463,7 +1499,7 @@ esp_err_t esphome_entity_register_climate(const esphome_climate_config_t *config
 
     /* Check for duplicate key */
     if (find_climate(config->key)) {
-        ESP_LOGW(ENTITY_TAG, "Climate with key %lu already exists", config->key);
+        ESP_LOGD(ENTITY_TAG, "Climate with key %lu already exists", config->key);
         ret = ESP_ERR_INVALID_ARG;
         goto done;
     }
@@ -1611,6 +1647,12 @@ done:
  */
 size_t esphome_entity_get_climate_count(void)
 {
+    /* The entity table lives in PSRAM and is allocated during init;
+     * Zigbee reports start ~26 s before that. Reading through a null
+     * base is what crashed the gateway once already. */
+    if (!s_entities) {
+        return 0;
+    }
     return s_entities->climate_count;
 }
 

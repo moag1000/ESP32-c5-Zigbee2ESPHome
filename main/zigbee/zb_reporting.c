@@ -972,7 +972,9 @@ esp_err_t zb_reporting_handle_configure_response(uint16_t short_addr,
 
     zb_reporting_pending_t *pending = find_pending_request(short_addr, cluster_id, attr_id);
     if (pending == NULL) {
-        ESP_LOGW(TAG, "No pending configure request for this response");
+        /* The device repeats its response per record; the first one consumes
+         * the pending entry and the rest legitimately find nothing. */
+        ESP_LOGD(TAG, "No pending configure request for this response");
         return ESP_ERR_NOT_FOUND;
     }
 

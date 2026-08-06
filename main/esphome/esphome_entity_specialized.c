@@ -42,7 +42,7 @@ esp_err_t esphome_entity_register_button(const esphome_button_config_t *config)
 
     /* Check for duplicate key */
     if (find_button(config->key)) {
-        ESP_LOGW(ENTITY_TAG, "Button with key %lu already exists", config->key);
+        ESP_LOGD(ENTITY_TAG, "Button with key %lu already exists", config->key);
         ret = ESP_ERR_INVALID_ARG;
         goto done;
     }
@@ -115,6 +115,12 @@ done:
  */
 size_t esphome_entity_get_button_count(void)
 {
+    /* The entity table lives in PSRAM and is allocated during init;
+     * Zigbee reports start ~26 s before that. Reading through a null
+     * base is what crashed the gateway once already. */
+    if (!s_entities) {
+        return 0;
+    }
     return s_entities->button_count;
 }
 
@@ -193,7 +199,7 @@ esp_err_t esphome_entity_register_lock(const esphome_lock_config_t *config)
     }
 
     if (find_lock(config->key)) {
-        ESP_LOGW(ENTITY_TAG, "Lock with key %lu already exists", config->key);
+        ESP_LOGD(ENTITY_TAG, "Lock with key %lu already exists", config->key);
         ret = ESP_ERR_INVALID_ARG;
         goto cleanup;
     }
@@ -321,6 +327,12 @@ cleanup:
  */
 size_t esphome_entity_get_lock_count(void)
 {
+    /* The entity table lives in PSRAM and is allocated during init;
+     * Zigbee reports start ~26 s before that. Reading through a null
+     * base is what crashed the gateway once already. */
+    if (!s_entities) {
+        return 0;
+    }
     return s_entities->lock_count;
 }
 
@@ -398,7 +410,7 @@ esp_err_t esphome_entity_register_media_player(const esphome_media_player_config
     }
 
     if (find_media_player(config->key)) {
-        ESP_LOGW(ENTITY_TAG, "Media player with key %lu already exists", config->key);
+        ESP_LOGD(ENTITY_TAG, "Media player with key %lu already exists", config->key);
         ret = ESP_ERR_INVALID_ARG;
         goto cleanup;
     }
@@ -536,6 +548,12 @@ cleanup:
  */
 size_t esphome_entity_get_media_player_count(void)
 {
+    /* The entity table lives in PSRAM and is allocated during init;
+     * Zigbee reports start ~26 s before that. Reading through a null
+     * base is what crashed the gateway once already. */
+    if (!s_entities) {
+        return 0;
+    }
     return s_entities->media_player_count;
 }
 
@@ -630,7 +648,7 @@ esp_err_t esphome_entity_register_alarm(const esphome_alarm_config_t *config)
     }
 
     if (find_alarm(config->key)) {
-        ESP_LOGW(ENTITY_TAG, "Alarm panel with key %lu already exists", config->key);
+        ESP_LOGD(ENTITY_TAG, "Alarm panel with key %lu already exists", config->key);
         ret = ESP_ERR_INVALID_ARG;
         goto cleanup;
     }
@@ -758,6 +776,12 @@ cleanup:
  */
 size_t esphome_entity_get_alarm_count(void)
 {
+    /* The entity table lives in PSRAM and is allocated during init;
+     * Zigbee reports start ~26 s before that. Reading through a null
+     * base is what crashed the gateway once already. */
+    if (!s_entities) {
+        return 0;
+    }
     return s_entities->alarm_count;
 }
 
@@ -850,7 +874,7 @@ esp_err_t esphome_entity_register_text(const esphome_text_config_t *config)
     }
 
     if (find_text(config->key)) {
-        ESP_LOGW(ENTITY_TAG, "Text entity with key %lu already exists", config->key);
+        ESP_LOGD(ENTITY_TAG, "Text entity with key %lu already exists", config->key);
         ret = ESP_ERR_INVALID_ARG;
         goto cleanup;
     }
@@ -1018,6 +1042,12 @@ cleanup:
  */
 size_t esphome_entity_get_text_count(void)
 {
+    /* The entity table lives in PSRAM and is allocated during init;
+     * Zigbee reports start ~26 s before that. Reading through a null
+     * base is what crashed the gateway once already. */
+    if (!s_entities) {
+        return 0;
+    }
     return s_entities->text_count;
 }
 

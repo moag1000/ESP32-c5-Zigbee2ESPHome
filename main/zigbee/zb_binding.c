@@ -250,7 +250,9 @@ esp_err_t zb_binding_create(uint64_t source_ieee, uint8_t source_ep,
     /* Check if binding already exists */
     if (find_binding_entry(source_ieee, source_ep, cluster_id, dest_ieee, dest_ep) != NULL) {
         xSemaphoreGive(s_binding_mutex);
-        ESP_LOGW(TAG, "Binding already exists");
+        /* Provisioning runs on every boot and is deliberately idempotent, so
+         * an existing binding is the normal case, not a problem. */
+        ESP_LOGD(TAG, "Binding already exists");
         return ESP_ERR_INVALID_ARG;
     }
 
