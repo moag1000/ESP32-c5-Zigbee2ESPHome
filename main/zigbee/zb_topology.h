@@ -62,6 +62,9 @@ extern "C" {
  */
 #define ZB_TOPOLOGY_SCAN_TIMEOUT_MS     30000
 
+/** @brief How often the coordinator's neighbour table is re-read for link quality */
+#define ZB_TOPOLOGY_LQI_REFRESH_MS      (15 * 60 * 1000)
+
 /**
  * @brief LQI request timeout in milliseconds
  */

@@ -15,6 +15,8 @@
 #include "core/events/event_bus.h"
 #include "core/events/event_data.h"
 #include "zb_constants.h"
+#include "zb_binding.h"
+#include "zb_tuya.h"
 #include "gateway_defaults.h"
 #include "core/memory/memory_manager_ng.h"
 #include "esp_log.h"
@@ -36,6 +38,9 @@ static const char *TAG = "ZB_REPORTING";
 static zb_reporting_entry_t *s_entries = NULL;
 static size_t s_entry_count = 0;
 static bool s_initialized = false;
+
+/** Restored devices are provisioned once per boot */
+static bool s_restored_provisioned = false;
 static SemaphoreHandle_t s_reporting_mutex = NULL;
 static zb_reporting_event_cb_t s_event_callback = NULL;
 
@@ -269,6 +274,11 @@ static zb_reporting_pending_t* find_pending_request(uint16_t short_addr,
 static void remove_pending_request(uint16_t short_addr, uint16_t cluster_id,
                                     uint16_t attr_id);
 
+static void handle_device_interviewed(event_type_t type, void *data,
+                                      size_t data_size, void *ctx);
+static void handle_network_ready(event_type_t type, void *data,
+                                  size_t data_size, void *ctx);
+
 esp_err_t zb_reporting_init(void)
 {
     if (s_initialized) {
@@ -317,6 +327,22 @@ esp_err_t zb_reporting_init(void)
         ESP_LOGW(TAG, "Failed to load configurations from NVS: %s", esp_err_to_name(ret));
     }
 
+    /* Provision every device the moment its cluster list is known. Nothing did
+     * this before: zb_reporting_set_defaults() was only reachable from the MQTT
+     * request handler, so on an ESPHome-only build no device was ever bound or
+     * configured and battery and on/off values never arrived. */
+    esp_err_t sub_ret = event_subscribe(EVT_DEVICE_INTERVIEWED, handle_device_interviewed, NULL);
+    if (sub_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to subscribe to EVT_DEVICE_INTERVIEWED: %s",
+                 esp_err_to_name(sub_ret));
+    }
+
+    sub_ret = event_subscribe(EVT_NETWORK_READY, handle_network_ready, NULL);
+    if (sub_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to subscribe to EVT_NETWORK_READY: %s",
+                 esp_err_to_name(sub_ret));
+    }
+
     ESP_LOGI(TAG, "Reporting configuration initialized (max: %d entries)",
              ZB_REPORTING_MAX_ENTRIES);
     return ESP_OK;
@@ -329,6 +355,9 @@ esp_err_t zb_reporting_deinit(void)
     }
 
     ESP_LOGI(TAG, "Deinitializing ZCL reporting configuration...");
+
+    event_unsubscribe(EVT_DEVICE_INTERVIEWED, handle_device_interviewed);
+    event_unsubscribe(EVT_NETWORK_READY, handle_network_ready);
 
     /* Save configurations before shutdown */
     zb_reporting_save_to_nvs();
@@ -504,6 +533,207 @@ esp_err_t zb_reporting_set_defaults(uint16_t short_addr)
              configured, short_addr);
 
     return configured > 0 ? ESP_OK : ESP_ERR_NOT_FOUND;
+}
+
+esp_err_t zb_reporting_provision_device(uint16_t short_addr)
+{
+    if (!s_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    device_t *device = device_registry_get_by_short_addr(short_addr);
+    if (device == NULL) {
+        ESP_LOGE(TAG, "Provision: device 0x%04X not found", short_addr);
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    const uint64_t device_ieee = device->id;
+    const uint8_t endpoint = device->proto.zigbee.endpoint;
+
+    esp_zb_ieee_addr_t coord_ieee_arr;
+    esp_zb_get_long_address(coord_ieee_arr);
+    uint64_t coord_ieee = 0;
+    memcpy(&coord_ieee, coord_ieee_arr, sizeof(coord_ieee));
+
+    ESP_LOGI(TAG, "Provisioning 0x%04X: bind + configure reporting + read", short_addr);
+
+    /* Clusters already bound in this pass. s_defaults lists several attributes
+     * per cluster (battery voltage and percentage, for instance) and a device
+     * only needs one binding per cluster. */
+    uint16_t bound[ZB_REPORTING_PROVISION_MAX_CLUSTERS];
+    size_t bound_count = 0;
+    size_t configured = 0;
+
+    for (const zb_reporting_default_t *def = s_defaults; def->cluster_name != NULL; def++) {
+        if (!device_zigbee_has_cluster(device, def->cluster_id)) {
+            continue;
+        }
+
+        bool already_bound = false;
+        for (size_t i = 0; i < bound_count; i++) {
+            if (bound[i] == def->cluster_id) {
+                already_bound = true;
+                break;
+            }
+        }
+
+        if (!already_bound && bound_count < ZB_REPORTING_PROVISION_MAX_CLUSTERS) {
+            /* Reports are delivered to the entries in the device's binding
+             * table, so without this the device would accept Configure
+             * Reporting and then send the reports nowhere. */
+            esp_err_t bind_ret = zb_binding_create(device_ieee, endpoint, def->cluster_id,
+                                                   coord_ieee, ZB_COORDINATOR_ENDPOINT);
+            if (bind_ret != ESP_OK) {
+                ESP_LOGW(TAG, "Bind %s failed: %s", def->cluster_name,
+                         esp_err_to_name(bind_ret));
+            }
+            bound[bound_count++] = def->cluster_id;
+            vTaskDelay(pdMS_TO_TICKS(GW_TIMEOUT_SHORT_MS));
+        }
+
+        zb_reporting_config_t config = {
+            .cluster_id = def->cluster_id,
+            .attr_id = def->attr_id,
+            .attr_type = def->attr_type,
+            .min_interval = def->min_interval,
+            .max_interval = def->max_interval,
+            .reportable_change = def->reportable_change
+        };
+
+        if (zb_reporting_configure(short_addr, endpoint, &config) == ESP_OK) {
+            configured++;
+        }
+        vTaskDelay(pdMS_TO_TICKS(GW_TIMEOUT_SHORT_MS));
+
+        /* Reporting only tells us about future changes. Battery reports at most
+         * every 12 hours, so without an explicit read the entity would sit at
+         * "unknown" for half a day after every join. */
+        zb_reporting_read(short_addr, endpoint, def->cluster_id, def->attr_id);
+        vTaskDelay(pdMS_TO_TICKS(GW_TIMEOUT_SHORT_MS));
+    }
+
+    ESP_LOGI(TAG, "Provisioned 0x%04X: %zu cluster binding(s), %zu attribute(s)",
+             short_addr, bound_count, configured);
+
+    return configured > 0 ? ESP_OK : ESP_ERR_NOT_FOUND;
+}
+
+/**
+ * @brief Provision a device once its interview has produced a cluster list
+ *
+ * Runs on the event dispatcher task rather than the Zigbee task: the ZCL sends
+ * below take the stack lock themselves and the loop sleeps between commands, so
+ * it must not run where it would block the stack.
+ */
+static void handle_device_interviewed(event_type_t type, void *data,
+                                       size_t data_size, void *ctx)
+{
+    (void)type;
+    (void)ctx;
+
+    if (!data || data_size < sizeof(evt_device_interviewed_t)) {
+        return;
+    }
+
+    const evt_device_interviewed_t *evt = (const evt_device_interviewed_t *)data;
+    if (!evt->success) {
+        return;
+    }
+
+    zb_reporting_provision_device(evt->short_addr);
+
+    /* Tuya devices keep their data in datapoints, not ZCL attributes, so none
+     * of the above reaches them. Ask for a datapoint dump instead.
+     *
+     * Note this is not enough for every device: the _TZ3210 Fingerbot Plus
+     * answers cmd 0x03 with a Default Response and no datapoints, and only
+     * dumps its values after pairing or a mode change (see zb_tuya.h). For
+     * those, the values come back when the user changes Mode in Home Assistant. */
+    device_t *dev = device_registry_get_by_short_addr(evt->short_addr);
+    if (dev && device_zigbee_has_cluster(dev, ZB_TUYA_CLUSTER_ID)) {
+        ESP_LOGI(TAG, "Querying Tuya datapoints from 0x%04X", evt->short_addr);
+        zb_tuya_query_dp(evt->short_addr, dev->proto.zigbee.endpoint);
+    }
+}
+
+/**
+ * @brief Provision devices that were restored from NVS rather than interviewed
+ *
+ * A device that was already paired comes back through device_persistence at
+ * boot and never runs an interview, so EVT_DEVICE_INTERVIEWED never fires for
+ * it. Devices paired before provisioning existed would therefore stay
+ * unconfigured forever — which is exactly the state the two devices on the
+ * author's desk were in.
+ *
+ * Reporting configuration lives on the device itself and survives our reboots,
+ * so a device that already has entries in our NVS table is left alone.
+ */
+static void provision_restored_task(void *arg)
+{
+    (void)arg;
+
+    /* Give the restored devices a moment to be reachable again. Sending ZCL the
+     * instant the network forms mostly produces timeouts, and sleepy devices
+     * need to poll us at least once first. */
+    vTaskDelay(pdMS_TO_TICKS(ZB_REPORTING_PROVISION_DELAY_MS));
+
+    size_t count = device_registry_count();
+    size_t provisioned = 0;
+
+    for (size_t i = 0; i < count; i++) {
+        device_t *dev = device_registry_get_by_index(i);
+        if (!dev || dev->protocol != DEV_PROTOCOL_ZIGBEE) {
+            continue;
+        }
+
+        bool has_config = false;
+        xSemaphoreTake(s_reporting_mutex, GW_TIMEOUT_LONG_TICKS);
+        for (size_t e = 0; e < ZB_REPORTING_MAX_ENTRIES; e++) {
+            if (s_entries[e].active && s_entries[e].device_ieee == dev->id) {
+                has_config = true;
+                break;
+            }
+        }
+        xSemaphoreGive(s_reporting_mutex);
+
+        if (has_config) {
+            continue;
+        }
+
+        ESP_LOGI(TAG, "Restored device 0x%04X has no reporting configuration yet",
+                 dev->proto.zigbee.short_addr);
+        if (zb_reporting_provision_device(dev->proto.zigbee.short_addr) == ESP_OK) {
+            provisioned++;
+        }
+    }
+
+    if (provisioned > 0) {
+        ESP_LOGI(TAG, "Provisioned %zu restored device(s)", provisioned);
+    }
+
+    vTaskDelete(NULL);
+}
+
+/**
+ * @brief Kick off provisioning of restored devices once, when the network is up
+ */
+static void handle_network_ready(event_type_t type, void *data,
+                                  size_t data_size, void *ctx)
+{
+    (void)type;
+    (void)data;
+    (void)data_size;
+    (void)ctx;
+
+    if (s_restored_provisioned) {
+        return;
+    }
+    s_restored_provisioned = true;
+
+    if (xTaskCreate(provision_restored_task, "zb_prov", 4096, NULL, 4, NULL) != pdPASS) {
+        ESP_LOGW(TAG, "Failed to start provisioning task");
+        s_restored_provisioned = false;
+    }
 }
 
 esp_err_t zb_reporting_process_mqtt_request(const char *topic, const char *payload)
@@ -1323,10 +1553,25 @@ static esp_err_t send_configure_reporting(uint16_t short_addr, uint8_t endpoint,
         .max_interval = config->max_interval,
     };
 
-    /* Set reportable change value */
-    memcpy(&record.reportable_change, &config->reportable_change,
-           change_size > sizeof(config->reportable_change) ?
-           sizeof(config->reportable_change) : change_size);
+    /* Set reportable change value.
+     *
+     * reportable_change is a POINTER to the value, not the value itself. This
+     * used to memcpy the number into the pointer field, so the SDK dereferenced
+     * whatever the change value happened to be — for the default of 0 that is a
+     * null dereference inside zb_zcl_put_value_to_packet(), crashing the
+     * gateway. It only affects analog attribute types; discrete ones (bool,
+     * enum, bitmap) carry no reportable change and never read the pointer,
+     * which is why on/off worked and battery percentage did not.
+     *
+     * The buffer lives until this function returns, and the command is built
+     * and sent below, so pointing at the stack is safe here. */
+    uint8_t change_buf[8] = {0};
+    if (change_size > 0) {
+        memcpy(change_buf, &config->reportable_change,
+               change_size > sizeof(config->reportable_change) ?
+               sizeof(config->reportable_change) : change_size);
+    }
+    record.reportable_change = change_buf;
 
     /* Create record list */
     esp_zb_zcl_config_report_record_t *records = &record;

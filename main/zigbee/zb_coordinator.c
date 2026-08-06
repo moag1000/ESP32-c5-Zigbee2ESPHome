@@ -116,7 +116,8 @@ static uint32_t s_route_error_count = 0;     /**< NLME route errors/discovery fa
 static uint32_t s_tc_rejoin_count = 0;       /**< Trust Center rejoin completions */
 
 /* Zigbee stack configuration */
-#define ZB_COORDINATOR_ENDPOINT     1
+/* ZB_COORDINATOR_ENDPOINT lives in zb_constants.h — zb_reporting.c needs it
+ * as the binding destination endpoint. */
 #define ZB_COORDINATOR_STACK_SIZE   (6 * 1024)  /* Needs 6KB: interview+Tuya discovery uses deep cJSON stack */
 /* CRITICAL: Zigbee task needs highest priority for timing-critical operations
  * like TCLK key exchange during device association. Priority 5 was too low

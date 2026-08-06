@@ -56,6 +56,18 @@ typedef struct __attribute__((packed)) {
             uint16_t short_addr;    /**< Zigbee network short address */
             uint8_t endpoint;       /**< Zigbee endpoint number */
             device_power_info_t power_info; /**< Power source info for availability timeouts */
+            /* Appended after the first release of this struct. The load path
+             * memsets before reading, so records written without these fields
+             * come back with cluster_count 0 and are simply treated as unknown.
+             *
+             * The cluster list has to survive a reboot: a restored device is
+             * never re-interviewed, so without this every device came back with
+             * an empty cluster list and anything that asks "does this device
+             * have genPowerCfg?" answered no — which is why attribute reporting
+             * could not be configured for any device that had been paired
+             * before the reboot. */
+            uint16_t cluster_count; /**< Number of entries in clusters[] */
+            uint16_t clusters[DEVICE_MAX_CLUSTERS]; /**< Cluster IDs from the interview */
         } zigbee;
         struct {
             uint8_t addr_type;      /**< BLE address type */
@@ -850,6 +862,11 @@ static void device_to_persisted(const device_t *dev, persisted_device_t *persist
             persisted->proto.zigbee.short_addr = dev->proto.zigbee.short_addr;
             persisted->proto.zigbee.endpoint = dev->proto.zigbee.endpoint;
             persisted->proto.zigbee.power_info = dev->proto.zigbee.power_info;
+            persisted->proto.zigbee.cluster_count =
+                (dev->proto.zigbee.cluster_count > DEVICE_MAX_CLUSTERS)
+                    ? DEVICE_MAX_CLUSTERS : dev->proto.zigbee.cluster_count;
+            memcpy(persisted->proto.zigbee.clusters, dev->proto.zigbee.clusters,
+                   persisted->proto.zigbee.cluster_count * sizeof(uint16_t));
             break;
         case DEV_PROTOCOL_BLE:
             persisted->proto.ble.addr_type = dev->proto.ble.addr_type;
@@ -887,6 +904,12 @@ static void persisted_to_device(const persisted_device_t *persisted, device_t *d
             dev->proto.zigbee.endpoint = persisted->proto.zigbee.endpoint;
             dev->proto.zigbee.power_info = persisted->proto.zigbee.power_info;
             dev->proto.zigbee.lqi = 0;  /* Runtime value */
+
+            dev->proto.zigbee.cluster_count =
+                (persisted->proto.zigbee.cluster_count > DEVICE_MAX_CLUSTERS)
+                    ? DEVICE_MAX_CLUSTERS : persisted->proto.zigbee.cluster_count;
+            memcpy(dev->proto.zigbee.clusters, persisted->proto.zigbee.clusters,
+                   dev->proto.zigbee.cluster_count * sizeof(uint16_t));
 
             /* Generate default friendly_name for Zigbee devices persisted
              * without one. Without this, state_topic becomes "zigbee2mqtt/"

@@ -1134,8 +1134,15 @@ static esp_err_t send_zcl_bind_request(uint64_t source_ieee, uint8_t source_ep,
     memcpy(bind_req.src_address, src_ieee_arr, sizeof(esp_zb_ieee_addr_t));
     memcpy(bind_req.dst_address_u.addr_long, dst_ieee_arr, sizeof(esp_zb_ieee_addr_t));
 
-    /* Send bind request with response logger callback */
+    /* Send bind request with response logger callback.
+     *
+     * The stack is not thread-safe: every caller outside the Zigbee task must
+     * hold the lock. Bindings used to be reachable only from the MQTT request
+     * handler, but zb_reporting_provision_device() now binds from the event
+     * dispatcher task after an interview, so the lock is mandatory. */
+    esp_zb_lock_acquire(GW_TIMEOUT_VERY_LONG_TICKS);
     esp_zb_zdo_device_bind_req(&bind_req, zdo_bind_callback, NULL);
+    esp_zb_lock_release();
 
     return ESP_OK;
 }
@@ -1171,8 +1178,11 @@ static esp_err_t send_zcl_unbind_request(uint64_t source_ieee, uint8_t source_ep
     memcpy(unbind_req.src_address, src_ieee_arr, sizeof(esp_zb_ieee_addr_t));
     memcpy(unbind_req.dst_address_u.addr_long, dst_ieee_arr, sizeof(esp_zb_ieee_addr_t));
 
-    /* Send unbind request with response logger callback */
+    /* Send unbind request with response logger callback (see bind above for
+     * why the lock is taken here). */
+    esp_zb_lock_acquire(GW_TIMEOUT_VERY_LONG_TICKS);
     esp_zb_zdo_device_unbind_req(&unbind_req, zdo_bind_callback, NULL);
+    esp_zb_lock_release();
 
     return ESP_OK;
 }

@@ -251,6 +251,27 @@ esp_err_t zb_reporting_read(uint16_t short_addr, uint8_t endpoint,
 esp_err_t zb_reporting_set_defaults(uint16_t short_addr);
 
 /**
+ * @brief Bind, configure reporting and read current values for a device
+ *
+ * Runs automatically when a device finishes its interview, and again when the
+ * Reconfigure button is pressed in Home Assistant.
+ *
+ * For every default cluster the device actually has this binds the cluster to
+ * the coordinator, configures reporting, and reads the attribute once so the
+ * entity has a value immediately instead of waiting for the first report — for
+ * battery that would otherwise be up to twelve hours.
+ *
+ * Tuya devices that carry their data in datapoints rather than ZCL attributes
+ * (the Fingerbot's battery is datapoint 105) are unaffected by this.
+ *
+ * @param[in] short_addr Device short address
+ * @return ESP_OK if at least one attribute was configured
+ * @return ESP_ERR_NOT_FOUND if the device is unknown or has no matching cluster
+ * @return ESP_ERR_INVALID_STATE if the module is not initialized
+ */
+esp_err_t zb_reporting_provision_device(uint16_t short_addr);
+
+/**
  * @brief Process MQTT reporting request
  *
  * Main entry point for handling reporting-related MQTT requests.

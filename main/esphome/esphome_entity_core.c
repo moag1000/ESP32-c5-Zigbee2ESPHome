@@ -232,7 +232,7 @@ esp_err_t esphome_entity_get_type(esphome_entity_key_t key, esphome_entity_type_
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -302,7 +302,7 @@ esp_err_t esphome_entity_get_type(esphome_entity_key_t key, esphome_entity_type_
  */
 void esphome_entities_enumerate(esphome_entity_enum_cb_t callback, void *user_data)
 {
-    if (!callback || !s_entities->initialized) {
+    if (!callback || !s_entities || !s_entities->initialized) {
         return;
     }
 

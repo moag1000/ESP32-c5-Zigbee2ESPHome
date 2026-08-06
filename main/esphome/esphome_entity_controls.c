@@ -29,7 +29,7 @@ esp_err_t esphome_entity_register_switch(const esphome_switch_config_t *config)
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         ESP_LOGE(ENTITY_TAG, "Entity manager not initialized");
         return ESP_ERR_INVALID_STATE;
     }
@@ -85,7 +85,7 @@ done:
  */
 esp_err_t esphome_entity_update_switch(esphome_entity_key_t key, bool state)
 {
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -124,7 +124,7 @@ esp_err_t esphome_entity_get_switch(esphome_entity_key_t key, esphome_switch_sta
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -157,7 +157,7 @@ esp_err_t esphome_entity_get_switch_config(esphome_entity_key_t key,
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -193,7 +193,7 @@ size_t esphome_entity_get_switch_count(void)
  */
 esp_err_t esphome_entity_execute_switch_command(esphome_entity_key_t key, bool state)
 {
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -237,7 +237,7 @@ esp_err_t esphome_entity_register_number(const esphome_number_config_t *config)
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         ESP_LOGE(ENTITY_TAG, "Entity manager not initialized");
         return ESP_ERR_INVALID_STATE;
     }
@@ -295,7 +295,7 @@ done:
  */
 esp_err_t esphome_entity_update_number(esphome_entity_key_t key, float value)
 {
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -331,7 +331,7 @@ done:
  */
 esp_err_t esphome_entity_set_number_missing(esphome_entity_key_t key)
 {
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -368,7 +368,7 @@ esp_err_t esphome_entity_get_number(esphome_entity_key_t key, esphome_number_sta
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -401,7 +401,7 @@ esp_err_t esphome_entity_get_number_config(esphome_entity_key_t key,
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -437,7 +437,7 @@ size_t esphome_entity_get_number_count(void)
  */
 esp_err_t esphome_entity_execute_number_command(esphome_entity_key_t key, float value)
 {
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -480,7 +480,7 @@ esp_err_t esphome_entity_register_select(const esphome_select_config_t *config)
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         ESP_LOGE(ENTITY_TAG, "Entity manager not initialized");
         return ESP_ERR_INVALID_STATE;
     }
@@ -532,7 +532,7 @@ esp_err_t esphome_entity_update_select(esphome_entity_key_t key, const char *sta
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -569,7 +569,7 @@ done:
  */
 esp_err_t esphome_entity_set_select_missing(esphome_entity_key_t key)
 {
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -606,7 +606,7 @@ esp_err_t esphome_entity_get_select(esphome_entity_key_t key, esphome_select_sta
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -639,7 +639,7 @@ esp_err_t esphome_entity_get_select_config(esphome_entity_key_t key,
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -679,7 +679,7 @@ esp_err_t esphome_entity_execute_select_command(esphome_entity_key_t key, const 
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -722,7 +722,7 @@ esp_err_t esphome_entity_register_light(const esphome_light_config_t *config)
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         ESP_LOGE(ENTITY_TAG, "Entity manager not initialized");
         return ESP_ERR_INVALID_STATE;
     }
@@ -781,7 +781,7 @@ esp_err_t esphome_entity_update_light(esphome_entity_key_t key, const esphome_li
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -831,7 +831,7 @@ esp_err_t esphome_entity_get_light(esphome_entity_key_t key, esphome_light_state
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -864,7 +864,7 @@ esp_err_t esphome_entity_get_light_config(esphome_entity_key_t key,
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -905,7 +905,7 @@ esp_err_t esphome_entity_execute_light_command(esphome_entity_key_t key,
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -981,7 +981,7 @@ esp_err_t esphome_entity_register_cover(const esphome_cover_config_t *config)
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         ESP_LOGE(ENTITY_TAG, "Entity manager not initialized");
         return ESP_ERR_INVALID_STATE;
     }
@@ -1035,7 +1035,7 @@ esp_err_t esphome_entity_update_cover(esphome_entity_key_t key,
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -1077,7 +1077,7 @@ esp_err_t esphome_entity_get_cover(esphome_entity_key_t key, esphome_cover_state
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -1110,7 +1110,7 @@ esp_err_t esphome_entity_get_cover_config(esphome_entity_key_t key,
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -1151,7 +1151,7 @@ esp_err_t esphome_entity_execute_cover_command(esphome_entity_key_t key,
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -1222,7 +1222,7 @@ esp_err_t esphome_entity_register_fan(const esphome_fan_config_t *config)
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         ESP_LOGE(ENTITY_TAG, "Entity manager not initialized");
         return ESP_ERR_INVALID_STATE;
     }
@@ -1275,7 +1275,7 @@ esp_err_t esphome_entity_update_fan(esphome_entity_key_t key, const esphome_fan_
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -1318,7 +1318,7 @@ esp_err_t esphome_entity_get_fan(esphome_entity_key_t key, esphome_fan_state_t *
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -1350,7 +1350,7 @@ esp_err_t esphome_entity_get_fan_config(esphome_entity_key_t key, esphome_fan_co
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -1391,7 +1391,7 @@ esp_err_t esphome_entity_execute_fan_command(esphome_entity_key_t key,
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -1450,7 +1450,7 @@ esp_err_t esphome_entity_register_climate(const esphome_climate_config_t *config
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         ESP_LOGE(ENTITY_TAG, "Entity manager not initialized");
         return ESP_ERR_INVALID_STATE;
     }
@@ -1509,7 +1509,7 @@ esp_err_t esphome_entity_update_climate(esphome_entity_key_t key,
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -1550,7 +1550,7 @@ esp_err_t esphome_entity_get_climate(esphome_entity_key_t key, esphome_climate_s
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -1583,7 +1583,7 @@ esp_err_t esphome_entity_get_climate_config(esphome_entity_key_t key,
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -1624,7 +1624,7 @@ esp_err_t esphome_entity_execute_climate_command(esphome_entity_key_t key,
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 

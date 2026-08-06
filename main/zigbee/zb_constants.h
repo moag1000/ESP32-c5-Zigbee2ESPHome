@@ -137,6 +137,18 @@
 /** @brief Maximum clusters per endpoint */
 #define ZB_MAX_CLUSTERS_PER_ENDPOINT            32
 
+/** @brief Endpoint the coordinator exposes its Home Automation clusters on
+ *
+ * Also the binding destination endpoint devices are told to report to.
+ */
+#define ZB_COORDINATOR_ENDPOINT                 1
+
+/** @brief Delay before provisioning devices restored from NVS at boot */
+#define ZB_REPORTING_PROVISION_DELAY_MS         30000
+
+/** @brief Maximum distinct clusters bound in one provisioning pass */
+#define ZB_REPORTING_PROVISION_MAX_CLUSTERS     12
+
 /** @brief Maximum clusters in a binding request */
 #define ZB_BINDING_MAX_CLUSTERS                 16
 

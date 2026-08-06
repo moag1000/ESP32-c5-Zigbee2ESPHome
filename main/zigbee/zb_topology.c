@@ -70,10 +70,24 @@ static esp_err_t topology_add_link(const esp_zb_ieee_addr_t source_ieee,
 static void topology_build_links(void);
 static uint32_t topology_get_timestamp(void);
 
+static esp_timer_handle_t s_lqi_timer = NULL;
+
+/**
+ * @brief Periodically re-read the coordinator's own neighbour table
+ *
+ * Only refreshes signal quality; it does not touch the topology scan state, so
+ * it cannot collide with a Network Heal in progress.
+ */
+static void lqi_refresh_timer_callback(void *arg)
+{
+    (void)arg;
+    zb_topology_request_neighbors(0x0000, 0);
+}
+
 /**
  * @brief Generic ZDO LQI response callback
  *
- * Logs the result of LQI (neighbor table) ZDO requests.
+ * Records the reported link quality for every neighbour we know as a device.
  *
  * @param rsp Response data from the stack
  * @param user_ctx User context (unused)
@@ -85,10 +99,43 @@ static void zdo_lqi_callback(const esp_zb_zdo_mgmt_lqi_rsp_t *rsp, void *user_ct
         ESP_LOGW(TAG, "ZDO LQI response: NULL response");
         return;
     }
-    if (rsp->status == ESP_ZB_ZDP_STATUS_SUCCESS) {
-        ESP_LOGD(TAG, "ZDO LQI request succeeded");
-    } else {
+    if (rsp->status != ESP_ZB_ZDP_STATUS_SUCCESS) {
         ESP_LOGW(TAG, "ZDO LQI request failed: 0x%02x", rsp->status);
+        return;
+    }
+
+    /* Store the link quality per device.
+     *
+     * This response is the only place the stack tells us how well it hears a
+     * device — the ZCL report callbacks carry no signal information at all.
+     * The values used to be discarded here, which is why every device reported
+     * LQI 0 and RSSI 0 in Home Assistant and why "linkquality" was 0 in every
+     * state message. */
+    size_t updated = 0;
+    for (uint8_t i = 0; i < rsp->neighbor_table_list_count; i++) {
+        const esp_zb_zdo_neighbor_table_list_record_t *rec = &rsp->neighbor_table_list[i];
+
+        uint64_t ieee = 0;
+        memcpy(&ieee, rec->extended_addr, sizeof(ieee));
+
+        device_t *dev = device_registry_get(ieee);
+        if (!dev && rec->network_addr != 0xFFFF) {
+            dev = device_registry_get_by_short_addr(rec->network_addr);
+        }
+        if (!dev || dev->protocol != DEV_PROTOCOL_ZIGBEE) {
+            continue;
+        }
+
+        dev->proto.zigbee.lqi = rec->lqi;
+        /* The neighbour table has no RSSI field. Derive an estimate from LQI so
+         * the entity shows something monotonic in signal strength rather than a
+         * flat zero: LQI 0..255 maps onto roughly -100..-30 dBm. */
+        dev->proto.zigbee.rssi = (int8_t)(-100 + (rec->lqi * 70) / 255);
+        updated++;
+    }
+
+    if (updated > 0) {
+        ESP_LOGD(TAG, "ZDO LQI response: updated link quality for %zu device(s)", updated);
     }
 }
 
@@ -150,6 +197,28 @@ esp_err_t zb_topology_init(void)
         ESP_LOGI(TAG, "No cached topology found, starting fresh");
     }
 
+    /* Refresh link quality on a timer.
+     *
+     * The only trigger for a neighbour lookup used to be the Network Heal
+     * button, so LQI in Home Assistant would have been whatever it was the last
+     * time somebody pressed it. Asking the coordinator for its own neighbour
+     * table is a local request — no over-the-air traffic — and covers every
+     * device that talks to us directly. */
+    const esp_timer_create_args_t lqi_timer_args = {
+        .callback = lqi_refresh_timer_callback,
+        .arg = NULL,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "topo_lqi_timer"
+    };
+    ret = esp_timer_create(&lqi_timer_args, &s_lqi_timer);
+    if (ret == ESP_OK) {
+        esp_timer_start_periodic(s_lqi_timer,
+                                 (uint64_t)ZB_TOPOLOGY_LQI_REFRESH_MS * 1000);
+    } else {
+        ESP_LOGW(TAG, "Failed to create LQI refresh timer: %s", esp_err_to_name(ret));
+        s_lqi_timer = NULL;
+    }
+
     s_initialized = true;
     ESP_LOGI(TAG, "Topology module initialized successfully");
     return ESP_OK;
@@ -162,6 +231,12 @@ esp_err_t zb_topology_deinit(void)
     }
 
     ESP_LOGI(TAG, "Deinitializing topology module...");
+
+    if (s_lqi_timer != NULL) {
+        esp_timer_stop(s_lqi_timer);
+        esp_timer_delete(s_lqi_timer);
+        s_lqi_timer = NULL;
+    }
 
     /* Stop any ongoing scan */
     zb_topology_scan_stop();
@@ -310,8 +385,14 @@ esp_err_t zb_topology_request_neighbors(uint16_t short_addr, uint8_t start_index
         .start_index = start_index
     };
 
-    /* Send LQI request with response logger callback */
+    /* Send LQI request with response logger callback.
+     *
+     * The lock was missing here. It did not bite while the only caller was a
+     * scan started from the Zigbee task, but the periodic refresh runs on the
+     * esp_timer task and would otherwise re-enter the stack unsynchronised. */
+    esp_zb_lock_acquire(GW_TIMEOUT_VERY_LONG_TICKS);
     esp_zb_zdo_mgmt_lqi_req(&lqi_req, zdo_lqi_callback, NULL);
+    esp_zb_lock_release();
     ESP_LOGD(TAG, "Sent Mgmt_Lqi_req to 0x%04X", short_addr);
 
     return ESP_OK;

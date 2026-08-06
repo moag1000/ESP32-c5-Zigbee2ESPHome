@@ -49,6 +49,72 @@ Aktives Scannen sendet Scan Requests und konkurriert damit um dasselbe
 Compile-Zeit-Entscheidung: der Handel laesst sich so beobachten statt raten.
 Passiv ist der Startzustand.
 
+## Drei Module waren nie initialisiert (behoben 2026-08-06)
+
+Home Assistant bekam von gepairten Geraeten keine Messwerte -- Battery, Voltage,
+LQI, RSSI standen dauerhaft auf `nan` bzw. 0. Ursache war nicht ein Fehler,
+sondern eine Kette:
+
+1. **`zb_reporting_init()` hatte keinen Aufrufer.** Das Modul blieb inert,
+   `s_initialized` false. Der einzige Weg zu `zb_reporting_set_defaults()` ging
+   ueber den MQTT-Request-Handler und lief damit ins `ESP_ERR_INVALID_STATE`.
+   **Kein Geraet hat je Attribut-Reporting konfiguriert bekommen.**
+2. **`zb_binding_init()` hatte ebenfalls keinen Aufrufer.** Reports gehen nur an
+   Eintraege in der Binding-Tabelle des Geraets -- ohne Binding waere selbst
+   konfiguriertes Reporting ins Leere gelaufen.
+3. **`zb_topology_init()` lief nur lazy beim ersten Scan.** `zdo_lqi_callback()`
+   hat die Nachbarschaftstabelle ausserdem nur geloggt und die LQI-Werte
+   verworfen -- `proto.zigbee.lqi/rssi` hatten im ganzen Baum **keinen
+   Schreiber**. Deshalb war auch `linkquality` in jeder State-Message 0.
+
+Alle drei werden jetzt in `main.c` vor `zb_coordinator_start()` initialisiert,
+damit ihre `EVT_NETWORK_READY`-Abos stehen, bevor der Stack das Event schickt.
+
+**Zwei echte Fehler kamen erst ans Licht, als der Code tatsaechlich lief:**
+
+- `send_configure_reporting()` schrieb den Zahlenwert per `memcpy` in
+  `record.reportable_change` -- ein `void *`. Das SDK dereferenziert diesen
+  Zeiger; beim Default 0 also eine Null-Dereferenzierung in
+  `zb_zcl_put_value_to_packet()`. Betrifft nur analoge Attributtypen, weshalb
+  `onOff` (bool, diskret) durchlief und `batteryPercentageRemaining` (U8) das
+  Geraet zerlegte.
+- `zb_binding.c` nahm **nirgends** den Zigbee-Lock, `zb_topology_request_neighbors()`
+  ebenso wenig. Solange nur der Zigbee-Task rief, fiel das nicht auf.
+
+**Der teuerste Fund lag daneben:** 77 Stellen in `main/esphome/esphome_entity_*.c`
+pruefen `s_entities->initialized`, **ohne vorher `s_entities` auf NULL zu
+pruefen**. Die Entity-Tabelle wird erst bei ~31 s alloziert, Zigbee laeuft ab
+~5 s. Jeder Report in diesem Fenster dereferenziert NULL. Der Absturz war
+eindeutig: MTVAL 0x0000d874, vier Byte vor dem Ende der 55416 Byte (0xd878)
+grossen Struktur -- also das letzte Feld `initialized` bei Basis NULL.
+
+**Clusterliste wird jetzt persistiert.** `persisted_device_t` speicherte
+`short_addr`, `endpoint` und `power_info`, aber **nicht die Cluster**. Ein
+wiederhergestelltes Geraet wird nie neu interviewt, kam also mit
+`cluster_count = 0` zurueck -- und `device_zigbee_has_cluster()` sagte zu allem
+nein. Die Felder haengen hinten am Struct, der Ladepfad memsetzt vorher, alte
+Records kommen mit `cluster_count = 0` zurueck.
+
+### Gemessen am Geraet
+
+| | vorher | nachher |
+|---|---|---|
+| Fingerbot Battery | `nan` | **66 %** |
+| Fingerbot LQI / RSSI | 0 / 0 | **244 / -34 dBm** |
+| Bindings fuer 0x1F0A | 0 | 2 (IAS Zone, genPowerCfg) |
+| Absturz bei Report vor Entity-Init | ja | nein |
+
+**Was weiterhin nicht kommt, und warum:** die Konfigurationswerte des Fingerbot
+(Sustain Time, Up/Down Movement, Click Count) sind Tuya-Datenpunkte. Laut den
+Hardware-Notizen in `zb_tuya.h` antwortet dieses Geraet auf cmd 0x03 (dataQuery)
+mit Default Response und **ohne** Datenpunkte; es dumpt nur nach dem Pairing
+oder nach einem Moduswechsel. Ein Moduswechsel in HA holt sie also zurueck --
+automatisch machen wir das nicht, weil wir den aktuellen Modus nach einem
+Neustart nicht kennen und ihn sonst blind ueberschreiben wuerden.
+
+`zb_groups_init()` hat ebenfalls keinen Aufrufer. Nicht angefasst, weil fuer
+diesen Fehler nicht noetig -- aber die Feature-Tabelle unten behauptet "done".
+
 ## Toter Code: aufgeraeumt (gemessen 2026-08-05)
 
 Es gibt **keinen unbeabsichtigt toten Code mehr**. Uebrig sind 1.868 Zeilen,

@@ -32,6 +32,9 @@
 
 /* Zigbee includes - coordinator or router based on config */
 #include "zigbee/zb_coordinator.h"
+#include "zigbee/zb_binding.h"
+#include "zigbee/zb_reporting.h"
+#include "zigbee/zb_topology.h"
 #include "zigbee/zb_router.h"
 
 /* WiFi and MQTT includes */
@@ -424,6 +427,31 @@ static void zigbee_stack_start(void)
         ESP_ERROR_CHECK(ret);
     }
     ESP_LOGI(TAG_ZIGBEE, "Zigbee coordinator initialized successfully");
+
+    /* Reporting and topology are initialized before the coordinator starts, so
+     * their EVT_NETWORK_READY subscriptions exist by the time the stack
+     * publishes it. Neither had a caller at all until now: zb_reporting stayed
+     * uninitialized, which meant no device ever had attribute reporting
+     * configured, and zb_topology only woke up when someone pressed Network
+     * Heal, so link quality was never read. */
+    /* Binding has to come first: zb_reporting_provision_device() binds each
+     * cluster to the coordinator before configuring reporting, and a device
+     * only delivers reports to the entries in its binding table. This module
+     * had no caller either, so every bind attempt returned INVALID_STATE. */
+    ret = zb_binding_init();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG_ZIGBEE, "Binding init failed: %s (continuing)", esp_err_to_name(ret));
+    }
+
+    ret = zb_reporting_init();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG_ZIGBEE, "Reporting init failed: %s (continuing)", esp_err_to_name(ret));
+    }
+
+    ret = zb_topology_init();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG_ZIGBEE, "Topology init failed: %s (continuing)", esp_err_to_name(ret));
+    }
 
     ret = zb_coordinator_start();
     if (ret != ESP_OK) {

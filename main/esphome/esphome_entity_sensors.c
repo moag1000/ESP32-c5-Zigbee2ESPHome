@@ -29,7 +29,7 @@ esp_err_t esphome_entity_register_sensor(const esphome_sensor_config_t *config)
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         ESP_LOGE(ENTITY_TAG, "Entity manager not initialized");
         return ESP_ERR_INVALID_STATE;
     }
@@ -86,7 +86,7 @@ done:
  */
 esp_err_t esphome_entity_update_sensor(esphome_entity_key_t key, float value)
 {
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -122,7 +122,7 @@ done:
  */
 esp_err_t esphome_entity_set_sensor_missing(esphome_entity_key_t key)
 {
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -159,7 +159,7 @@ esp_err_t esphome_entity_get_sensor(esphome_entity_key_t key, esphome_sensor_sta
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -192,7 +192,7 @@ esp_err_t esphome_entity_get_sensor_config(esphome_entity_key_t key,
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -236,7 +236,7 @@ esp_err_t esphome_entity_register_binary_sensor(const esphome_binary_sensor_conf
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         ESP_LOGE(ENTITY_TAG, "Entity manager not initialized");
         return ESP_ERR_INVALID_STATE;
     }
@@ -294,7 +294,7 @@ done:
  */
 esp_err_t esphome_entity_update_binary_sensor(esphome_entity_key_t key, bool state)
 {
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -330,7 +330,7 @@ done:
  */
 esp_err_t esphome_entity_set_binary_sensor_missing(esphome_entity_key_t key)
 {
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -368,7 +368,7 @@ esp_err_t esphome_entity_get_binary_sensor(esphome_entity_key_t key,
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -401,7 +401,7 @@ esp_err_t esphome_entity_get_binary_sensor_config(esphome_entity_key_t key,
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -445,7 +445,7 @@ esp_err_t esphome_entity_register_text_sensor(const esphome_text_sensor_config_t
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         ESP_LOGE(ENTITY_TAG, "Entity manager not initialized");
         return ESP_ERR_INVALID_STATE;
     }
@@ -506,7 +506,7 @@ esp_err_t esphome_entity_update_text_sensor(esphome_entity_key_t key, const char
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -543,7 +543,7 @@ done:
  */
 esp_err_t esphome_entity_set_text_sensor_missing(esphome_entity_key_t key)
 {
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -581,7 +581,7 @@ esp_err_t esphome_entity_get_text_sensor(esphome_entity_key_t key,
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -614,7 +614,7 @@ esp_err_t esphome_entity_get_text_sensor_config(esphome_entity_key_t key,
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (!s_entities->initialized) {
+    if (!s_entities || !s_entities->initialized) {
         return ESP_ERR_INVALID_STATE;
     }
 
