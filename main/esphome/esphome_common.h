@@ -106,8 +106,20 @@ extern "C" {
 /** @brief Connection keepalive interval in seconds */
 #define ESPHOME_KEEPALIVE_INTERVAL      30
 
-/** @brief How long a client may sit unauthenticated before its slot is reclaimed */
-#define ESPHOME_HANDSHAKE_IDLE_TIMEOUT_MS   15000
+/** @brief How long a client may sit unauthenticated before its slot is reclaimed
+ *
+ * aioesphomeapi sends hello and handshake in the same packet as the connection,
+ * so a real client has spoken within milliseconds. Anything still silent after
+ * this is a port scan, a TCP health check or a dead peer — and every one of
+ * those holds a slot that Home Assistant then cannot have.
+ *
+ * Fifteen seconds was the first guess and it was too generous: a monitoring
+ * loop doing a bare TCP connect once a minute was enough to make the gateway
+ * look like it had dropped off the network, because the probes accumulated
+ * faster than they expired. Measured against real clients, five seconds is
+ * still three orders of magnitude more than they need.
+ */
+#define ESPHOME_HANDSHAKE_IDLE_TIMEOUT_MS   5000
 
 /** @brief Maximum connection idle time before disconnect (seconds) */
 #define ESPHOME_MAX_IDLE_TIME           120
