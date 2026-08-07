@@ -11,6 +11,7 @@
  */
 
 #include "esphome_services.h"
+#include "core/memory/memory_manager_ng.h"
 #include "esphome_protocol.h"
 #include <string.h>
 #include "freertos/FreeRTOS.h"
@@ -37,7 +38,11 @@ typedef struct {
  * ============================================================================ */
 
 static struct {
-    service_entry_t services[ESPHOME_MAX_SERVICES];
+    /* Allocated at init, in PSRAM. Just under 6 KB of internal RAM otherwise,
+     * for a table that is only ever read and written from task context. Only
+     * the array moved — the surrounding struct stays static so every existing
+     * s_services.x access is unchanged and nothing can observe it as null. */
+    service_entry_t *services;
     size_t service_count;
     SemaphoreHandle_t mutex;
     bool initialized;
@@ -144,8 +149,15 @@ esp_err_t esphome_services_init(void)
         return ESP_ERR_NO_MEM;
     }
 
-    /* Clear storage */
-    memset(s_services.services, 0, sizeof(s_services.services));
+    /* Allocate storage */
+    s_services.services = mem_ng_calloc(ESPHOME_MAX_SERVICES, sizeof(service_entry_t),
+                                        MEM_CAP_PSRAM);
+    if (!s_services.services) {
+        ESP_LOGE(TAG, "Failed to allocate %d service slot(s)", ESPHOME_MAX_SERVICES);
+        vSemaphoreDelete(s_services.mutex);
+        s_services.mutex = NULL;
+        return ESP_ERR_NO_MEM;
+    }
     s_services.service_count = 0;
     s_services.initialized = true;
 
@@ -170,7 +182,10 @@ esp_err_t esphome_services_deinit(void)
         s_services.mutex = NULL;
     }
 
-    memset(s_services.services, 0, sizeof(s_services.services));
+    if (s_services.services) {
+        mem_ng_free(s_services.services);
+        s_services.services = NULL;
+    }
     s_services.service_count = 0;
     s_services.initialized = false;
 

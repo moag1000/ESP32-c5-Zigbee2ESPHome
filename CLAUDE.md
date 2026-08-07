@@ -658,7 +658,7 @@ Sub-device info is provided in `DeviceInfoResponse` via `esphome_api_handlers.c`
 | System Monitor + Crash Reporter | ~2KB | done |
 | LED Status Manager | ~1KB | done |
 | mmWave Presence Sensor (S3KM1110) | ~1KB | done |
-| ESPHome Service Calls | ~1KB | done -- `permit_join`, `remove_device`, `reconfigure_device` |
+| ESPHome Service Calls | ~1KB | done -- `permit_join`, `remove_device`, `reconfigure_device`; bis 2026-08-07 registriert, aber nie angekuendigt |
 | BLE Scanner | -- | **deaktiviert** (Code im Baum, nicht kompiliert) |
 | ESPHome BLE Proxy | -- | **deaktiviert** |
 
@@ -672,11 +672,11 @@ Sub-device info is provided in `DeviceInfoResponse` via `esphome_api_handlers.c`
 | HP SRAM statisch (Linker) | 179 KB von 321 KB = 55,8 % belegt, **142 KB frei** |
 | davon `.bss` / `.text` / `.data` | 57,8 KB / 90 KB / 31 KB |
 | Interner Heap beim Start | 198 KB gesamt, 147 KB frei |
-| **Interner Heap eingeschwungen** | **72 KB frei** (Stand 2026-08-07, BLE an) |
-| **Tiefststand seit Boot** | **71 KB** |
+| **Interner Heap eingeschwungen** | **78 KB frei** (Stand 2026-08-07, BLE an) |
+| **Tiefststand seit Boot** | **77 KB** |
 | davon durch BLE | rund 59 KB (ohne BLE waren es 122 KB) |
 | Zwischenstand 2026-08-06 | 59 KB / 58 KB Tiefstand |
-| dazugewonnen 2026-08-07 | +18 KB, trotz zwei zusaetzlicher Client-Slots (-3 KB) |
+| dazugewonnen 2026-08-07 | +24 KB, trotz zwei zusaetzlicher Client-Slots (-3 KB) |
 | PSRAM | 6115 KB gesamt, 6109 KB frei -- praktisch ungenutzt |
 | PSRAM `.bss` statisch | 20 KB |
 | Flash-Image | 2,1 MB, App-Partition zu 47 % frei |

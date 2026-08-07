@@ -835,6 +835,18 @@ static esp_err_t handle_device_info_request(esphome_client_t *client, const esph
 }
 
 /**
+ * @brief Service enumeration callback context
+ */
+typedef struct {
+    esphome_client_t *client;
+    esp_err_t result;
+} list_services_ctx_t;
+
+/* Defined further down with the other service handling; declared here because
+ * the entity list is where services have to be announced. */
+static bool list_services_enum_callback(const esphome_service_t *service, void *user_data);
+
+/**
  * @brief Handle ListEntitiesRequest message
  */
 static esp_err_t handle_list_entities_request(esphome_client_t *client, const esphome_message_t *msg)
@@ -851,6 +863,29 @@ static esp_err_t handle_list_entities_request(esphome_client_t *client, const es
     ESP_LOGI(TAG, "Enumerating entities...");
     esphome_entities_enumerate(esphome_api_list_entities_callback, &ctx);
     ESP_LOGI(TAG, "Entity enumeration complete, result=%d", ctx.result);
+
+    /* Services belong in this stream too.
+     *
+     * ListEntitiesServicesResponse is a response inside the ListEntities
+     * exchange, not the answer to a request of its own — the ESPHome protocol
+     * has no ListServicesRequest and no client ever sends one. This project
+     * defined message 40 as that request and dispatched the service
+     * enumeration from it, so the three gateway services (permit_join,
+     * remove_device, reconfigure_device) were registered internally and never
+     * announced. Home Assistant saw zero services and could call none of them,
+     * while the feature table listed them as done.
+     *
+     * A failure here is logged and does not abort the entity list: a client
+     * that got its entities but no services is far better off than one that
+     * got neither. */
+    list_services_ctx_t svc_ctx = {
+        .client = client,
+        .result = ESP_OK,
+    };
+    esphome_services_enumerate(list_services_enum_callback, &svc_ctx);
+    if (svc_ctx.result != ESP_OK) {
+        ESP_LOGW(TAG, "Service enumeration failed: %s", esp_err_to_name(svc_ctx.result));
+    }
 
     /* Send ListEntitiesDoneResponse */
     uint8_t output[ESPHOME_OUTPUT_BUFFER_SMALL];
@@ -1692,13 +1727,6 @@ static esp_err_t handle_alarm_command(esphome_client_t *client, const esphome_me
  * Service Handlers
  * ============================================================================ */
 
-/**
- * @brief Service enumeration callback context
- */
-typedef struct {
-    esphome_client_t *client;
-    esp_err_t result;
-} list_services_ctx_t;
 
 /**
  * @brief Callback for service enumeration in list services
