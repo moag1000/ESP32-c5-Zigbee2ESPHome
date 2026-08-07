@@ -490,9 +490,18 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                 xEventGroupSetBits(s_wifi.event_group, WIFI_DISCONNECTED_BIT);
                 xEventGroupClearBits(s_wifi.event_group, WIFI_CONNECTED_BIT);
 
-                /* Start watchdog: full WiFi restart if still disconnected after 5 min */
-                if (s_wifi.watchdog_timer) {
-                    esp_timer_stop(s_wifi.watchdog_timer);
+                /* Arm the watchdog: full WiFi restart if still disconnected
+                 * after 5 minutes.
+                 *
+                 * Only if it is not already running. Restarting it here looked
+                 * harmless and disarmed it completely: a failed reconnect
+                 * produces another DISCONNECTED event, so in a reconnect loop
+                 * the timer was reset every ~50 s and could never reach five
+                 * minutes. Measured on hardware: 87 consecutive failures with
+                 * reason 201 over nine hours, and the watchdog never fired
+                 * once. It has to measure time since the connection was lost,
+                 * not time since the last failed attempt. */
+                if (s_wifi.watchdog_timer && !esp_timer_is_active(s_wifi.watchdog_timer)) {
                     esp_timer_start_once(s_wifi.watchdog_timer, 5ULL * 60 * 1000000);
                 }
 

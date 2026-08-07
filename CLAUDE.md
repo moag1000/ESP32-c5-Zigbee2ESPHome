@@ -385,6 +385,39 @@ bei gleicher Wanduhrzeit).
 dort steht, welcher Kanal wie gescannt wird und wann der AP erstmals gehoert
 wird (`rsn valid ... mac=`, `ap found, mac=`).
 
+## Der WLAN-Watchdog hat sich selbst entschaerft (behoben 2026-08-07)
+
+Das Gateway war nach rund neun Stunden Laufzeit aus dem Netz verschwunden und
+kam **nicht von selbst zurueck**: 87 aufeinanderfolgende Fehlschlaege mit Grund
+201 (`NO_AP_FOUND`), alle 30 s ein neuer Versuch, kein Ende. Der AP stand die
+ganze Zeit da -- nach einem Neustart verbindet dasselbe Geraet in 25 s mit
+-50 dBm.
+
+Es gibt fuer genau diesen Fall einen Watchdog (`wifi_watchdog_callback`, voller
+Treiber-Neustart nach 5 min ohne Verbindung). Er hat in neun Stunden **kein
+einziges Mal** gefeuert, weil er bei *jedem* Disconnect-Ereignis neu gestartet
+wurde:
+
+    esp_timer_stop(s_wifi.watchdog_timer);
+    esp_timer_start_once(s_wifi.watchdog_timer, 5 min);
+
+Ein fehlgeschlagener Reconnect erzeugt aber selbst wieder ein
+`DISCONNECTED`-Ereignis. In der Schleife wurde der Ein-Schuss-Timer also alle
+~50 s zurueckgesetzt und konnte die fuenf Minuten nie erreichen. Er mass
+"5 Minuten seit dem letzten Fehlversuch" statt "5 Minuten ohne Verbindung".
+
+Jetzt wird er nur scharfgestellt, wenn er nicht ohnehin laeuft
+(`esp_timer_is_active()`); gestoppt wird er weiterhin beim erfolgreichen
+Verbinden.
+
+**Merksatz:** ein Watchdog, der von dem Ereignis zurueckgesetzt wird, das er
+ueberwachen soll, ist kein Watchdog. Beim Pruefen nicht fragen "wird er
+gestartet?", sondern "was setzt ihn zurueck?".
+
+**Noch nicht beobachtet:** dass die Eskalation tatsaechlich greift. Dafuer
+muesste der AP fuenf Minuten am Stueck verschwinden. Die Logik ist geprueft,
+das Verhalten nicht.
+
 ## Der Boot-Scan war kaputt (und hat in die Irre gefuehrt)
 
 `log_visible_aps()` uebergab eine `wifi_scan_config_t`, die ausser
