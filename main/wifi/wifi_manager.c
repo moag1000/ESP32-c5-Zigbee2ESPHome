@@ -252,6 +252,9 @@ static void schedule_reconnect(uint32_t delay_ms)
 /** Consecutive watchdog firings without a successful connection in between */
 static uint8_t s_watchdog_strikes = 0;
 
+/** Whether the station has ever associated since this boot */
+static bool s_had_connection = false;
+
 static void wifi_watchdog_callback(void *arg)
 {
     (void)arg;
@@ -277,7 +280,17 @@ static void wifi_watchdog_callback(void *arg)
      * state survives one. Deliberately not sooner: an access point that is
      * simply switched off overnight should not cost a reboot every five
      * minutes, and this project has had a restart loop before. */
-    if (s_watchdog_strikes >= WIFI_MGR_WATCHDOG_MAX_STRIKES) {
+    if (s_watchdog_strikes >= WIFI_MGR_WATCHDOG_MAX_STRIKES && s_had_connection) {
+        /* Only worth rebooting if this device has been on the network at least
+         * once since it booted.
+         *
+         * A reboot recovers a station that stopped finding an access point it
+         * had been talking to. It does nothing for an access point that is
+         * simply switched off — and without this guard, a router off overnight
+         * would have the gateway rebooting every fifteen minutes until morning,
+         * tearing down the Zigbee network each time. This project has had a
+         * restart loop before and it is not worth repeating for a case the
+         * reboot cannot fix anyway. */
         ESP_LOGE(TAG, "WiFi watchdog: %u driver restarts did not help — rebooting",
                  s_watchdog_strikes);
         vTaskDelay(pdMS_TO_TICKS(200));  /* let the log drain */
@@ -453,6 +466,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                     esp_timer_stop(s_wifi.watchdog_timer);
                 }
                 s_watchdog_strikes = 0;
+                s_had_connection = true;
 
                 /* Update stats and reset retry counters with mutex protection */
                 if (xSemaphoreTake(s_wifi.state_mutex, pdMS_TO_TICKS(WIFI_MGR_EVENT_MUTEX_TIMEOUT_MS)) == pdTRUE) {
