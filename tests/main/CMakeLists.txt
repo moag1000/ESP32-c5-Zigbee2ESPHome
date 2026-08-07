@@ -38,6 +38,13 @@ set(TEST_SRCS
     # touches files), so the collection logic is testable. Linking it needs
     # twelve symbols across zb_coordinator, zb_network, zb_groups, zb_binding,
     # bridge_response and littlefs_mount — all stubbed.
+    # The Tuya datapoint parser reads a 16-bit length off the air and fills a
+    # 64-byte buffer from it — worth pinning down. No stubs needed despite
+    # zb_tuya.c's dependencies: -ffunction-sections plus --gc-sections drops
+    # everything the parser does not reach.
+    "../unit/test_zb_tuya_parse.c"
+    "../../main/zigbee/zb_tuya.c"
+
     "../unit/test_zb_backup.c"
     "../../main/zigbee/zb_backup.c"
     "../mocks/mock_zb_backup_deps.c"

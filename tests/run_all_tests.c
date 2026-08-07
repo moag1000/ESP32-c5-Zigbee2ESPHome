@@ -46,6 +46,7 @@ extern test_stats_t run_zb_diagnostics_tests(void);
 #endif
 #ifdef TEST_SUITE_ZB_BACKUP
 extern test_stats_t run_zb_backup_tests(void);
+extern test_stats_t run_zb_tuya_parse_tests(void);
 #endif
 #ifdef TEST_SUITE_ESPHOME_PROTOCOL
 extern test_stats_t run_esphome_protocol_tests(void);
@@ -158,6 +159,7 @@ static void test_runner_task(void *pvParameters)
 #endif
 #ifdef TEST_SUITE_ZB_BACKUP
     RUN_SUITE(run_zb_backup_tests, "Zigbee Backup");
+    RUN_SUITE(run_zb_tuya_parse_tests, "Tuya Datapoint Parser");
 #endif
 #ifdef TEST_SUITE_ESPHOME_PROTOCOL
     RUN_SUITE(run_esphome_protocol_tests, "ESPHome Protocol");
