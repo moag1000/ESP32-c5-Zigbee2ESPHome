@@ -774,6 +774,21 @@ Aktualisieren mit `idf.py update-dependencies`.
 source ./scripts/setup_env.sh && ./scripts/build.sh && ./scripts/flash.sh
 ```
 
+## Tests nehmen das Geraet vom Netz
+
+`./scripts/test.sh` laeuft **auf der Hardware**: es flasht die Testfirmware,
+laesst die Suite laufen und flasht danach die Gateway-Firmware zurueck
+("Gateway restored."). Das Geraet startet dabei zweimal neu und ist rund zwei
+Minuten weder in Home Assistant noch im Zigbee-Netz.
+
+Das ist kein Fehler, aber es ueberrascht: waehrend einer Fehlersuche sieht ein
+Testlauf im Monitoring aus wie ein WLAN-Ausfall. Am 2026-08-07 hat genau das
+einen Fehlalarm erzeugt, der erst durch den Blick auf die Uptime (40 s) als
+eigenverursacht erkennbar war.
+
+Wer nur den Quelltext pruefen will, braucht das Geraet nicht -- `idf.py build`
+reicht.
+
 ## Architecture
 
 ### Layer Abstraction
