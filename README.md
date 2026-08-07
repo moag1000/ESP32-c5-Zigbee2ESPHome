@@ -104,14 +104,24 @@ Measured on hardware (ESP32-C5, ESP-IDF v6.0.2):
 |---|---|
 | Wi-Fi association | 25-27 s from boot, 0 failed attempts |
 | Devices in converter DB | 6801, from 1360 manufacturers |
-| Internal heap, steady state | 122 KB free (65 KB with BLE on) |
-| Internal heap, low-water mark | 121 KB |
-| Test suite | 119 tests, on-device |
+| Internal heap, steady state | 82 KB free, BLE on |
+| Internal heap, low-water mark | 77 KB |
+| Test suite | 129 tests, on-device |
 
-Known gaps: GATT connections are untested for want of a device; the C5's Wi-Fi
-scan returns nothing useful, so anything scan-based (the captive portal's
-network list) is unreliable; 47 % of flash and a good deal of the codebase have
-never been reviewed.
+Known gaps, and they are real:
+
+- **Two devices, one network, one developer.** A Fingerbot Plus and an Aqara
+  vibration sensor. Everything else in the converter database is untested here.
+- **The Wi-Fi escalation has never been observed firing.** The watchdog that
+  restarts the driver, and reboots after three failures, is reviewed but not
+  demonstrated; that needs an access point to stay away for five minutes.
+- **GATT initializes but has not been tested** against a peripheral.
+- **Most testing runs in minutes.** Both of the worst faults found so far needed
+  conditions a short test does not produce: one took nine hours of uptime, the
+  other three simultaneous clients. Users produce both without trying.
+- The C5's Wi-Fi scan returns nothing useful, so anything scan-based (the
+  captive portal's network list) is unreliable.
+- A good deal of the codebase has never been read.
 
 ## How it compares
 
