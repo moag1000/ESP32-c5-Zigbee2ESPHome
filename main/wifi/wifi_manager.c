@@ -249,16 +249,43 @@ static void schedule_reconnect(uint32_t delay_ms)
  * @brief WiFi watchdog — full WiFi restart if disconnected for too long.
  * Fires 5 minutes after disconnect. Stops+starts WiFi driver to reset state.
  */
+/** Consecutive watchdog firings without a successful connection in between */
+static uint8_t s_watchdog_strikes = 0;
+
 static void wifi_watchdog_callback(void *arg)
 {
     (void)arg;
     wifi_ap_record_t ap_info;
     if (esp_wifi_sta_get_ap_info(&ap_info) == ESP_OK) {
         /* Already connected — nothing to do */
+        s_watchdog_strikes = 0;
         return;
     }
 
-    ESP_LOGW(TAG, "WiFi watchdog: still disconnected after 5 min — full WiFi restart");
+    s_watchdog_strikes++;
+
+    /* Escalate to a reboot when restarting the driver keeps not helping.
+     *
+     * The driver restart below is the right first move but it is not proven to
+     * recover this chip from the state observed on hardware: reason 201,
+     * NO_AP_FOUND, repeated for nine hours while the access point sat there at
+     * -50 dBm. What is proven is that a reboot recovers it — the same device
+     * associated 25 seconds after one.
+     *
+     * Three strikes is roughly fifteen minutes offline. By then the gateway is
+     * useless to Home Assistant anyway, and a reboot is cheap now that device
+     * state survives one. Deliberately not sooner: an access point that is
+     * simply switched off overnight should not cost a reboot every five
+     * minutes, and this project has had a restart loop before. */
+    if (s_watchdog_strikes >= WIFI_MGR_WATCHDOG_MAX_STRIKES) {
+        ESP_LOGE(TAG, "WiFi watchdog: %u driver restarts did not help — rebooting",
+                 s_watchdog_strikes);
+        vTaskDelay(pdMS_TO_TICKS(200));  /* let the log drain */
+        esp_restart();
+    }
+
+    ESP_LOGW(TAG, "WiFi watchdog: still disconnected after 5 min (strike %u/%u) — "
+             "full WiFi restart", s_watchdog_strikes, WIFI_MGR_WATCHDOG_MAX_STRIKES);
 
     /* Full WiFi restart: disconnect → stop → start → connect */
     esp_wifi_disconnect();
@@ -283,7 +310,9 @@ static void wifi_watchdog_callback(void *arg)
         xSemaphoreGive(s_wifi.state_mutex);
     }
 
-    /* Schedule another watchdog in case this restart also fails */
+    /* Schedule another watchdog in case this restart also fails. Restarting the
+     * timer is correct here — this callback only runs when the previous one
+     * already expired, so there is nothing to reset away. */
     if (s_wifi.watchdog_timer) {
         esp_timer_stop(s_wifi.watchdog_timer);
         esp_timer_start_once(s_wifi.watchdog_timer, 5ULL * 60 * 1000000);
@@ -423,6 +452,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                 if (s_wifi.watchdog_timer) {
                     esp_timer_stop(s_wifi.watchdog_timer);
                 }
+                s_watchdog_strikes = 0;
 
                 /* Update stats and reset retry counters with mutex protection */
                 if (xSemaphoreTake(s_wifi.state_mutex, pdMS_TO_TICKS(WIFI_MGR_EVENT_MUTEX_TIMEOUT_MS)) == pdTRUE) {

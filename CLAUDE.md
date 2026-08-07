@@ -414,9 +414,22 @@ Verbinden.
 ueberwachen soll, ist kein Watchdog. Beim Pruefen nicht fragen "wird er
 gestartet?", sondern "was setzt ihn zurueck?".
 
-**Noch nicht beobachtet:** dass die Eskalation tatsaechlich greift. Dafuer
-muesste der AP fuenf Minuten am Stueck verschwinden. Die Logik ist geprueft,
-das Verhalten nicht.
+**Gestufte Eskalation.** Der Treiber-Neustart ist der richtige erste Schritt,
+aber **unbewiesen** fuer genau diesen Zustand -- belegt ist nur, dass ein
+*Neustart* den Chip zurueckholt (25 s, -49 dBm). Deshalb zaehlt der Watchdog
+seine Fehlschlaege: nach `WIFI_MGR_WATCHDOG_MAX_STRIKES` (3, also rund
+15 Minuten ohne Netz) folgt `esp_restart()`. Der Zaehler wird bei jeder
+erfolgreichen Verbindung genullt.
+
+Bewusst nicht frueher: ein AP, der ueber Nacht abgeschaltet wird, soll nicht
+alle fuenf Minuten einen Neustart kosten -- dieses Projekt hatte schon einmal
+eine Neustartschleife. Und bewusst ueberhaupt, weil das Geraet nach 15 Minuten
+ohne Netz fuer Home Assistant ohnehin nicht existiert und der Zustand seit
+2026-08-06 einen Neustart uebersteht.
+
+**Noch nicht beobachtet:** dass eine der beiden Stufen tatsaechlich feuert.
+Dafuer muesste der AP fuenf Minuten am Stueck verschwinden. Die Logik ist
+geprueft, das Verhalten nicht.
 
 ## Der Boot-Scan war kaputt (und hat in die Irre gefuehrt)
 

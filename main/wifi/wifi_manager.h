@@ -32,6 +32,14 @@ extern "C" {
 /** @brief Maximum delay for reconnection attempts (ms) */
 #define WIFI_MGR_RECONNECT_MAX_DELAY_MS     30000
 
+/** @brief Driver restarts the watchdog will try before rebooting instead
+ *
+ * Three firings is about fifteen minutes with no network. Restarting the WiFi
+ * driver is the cheaper move and is tried first; a reboot is the one recovery
+ * this chip has been observed to respond to after it stops finding the AP.
+ */
+#define WIFI_MGR_WATCHDOG_MAX_STRIKES       3
+
 /** @brief Mutex acquisition timeout for state operations (ms) */
 #define WIFI_MGR_STATE_MUTEX_TIMEOUT_MS     100
 
