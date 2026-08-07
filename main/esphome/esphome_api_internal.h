@@ -118,7 +118,16 @@ typedef struct {
 typedef struct {
     esphome_api_config_t config;                    /**< Server configuration */
     esphome_api_stats_t stats;                      /**< Server statistics */
-    esphome_client_t clients[ESPHOME_MAX_CLIENTS];  /**< Client connection array */
+    /** Client connection array, allocated at init in PSRAM
+     *
+     * Roughly 1.2 KB per slot, almost all of it the receive buffer, and four
+     * slots put it well past 4 KB of internal RAM that never needed to be
+     * internal — nothing here is touched from an ISR. Kept as a pointer rather
+     * than moving the whole s_api struct: esphome_api_get_state() hands out
+     * &s_api to ten call sites that dereference it without a null check, and a
+     * struct that can be null before init is exactly the crash this project
+     * already had once with the entity table. Indexing is unchanged. */
+    esphome_client_t *clients;
     int server_socket;                              /**< Server listening socket */
     TaskHandle_t server_task;                       /**< Server accept task handle (for API compat) */
     psram_task_handle_t server_psram_task;          /**< PSRAM-backed server task resources */

@@ -415,9 +415,22 @@ esp_err_t esphome_api_init(const esphome_api_config_t *config)
         s_api.config.max_clients = 1;
     }
 
+    /* Allocate the client slots */
+    s_api.clients = mem_ng_calloc(ESPHOME_MAX_CLIENTS, sizeof(esphome_client_t),
+                                  MEM_CAP_PSRAM);
+    if (!s_api.clients) {
+        ESP_LOGE(TAG, "Failed to allocate %d client slot(s)", ESPHOME_MAX_CLIENTS);
+        return ESP_ERR_NO_MEM;
+    }
+    for (int i = 0; i < ESPHOME_MAX_CLIENTS; i++) {
+        s_api.clients[i].socket = -1;
+    }
+
     /* Create mutex */
     s_api.mutex = xSemaphoreCreateMutex();
     if (!s_api.mutex) {
+        mem_ng_free(s_api.clients);
+        s_api.clients = NULL;
         ESP_LOGE(TAG, "Failed to create mutex");
         return ESP_ERR_NO_MEM;
     }
@@ -728,6 +741,12 @@ esp_err_t esphome_api_deinit(void)
     if (s_api.mutex) {
         vSemaphoreDelete(s_api.mutex);
         s_api.mutex = NULL;
+    }
+
+    /* Release the client slots */
+    if (s_api.clients) {
+        mem_ng_free(s_api.clients);
+        s_api.clients = NULL;
     }
 
     /* Free PSRAM task resources (stack and TCB) */
