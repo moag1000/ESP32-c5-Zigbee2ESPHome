@@ -11,9 +11,12 @@
  *   - Device Count (Sensor, diagnostic)
  *   - Network PAN ID (TextSensor, diagnostic)
  *   - Coordinator State (TextSensor, diagnostic)
+ *   - Last Reset Reason (TextSensor, diagnostic)
+ *   - Boot Count (Sensor, diagnostic)
  */
 
 #include "esphome_adapter_gateway.h"
+#include "core/monitoring/crash_reporter.h"
 #include "esphome/esphome_entities.h"
 #include "esphome/esphome_entities_types.h"
 #include "esphome/esphome_ota.h"
@@ -51,6 +54,8 @@ static const char *TAG = "gw_entities";
 #define GW_KEY_COORDINATOR_STATE   0x40000007
 
 #define GW_KEY_OTA_MODE            0x40000008
+#define GW_KEY_RESET_REASON        0x40000009
+#define GW_KEY_BOOT_COUNT          0x4000000C
 
 #if CONFIG_MMWAVE_SENSOR_ENABLE
 #define GW_KEY_BLE_SCANNER         0x4000000A
@@ -441,6 +446,41 @@ esp_err_t esphome_adapter_gateway_register(void)
         esphome_entity_register_text_sensor(&cfg);
     }
 
+    /* --- Last Reset Reason TextSensor (diagnostic) ---
+     *
+     * The crash reporter has always known this and only ever published it over
+     * MQTT, which an ESPHome-primary build switches off. So a gateway that
+     * restarted overnight gave its owner no way to tell a crash from a power
+     * cut from a watchdog reboot — the exact question that took a broker and a
+     * serial cable to answer here. The string carries the crash marker, because
+     * "was this a crash" is the first thing anyone wants to know. */
+    {
+        esphome_text_sensor_config_t cfg = {0};
+        cfg.key = GW_KEY_RESET_REASON;
+        cfg.device_id = 0;
+        strncpy(cfg.name, "Last Reset Reason", sizeof(cfg.name) - 1);
+        snprintf(cfg.unique_id, sizeof(cfg.unique_id), "zbgw_reset_reason");
+        strncpy(cfg.icon, "mdi:restart-alert", sizeof(cfg.icon) - 1);
+        cfg.entity_category = 2;  /* DIAGNOSTIC */
+        cfg.disabled_by_default = false;
+        esphome_entity_register_text_sensor(&cfg);
+    }
+
+    /* --- Boot Count Sensor (diagnostic) --- */
+    {
+        esphome_sensor_config_t cfg = {0};
+        cfg.key = GW_KEY_BOOT_COUNT;
+        cfg.device_id = 0;
+        strncpy(cfg.name, "Boot Count", sizeof(cfg.name) - 1);
+        snprintf(cfg.unique_id, sizeof(cfg.unique_id), "zbgw_boot_count");
+        strncpy(cfg.icon, "mdi:counter", sizeof(cfg.icon) - 1);
+        cfg.accuracy_decimals = 0;
+        cfg.state_class = ESPHOME_STATE_CLASS_TOTAL_INCREASING;
+        cfg.entity_category = 2;  /* DIAGNOSTIC */
+        cfg.disabled_by_default = false;
+        esphome_entity_register_sensor(&cfg);
+    }
+
     /* --- OTA Mode Switch --- */
     {
         esphome_switch_config_t cfg = {0};
@@ -510,6 +550,19 @@ esp_err_t esphome_adapter_gateway_register(void)
 
 void esphome_adapter_gateway_update_state(void)
 {
+    /* Reset reason and boot count. Both are fixed for the life of this boot,
+     * but they are cheap and pushing them here means a reconnecting client sees
+     * them without waiting for a restart. */
+    if (crash_reporter_is_initialized()) {
+        char reason[48];
+        snprintf(reason, sizeof(reason), "%s%s",
+                 crash_reporter_get_reason_str(),
+                 crash_reporter_was_crash() ? " (crash)" : "");
+        esphome_entity_update_text_sensor(GW_KEY_RESET_REASON, reason);
+        esphome_entity_update_sensor(GW_KEY_BOOT_COUNT,
+                                     (float)crash_reporter_get_boot_count());
+    }
+
     /* Channel + PAN ID from network info */
     zb_network_info_t info = {0};
     if (zb_network_get_info(&info) == ESP_OK) {

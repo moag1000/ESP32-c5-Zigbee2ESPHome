@@ -658,6 +658,7 @@ Sub-device info is provided in `DeviceInfoResponse` via `esphome_api_handlers.c`
 | System Monitor + Crash Reporter | ~2KB | done |
 | LED Status Manager | ~1KB | done |
 | mmWave Presence Sensor (S3KM1110) | ~1KB | done |
+| Neustartgrund + Boot-Zaehler | ~0 | done -- Diagnose-Entities, seit 2026-08-07 |
 | ESPHome Service Calls | ~1KB | done -- `permit_join`, `remove_device`, `reconfigure_device`; bis 2026-08-07 registriert, aber nie angekuendigt |
 | BLE Scanner | -- | **deaktiviert** (Code im Baum, nicht kompiliert) |
 | ESPHome BLE Proxy | -- | **deaktiviert** |
