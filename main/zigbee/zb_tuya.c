@@ -147,6 +147,26 @@ static esp_err_t parse_dp_with_offset(const uint8_t *data, size_t len, tuya_dp_t
     /* Parse based on type */
     memset(&dp->value, 0, sizeof(dp->value));
 
+    /* Make dp->length mean what every consumer reads it as: how many bytes are
+     * actually in dp->value.raw.
+     *
+     * It is a 16-bit field straight off the air, so it can say 65535 while the
+     * buffer holds 64. The copies below skip anything that does not fit, which
+     * left dp->length describing the frame rather than the buffer — and
+     * consumers size their loops from it. tuya_fingerbot.c reads a step count
+     * out of the copied data and walks three bytes per step, bounded against
+     * dp->length; that only stayed inside the buffer because an oversized
+     * datapoint leaves the memset zeros behind, so the step count read as zero.
+     * Correct by accident is not correct.
+     *
+     * Truncation is logged. A datapoint this large is either a device we do not
+     * model properly or a malformed frame, and both are worth seeing. */
+    if (dp->length > ZB_TUYA_DP_MAX_RAW_SIZE) {
+        ESP_LOGW(TAG, "DP %u payload %u bytes exceeds the %d-byte buffer — truncating",
+                 dp->dp_id, dp->length, ZB_TUYA_DP_MAX_RAW_SIZE);
+        dp->length = ZB_TUYA_DP_MAX_RAW_SIZE;
+    }
+
     switch (dp->type) {
         case TUYA_DP_TYPE_BOOL:
             if (dp->length >= 1) {
@@ -165,7 +185,7 @@ static esp_err_t parse_dp_with_offset(const uint8_t *data, size_t len, tuya_dp_t
             break;
 
         case TUYA_DP_TYPE_STRING:
-            if (dp->length > 0 && dp->length < ZB_TUYA_DP_MAX_RAW_SIZE) {
+            if (dp->length > 0) {
                 memcpy(dp->value.raw, payload, dp->length);
             }
             break;
@@ -192,7 +212,7 @@ static esp_err_t parse_dp_with_offset(const uint8_t *data, size_t len, tuya_dp_t
 
         default:
             /* Raw data */
-            if (dp->length > 0 && dp->length <= ZB_TUYA_DP_MAX_RAW_SIZE) {
+            if (dp->length > 0) {
                 memcpy(dp->value.raw, payload, dp->length);
             }
             break;
