@@ -377,8 +377,15 @@ static void event_trace_handler(event_type_t type, void *data, size_t data_size,
         s_stats.events_per_type[type]++;
     }
 
-    /* Log the event */
-    ESP_LOGI(TAG, "[%lu ms] %s: %s",
+    /* Log the event.
+     *
+     * At debug level, not info. Every event went to the console at info, which
+     * on a live gateway was 146 lines in 471 seconds — 27 % of all output, and
+     * enough to bury the messages someone is actually looking for. The ring
+     * buffer below keeps the same data either way, and event_trace_dump() and
+     * event_trace_dump_mqtt() hand it out on request; the console copy was pure
+     * duplication. */
+    ESP_LOGD(TAG, "[%lu ms] %s: %s",
              (unsigned long)entry.timestamp_ms,
              event_type_to_str(type),
              entry.summary);
