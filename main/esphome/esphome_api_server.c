@@ -513,8 +513,43 @@ void esphome_api_client_task(void *pvParameters)
 #ifdef CONFIG_ESPHOME_NOISE_ENCRYPTION
     /* Protocol detection: peek at first byte to determine Noise vs plaintext.
      * Noise frames always use 0x01 indicator. Plaintext uses 0x00. */
-    ssize_t first_byte = recv(client->socket, client->rx_buffer, 1, MSG_PEEK);
-    if (first_byte == 1) {
+    /* Wait for that byte rather than assuming it is already there.
+     *
+     * A single peek treats "nothing has arrived yet" the same as "this is not
+     * a Noise client": first_byte != 1 skipped the whole block, leaving
+     * encryption_enabled false, and the main loop then fed Noise frames to the
+     * plaintext decoder. That is visible in the log as "Invalid frame marker:
+     * 0x01" — the Noise indicator itself — followed by protobuf wire types 3,
+     * 4, 6 and 7, which do not exist and are simply ciphertext being read as a
+     * message. Reproduced with three concurrent clients: 26 such lines in one
+     * run, none in steady state, which is why it never showed up before.
+     *
+     * A client whose first packet never arrives is not a plaintext client, it
+     * is a client we cannot classify — so say so and hang up instead of
+     * guessing. */
+    ssize_t first_byte = -1;
+    for (int attempt = 0; attempt < ESPHOME_PROTOCOL_PEEK_ATTEMPTS; attempt++) {
+        first_byte = recv(client->socket, client->rx_buffer, 1, MSG_PEEK);
+        if (first_byte == 1) {
+            break;
+        }
+        if (first_byte == 0) {
+            ESP_LOGI(TAG, "Client %d closed before sending anything", client_id);
+            goto disconnect;
+        }
+        if (first_byte < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+            ESP_LOGW(TAG, "Client %d: peek failed: errno=%d", client_id, errno);
+            goto disconnect;
+        }
+    }
+
+    if (first_byte != 1) {
+        ESP_LOGW(TAG, "Client %d sent nothing to identify itself by - dropping",
+                 client_id);
+        goto disconnect;
+    }
+
+    {
         bool is_noise = (client->rx_buffer[0] == ESPHOME_FRAME_NOISE);
         if (is_noise) {
             ESP_LOGI(TAG, "Client %d using Noise protocol (first byte: 0x%02x)",

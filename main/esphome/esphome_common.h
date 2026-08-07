@@ -103,6 +103,13 @@ extern "C" {
 /** @brief Socket receive timeout in milliseconds */
 #define ESPHOME_SOCKET_TIMEOUT_MS       5000
 
+/** @brief Peeks allowed while identifying a new client as Noise or plaintext
+ *
+ * Each attempt blocks for up to ESPHOME_SOCKET_TIMEOUT_MS, so this is the
+ * patience budget for a client that has connected but not yet spoken.
+ */
+#define ESPHOME_PROTOCOL_PEEK_ATTEMPTS  3
+
 /** @brief Connection keepalive interval in seconds */
 #define ESPHOME_KEEPALIVE_INTERVAL      30
 
