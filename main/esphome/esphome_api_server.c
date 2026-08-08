@@ -206,8 +206,27 @@ bool esphome_api_check_client_keepalive(esphome_client_t *client)
      * the same packet from aioesphomeapi, so a client with nothing to say for
      * this long is not mid-handshake, it is gone. */
     if (client->state != ESPHOME_CLIENT_AUTHENTICATED) {
-        if ((now - client->last_activity) > ESPHOME_HANDSHAKE_IDLE_TIMEOUT_MS) {
-            ESP_LOGW(TAG, "Client dropped before authenticating - reclaiming slot");
+        /* Two different situations, two different budgets.
+         *
+         * Before the Noise handshake a client has proven nothing, and a real
+         * one sends hello in the same packet as the connection — so a few
+         * seconds is generous and keeps port scans and dead peers from holding
+         * slots.
+         *
+         * After the handshake it has proven it holds the key, and it is now in
+         * the ESPHome login exchange. last_activity only moves when a message
+         * is actually handled, so a client waiting on us mid-login looks idle.
+         * Five seconds killed those: observed as "Noise handshake complete"
+         * followed exactly 5.005 s later by "dropped before authenticating",
+         * with Home Assistant then timing out its entity enumeration. That was
+         * a regression I introduced by applying the first-byte reasoning to the
+         * whole pre-authentication phase. */
+        uint32_t budget = client->encryption_enabled
+                              ? ESPHOME_LOGIN_IDLE_TIMEOUT_MS
+                              : ESPHOME_HANDSHAKE_IDLE_TIMEOUT_MS;
+        if ((now - client->last_activity) > budget) {
+            ESP_LOGW(TAG, "Client dropped before authenticating (%s) - reclaiming slot",
+                     client->encryption_enabled ? "login stalled" : "never spoke");
             return true;
         }
         return false;

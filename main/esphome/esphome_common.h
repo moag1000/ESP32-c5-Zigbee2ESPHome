@@ -128,6 +128,14 @@ extern "C" {
  */
 #define ESPHOME_HANDSHAKE_IDLE_TIMEOUT_MS   5000
 
+/** @brief How long a client may take over the ESPHome login once encrypted
+ *
+ * Applies after the Noise handshake, where the client has proven it holds the
+ * key and is merely slow. Long enough that a busy gateway enumerating sixty
+ * entities does not lose the client that asked.
+ */
+#define ESPHOME_LOGIN_IDLE_TIMEOUT_MS       30000
+
 /** @brief Maximum connection idle time before disconnect (seconds) */
 #define ESPHOME_MAX_IDLE_TIME           120
 
