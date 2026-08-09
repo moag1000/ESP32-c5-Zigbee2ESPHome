@@ -119,6 +119,16 @@ Known gaps, and they are real:
 - **Most testing runs in minutes.** Both of the worst faults found so far needed
   conditions a short test does not produce: one took nine hours of uptime, the
   other three simultaneous clients. Users produce both without trying.
+- **The C5 loses its access point periodically and does not find it again.**
+  Reason 201, NO_AP_FOUND, with the AP sitting there at -50 dBm. Seen on both a
+  DFS and a non-DFS channel, so it is not only a DFS effect. The watchdog
+  recovers it — a driver restart, then a reboot after fifteen minutes — and that
+  has now brought the gateway back three times without anyone touching it. It is
+  a mitigation, not a fix; the fault is below this firmware.
+- **Prefer a non-DFS 5 GHz channel** (36, 40, 44, 48). On DFS channel 64 an API
+  login took 10-28 seconds and frequently timed out; on channel 48 the same
+  login takes 0.8-2.6 seconds. Espressif documents that the ESP32-C5 cannot
+  detect radar and cannot vacate DFS channels itself.
 - The C5's Wi-Fi scan returns nothing useful, so anything scan-based (the
   captive portal's network list) is unreliable.
 - A good deal of the codebase has never been read.
