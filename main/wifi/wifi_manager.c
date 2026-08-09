@@ -1178,7 +1178,23 @@ esp_err_t wifi_manager_connect(const char *ssid, const char *password)
             },
 #else
             /* PMF enabled - use WPA2/WPA3 with protection */
-            .threshold.authmode = WIFI_AUTH_WPA2_WPA3_PSK,
+            /* The threshold is a FLOOR ("accept nothing weaker"), and the
+             * authmode enum is not ordered by strength:
+             *
+             *   WPA2_PSK(3) < WPA_WPA2_PSK(4) < ENTERPRISE(5)
+             *               < WPA3_PSK(6) < WPA2_WPA3_PSK(7)
+             *
+             * Setting the floor to WPA2_WPA3_PSK therefore rejects an AP
+             * advertising plain WPA3 — which is stronger, not weaker — and
+             * anything that momentarily reads as WPA2. Observed on hardware as
+             * reason 211, NO_AP_FOUND_IN_AUTHMODE_THRESHOLD: eight consecutive
+             * rejections of an access point sitting there at -48 dBm, twice in
+             * twenty-four hours, each ending only when the watchdog rebooted.
+             *
+             * WPA2 is the floor this gateway actually requires. It does not
+             * weaken what gets negotiated: an AP offering WPA3 still gets
+             * WPA3, and PMF stays capable below. */
+            .threshold.authmode = WIFI_AUTH_WPA2_PSK,
             .sae_pwe_h2e = WPA3_SAE_PWE_BOTH,
             .pmf_cfg = {
                 .capable = true,
@@ -1575,7 +1591,10 @@ esp_err_t wifi_manager_reconnect(void)
             },
 #else
             /* PMF enabled - same as wifi_manager_connect() */
-            .threshold.authmode = WIFI_AUTH_WPA2_WPA3_PSK,
+            /* WPA2 floor, not WPA2_WPA3 — see the note at the other
+             * sta_config site: the enum is not ordered by strength and the
+             * stricter-looking value rejects WPA3-only access points. */
+            .threshold.authmode = WIFI_AUTH_WPA2_PSK,
             .sae_pwe_h2e = WPA3_SAE_PWE_BOTH,
             .pmf_cfg = {
                 .capable = true,
