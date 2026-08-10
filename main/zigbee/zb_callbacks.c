@@ -61,6 +61,7 @@
 #if CONFIG_GW_LED_ENABLED
 #include "led/led_controller.h"
 #include "core/led_status_manager.h"
+#include "zigbee/zb_lumi.h"
 #endif
 
 static const char *TAG = "ZB_CB";
@@ -1453,6 +1454,117 @@ static const char* zdo_status_to_str(esp_zb_zdp_status_t status)
     }
 }
 
+/**
+ * @brief Handle Aqara's 0xFF01 attribute, which is where their battery lives
+ *
+ * These devices do not implement genPowerCfg, so the ordinary battery path
+ * never sees them. The vibration sensor in this network reported no battery at
+ * all while the Fingerbot beside it reported 66 %, and this is the difference.
+ *
+ * The payload arrives as a ZCL string: one length byte, then the tag/type/value
+ * run that zb_lumi_parse_special() reads.
+ */
+static void handle_lumi_special_attribute(uint16_t short_addr,
+                                          device_t *device,
+                                          const esp_zb_zcl_attribute_data_t *data)
+{
+    if (device == NULL || data == NULL || data->value == NULL || data->size < 2) {
+        return;
+    }
+    if (data->type != ESP_ZB_ZCL_ATTR_TYPE_CHAR_STRING &&
+        data->type != ESP_ZB_ZCL_ATTR_TYPE_OCTET_STRING) {
+        ESP_LOGD(TAG, "0xFF01 from 0x%04X has unexpected type 0x%02X",
+                 short_addr, data->type);
+        return;
+    }
+
+    const uint8_t *raw = (const uint8_t *)data->value;
+    size_t payload_len = raw[0];
+    const size_t available = (size_t)data->size - 1;
+    if (payload_len > available) {
+        payload_len = available;   /* the length byte is the device's claim, not a fact */
+    }
+
+    zb_lumi_attrs_t attrs;
+    if (zb_lumi_parse_special(raw + 1, payload_len, &attrs) != ESP_OK) {
+        ESP_LOGD(TAG, "0xFF01 from 0x%04X carried nothing readable", short_addr);
+        return;
+    }
+
+    cJSON *json = cJSON_CreateObject();
+    if (json == NULL) {
+        return;
+    }
+
+    bool anything = false;
+
+    bool battery_is_new = false;
+
+    if (attrs.has_voltage) {
+        uint8_t percent = zb_lumi_voltage_to_percent(attrs.voltage_mv);
+        cJSON_AddNumberToObject(json, "battery", percent);
+        cJSON_AddNumberToObject(json, "voltage", attrs.voltage_mv);
+        cJSON_AddBoolToObject(json, "battery_low", percent < 20);
+
+        /* Entities are registered long before a sleepy device first reports,
+         * so setting the capability alone would leave Home Assistant without a
+         * battery entity to put this number in. */
+        battery_is_new = ((device->capabilities & DEV_CAP_BATTERY) == 0);
+        device->capabilities |= DEV_CAP_BATTERY;
+
+        anything = true;
+        ESP_LOGI(TAG, "Device 0x%04X battery: %u %% (%u mV)",
+                 short_addr, percent, attrs.voltage_mv);
+    }
+
+    if (attrs.has_temperature) {
+        cJSON_AddNumberToObject(json, "device_temperature", attrs.temperature_c);
+        anything = true;
+    }
+
+    if (!anything) {
+        cJSON_Delete(json);
+        return;
+    }
+
+    /* Merge before publishing: the event carries no payload and the handler
+     * reads the registry, the same contract the Tuya and converter paths use. */
+    esp_err_t ret = device_registry_merge_state(device->id, json);
+    cJSON_Delete(json);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to merge lumi state for 0x%04X: %s",
+                 short_addr, esp_err_to_name(ret));
+        return;
+    }
+
+    if (battery_is_new) {
+        /* Re-register this device's entities so a battery sensor exists. The
+         * adapter collapses a run of these into one client disconnect, so a
+         * device waking up does not throw Home Assistant off on its own. */
+        device_persistence_save(device);
+
+        evt_device_interviewed_t interviewed = {
+            .ieee_addr = device->id,
+            .short_addr = short_addr,
+            .success = true,
+            .endpoint_count = 1,
+        };
+        event_publish(EVT_DEVICE_INTERVIEWED, &interviewed, sizeof(interviewed));
+        ESP_LOGI(TAG, "Device 0x%04X gained a battery reading — re-registering entities",
+                 short_addr);
+    }
+
+    evt_device_state_t evt = {
+        .ieee_addr = device->id,
+        .short_addr = short_addr,
+        .endpoint = 1,
+        .cluster_id = ESP_ZB_ZCL_CLUSTER_ID_BASIC,
+        .attr_id = ZB_LUMI_ATTR_SPECIAL,
+        .json_state = NULL,
+    };
+    event_publish(EVT_DEVICE_STATE_CHANGED, &evt, sizeof(evt));
+}
+
 static void handle_basic_cluster_report(uint16_t short_addr, esp_zb_zcl_report_attr_message_t *msg)
 {
     if (msg == NULL) {
@@ -1655,6 +1767,10 @@ static void handle_basic_cluster_report(uint16_t short_addr, esp_zb_zcl_report_a
                 uint8_t power_source = *(uint8_t *)data->value;
                 ESP_LOGI(TAG, "Device 0x%04X power source: 0x%02X", short_addr, power_source);
             }
+            break;
+
+        case ZB_LUMI_ATTR_SPECIAL:
+            handle_lumi_special_attribute(short_addr, device, data);
             break;
 
         default:

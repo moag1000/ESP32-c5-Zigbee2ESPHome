@@ -31,6 +31,7 @@ set(COMPONENT_SRCS
     "zigbee/zb_alarms.c"
     "zigbee/zb_demand_response.c"
     "zigbee/zb_hvac_dehumid.c"
+    "zigbee/zb_lumi.c"
     "zigbee/zb_tuya.c"
     "zigbee/tuya/tuya_driver_registry.c"
     "zigbee/tuya/tuya_fingerbot.c"

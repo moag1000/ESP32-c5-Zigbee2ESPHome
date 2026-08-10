@@ -45,6 +45,12 @@ set(TEST_SRCS
     "../unit/test_zb_tuya_parse.c"
     "../../main/zigbee/zb_tuya.c"
 
+    # zb_lumi.c includes nothing but its own header and string.h. The parser
+    # walks a tag/type/value run with no per-entry length, so one wrong width
+    # shifts every following read — worth pinning down.
+    "../unit/test_zb_lumi.c"
+    "../../main/zigbee/zb_lumi.c"
+
     "../unit/test_zb_backup.c"
     "../../main/zigbee/zb_backup.c"
     "../mocks/mock_zb_backup_deps.c"

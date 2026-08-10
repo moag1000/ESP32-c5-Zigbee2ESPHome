@@ -49,6 +49,7 @@ extern test_stats_t run_zb_backup_tests(void);
 extern test_stats_t run_zb_tuya_parse_tests(void);
 #endif
 #ifdef TEST_SUITE_ESPHOME_PROTOCOL
+extern test_stats_t run_zb_lumi_tests(void);
 extern test_stats_t run_esphome_protocol_tests(void);
 extern test_stats_t run_esphome_execute_service_tests(void);
 #endif
@@ -163,6 +164,7 @@ static void test_runner_task(void *pvParameters)
     RUN_SUITE(run_zb_tuya_parse_tests, "Tuya Datapoint Parser");
 #endif
 #ifdef TEST_SUITE_ESPHOME_PROTOCOL
+    RUN_SUITE(run_zb_lumi_tests, "Aqara 0xFF01");
     RUN_SUITE(run_esphome_protocol_tests, "ESPHome Protocol");
     RUN_SUITE(run_esphome_execute_service_tests, "ESPHome ExecuteService");
 #endif
