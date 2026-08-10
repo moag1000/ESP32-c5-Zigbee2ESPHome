@@ -341,3 +341,21 @@ CONFIG_MMWAVE_GPIO_TX=5
 CONFIG_MMWAVE_GPIO_RX=4
 
 CONFIG_ESPHOME_API_MAX_CLIENTS=4
+
+# A hung task used to mean a dead gateway.
+#
+# Both watchdogs were enabled, but ESP_TASK_WDT_PANIC was not: the task
+# watchdog only printed a warning and never reset. Observed on 2026-08-10 —
+# the gateway went off the network for twenty minutes, stopped writing to the
+# serial console, and did not come back. Its boot counter proved no reboot
+# happened in that window (388 before, 389 after a hardware reset). The
+# interrupt watchdog does reset, but it only catches interrupts left disabled,
+# not a starved task.
+#
+# The timeout is 30 s rather than the default 10 s deliberately. This project
+# has had a reboot loop before, and the boot path does real work — the
+# converter index alone reads megabytes out of LittleFS. Thirty seconds is far
+# longer than any legitimate operation here and still far shorter than "until
+# someone walks over with a USB cable".
+CONFIG_ESP_TASK_WDT_PANIC=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=30
