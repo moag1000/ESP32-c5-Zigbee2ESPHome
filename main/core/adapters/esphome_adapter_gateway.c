@@ -13,9 +13,12 @@
  *   - Coordinator State (TextSensor, diagnostic)
  *   - Last Reset Reason (TextSensor, diagnostic)
  *   - Boot Count (Sensor, diagnostic)
+ *   - WiFi Disconnects (Sensor, diagnostic)
+ *   - WiFi Last Disconnect Reason (TextSensor, diagnostic)
  */
 
 #include "esphome_adapter_gateway.h"
+#include "wifi/wifi_manager.h"
 #include "core/monitoring/crash_reporter.h"
 #include "esphome/esphome_entities.h"
 #include "esphome/esphome_entities_types.h"
@@ -56,6 +59,8 @@ static const char *TAG = "gw_entities";
 #define GW_KEY_OTA_MODE            0x40000008
 #define GW_KEY_RESET_REASON        0x40000009
 #define GW_KEY_BOOT_COUNT          0x4000000C
+#define GW_KEY_WIFI_DISCONNECTS    0x4000000D
+#define GW_KEY_WIFI_LAST_REASON    0x4000000E
 
 #if CONFIG_MMWAVE_SENSOR_ENABLE
 #define GW_KEY_BLE_SCANNER         0x4000000A
@@ -481,6 +486,38 @@ esp_err_t esphome_adapter_gateway_register(void)
         esphome_entity_register_sensor(&cfg);
     }
 
+    /* --- WiFi Disconnects + Last Reason (diagnostic) ---
+     *
+     * This chip loses its access point every nine to fourteen hours with the AP
+     * sitting at -50 dBm, and until now the only way to see that was a serial
+     * cable. The watchdog recovers it, so a user may never notice — but they
+     * should be able to find out, and "how often" should be a number they can
+     * read rather than something someone infers from logs. */
+    {
+        esphome_sensor_config_t cfg = {0};
+        cfg.key = GW_KEY_WIFI_DISCONNECTS;
+        cfg.device_id = 0;
+        strncpy(cfg.name, "WiFi Disconnects", sizeof(cfg.name) - 1);
+        snprintf(cfg.unique_id, sizeof(cfg.unique_id), "zbgw_wifi_disconnects");
+        strncpy(cfg.icon, "mdi:wifi-remove", sizeof(cfg.icon) - 1);
+        cfg.accuracy_decimals = 0;
+        cfg.state_class = ESPHOME_STATE_CLASS_TOTAL_INCREASING;
+        cfg.entity_category = 2;  /* DIAGNOSTIC */
+        cfg.disabled_by_default = false;
+        esphome_entity_register_sensor(&cfg);
+    }
+    {
+        esphome_text_sensor_config_t cfg = {0};
+        cfg.key = GW_KEY_WIFI_LAST_REASON;
+        cfg.device_id = 0;
+        strncpy(cfg.name, "WiFi Last Disconnect Reason", sizeof(cfg.name) - 1);
+        snprintf(cfg.unique_id, sizeof(cfg.unique_id), "zbgw_wifi_last_reason");
+        strncpy(cfg.icon, "mdi:wifi-alert", sizeof(cfg.icon) - 1);
+        cfg.entity_category = 2;  /* DIAGNOSTIC */
+        cfg.disabled_by_default = false;
+        esphome_entity_register_text_sensor(&cfg);
+    }
+
     /* --- OTA Mode Switch --- */
     {
         esphome_switch_config_t cfg = {0};
@@ -561,6 +598,16 @@ void esphome_adapter_gateway_update_state(void)
         esphome_entity_update_text_sensor(GW_KEY_RESET_REASON, reason);
         esphome_entity_update_sensor(GW_KEY_BOOT_COUNT,
                                      (float)crash_reporter_get_boot_count());
+    }
+
+    /* WiFi disconnect statistics */
+    {
+        wifi_stats_t ws = {0};
+        if (wifi_manager_get_stats(&ws) == ESP_OK) {
+            esphome_entity_update_sensor(GW_KEY_WIFI_DISCONNECTS, (float)ws.disconnect_count);
+            esphome_entity_update_text_sensor(GW_KEY_WIFI_LAST_REASON,
+                wifi_manager_disconnect_reason_str(ws.last_disconnect_reason));
+        }
     }
 
     /* Channel + PAN ID from network info */

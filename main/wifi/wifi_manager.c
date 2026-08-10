@@ -517,6 +517,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                 /* Update stats and clear IP with mutex protection */
                 if (xSemaphoreTake(s_wifi.state_mutex, pdMS_TO_TICKS(WIFI_MGR_EVENT_MUTEX_TIMEOUT_MS)) == pdTRUE) {
                     s_wifi.stats.disconnect_count++;
+                    s_wifi.stats.last_disconnect_reason = (uint8_t)event->reason;
                     s_wifi.ip_addr.addr = 0;
                     auto_reconnect = s_wifi.auto_reconnect;
                     retry_count = s_wifi.retry_count;
@@ -1478,6 +1479,30 @@ uint8_t wifi_manager_get_signal_quality(void)
 /**
  * @brief Get WiFi statistics
  */
+const char *wifi_manager_disconnect_reason_str(uint8_t reason)
+{
+    switch (reason) {
+        case 0:                                          return "none";
+        case WIFI_REASON_AUTH_EXPIRE:                    return "auth expired";
+        case WIFI_REASON_AUTH_LEAVE:                     return "auth leave";
+        case WIFI_REASON_BEACON_TIMEOUT:                 return "beacon timeout";
+        case WIFI_REASON_NO_AP_FOUND:                    return "no AP found";
+        case WIFI_REASON_AUTH_FAIL:                      return "auth failed";
+        case WIFI_REASON_ASSOC_FAIL:                     return "assoc failed";
+        case WIFI_REASON_HANDSHAKE_TIMEOUT:              return "handshake timeout";
+        case WIFI_REASON_CONNECTION_FAIL:                return "connection failed";
+        case WIFI_REASON_NO_AP_FOUND_W_COMPATIBLE_SECURITY: return "no AP with compatible security";
+        case WIFI_REASON_NO_AP_FOUND_IN_AUTHMODE_THRESHOLD: return "no AP above authmode threshold";
+        case WIFI_REASON_NO_AP_FOUND_IN_RSSI_THRESHOLD:  return "no AP above RSSI threshold";
+        default: {
+            /* Deliberately a number, not a guess. */
+            static char buf[16];
+            snprintf(buf, sizeof(buf), "reason %u", (unsigned)reason);
+            return buf;
+        }
+    }
+}
+
 esp_err_t wifi_manager_get_stats(wifi_stats_t *stats)
 {
     if (!stats) {

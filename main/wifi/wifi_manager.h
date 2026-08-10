@@ -116,6 +116,7 @@ typedef struct {
     uint32_t uptime_seconds;   /*!< Current connection uptime */
     int8_t rssi;               /*!< Current RSSI in dBm (0 if not connected) */
     uint8_t signal_quality;    /*!< Signal quality percentage (0-100%) */
+    uint8_t last_disconnect_reason; /*!< esp_wifi reason code of the last disconnect (0 = none yet) */
 } wifi_stats_t;
 
 /**
@@ -264,6 +265,18 @@ void wifi_manager_update_rssi(void);
  *     - ESP_ERR_INVALID_ARG: Invalid stats pointer
  */
 esp_err_t wifi_manager_get_stats(wifi_stats_t *stats);
+
+/**
+ * @brief Human-readable name for an esp_wifi disconnect reason
+ *
+ * Covers the codes this gateway actually meets. Anything else comes back as
+ * "reason <n>" rather than a guess — a wrong name is worse than a number when
+ * someone is trying to work out why their gateway keeps vanishing.
+ *
+ * @param[in] reason esp_wifi reason code
+ * @return Static string, never NULL
+ */
+const char *wifi_manager_disconnect_reason_str(uint8_t reason);
 
 /**
  * @brief Enable or disable auto-reconnect
