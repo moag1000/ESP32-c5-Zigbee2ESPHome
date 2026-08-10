@@ -788,15 +788,24 @@ def _extract_func_name(call_str):
       ikeaLight(...)         -> 'ikeaLight'
       ledvanceLight(...)     -> 'ledvanceLight'
       addCustomClusterManuSpecificIkeaUnknown() -> 'addCustomClusterManuSpecificIkeaUnknown'
+      m.binary<"cluster", Type>(...) -> 'binary'
+
+    TypeScript generic arguments used to end the match here, and the caller
+    treats (None, None) as "not an extend call" and drops it whole. That is 954
+    calls in the upstream device files — m.numeric, m.enumLookup and m.binary
+    annotated with their cluster type — so the entities they declare never
+    reached the database at all, along with the entityCategory most of them
+    carry.
 
     Returns (func_name, args_str) or (None, None) if no match.
     """
     s = call_str.strip()
 
-    # Match: optional.prefix.chain.funcName( ... )
-    # The function name is everything after the last dot before the opening paren
-    # OR the entire name if no dots before the paren
-    match = re.match(r'(?:[\w.]*\.)?(\w+)\s*\((.*)\)\s*$', s, re.DOTALL)
+    # Match: optional.prefix.chain.funcName<Generics>( ... )
+    # The function name is everything after the last dot before the opening
+    # paren, or the whole name if there are no dots. Generics between the name
+    # and the paren are TypeScript, not JavaScript, and carry nothing we need.
+    match = re.match(r'(?:[\w.]*\.)?(\w+)\s*(?:<.*?>)?\s*\((.*)\)\s*$', s, re.DOTALL)
     if not match:
         return None, None
     return match.group(1), match.group(2).strip()
@@ -1084,6 +1093,12 @@ def parse_extend_call(call_str):
     # exposes). Without carrying that across, every value a device exposes
     # arrives in Home Assistant as an equal, primary control — a Fingerbot
     # listed "Reverse" and "Program Enable" beside its actual switch.
+    #
+    # The other spelling, .withCategory("config"), is not read here. It chains
+    # onto explicit exposes, and this extractor only walks modernExtend calls —
+    # adding the regex changed nothing measurable, so it is left out rather
+    # than carried as code that never fires. Reading those 318 upstream uses
+    # means parsing the exposes arrays first.
     if args_str:
         cat_m = re.search(r'entityCategory\s*:\s*["\']([a-z]+)["\']', args_str)
         if cat_m and cat_m.group(1) in ("config", "diagnostic"):
