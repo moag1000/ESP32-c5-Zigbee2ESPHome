@@ -606,6 +606,10 @@ esp_err_t zb_coordinator_permit_join_with_options(const zb_permit_join_options_t
              * allowing successful Zigbee association. */
 #if CONFIG_ESP_COEX_SW_COEXIST_ENABLE
             {
+                /* Pairing is the one time Zigbee gets the radio ahead of Wi-Fi.
+                 * A joining device retries on a short window, and a missed
+                 * association is a user standing there pressing a button that
+                 * does nothing. Normal operation runs a step below this. */
                 esp_ieee802154_coex_config_t coex_mid = {
                     .idle = IEEE802154_IDLE,
                     .txrx = IEEE802154_MIDDLE,
@@ -884,18 +888,18 @@ static void permit_join_timer_callback(void *arg)
         esp_timer_stop(s_permit_join_update_timer);
     }
 
-    /* Ensure IEEE 802.15.4 coex priority stays at MIDDLE after permit_join ends */
+    /* Drop IEEE 802.15.4 back below Wi-Fi now that pairing is over */
 #if CONFIG_ESP_COEX_SW_COEXIST_ENABLE
     {
         esp_ieee802154_coex_config_t coex_normal = {
             .idle = IEEE802154_IDLE,
-            .txrx = IEEE802154_MIDDLE,
-            .txrx_at = IEEE802154_MIDDLE,
+            .txrx = IEEE802154_LOW,
+            .txrx_at = IEEE802154_LOW,
         };
         esp_zb_lock_acquire(GW_TIMEOUT_VERY_LONG_TICKS);
         esp_ieee802154_set_coex_config(coex_normal);
         esp_zb_lock_release();
-        ESP_LOGD(TAG, "IEEE 802.15.4 coex priority confirmed MIDDLE (timer expired)");
+        ESP_LOGD(TAG, "IEEE 802.15.4 coex priority back to LOW (timer expired)");
     }
 #endif
 
@@ -1057,6 +1061,24 @@ static void esp_zb_task(void *pvParameters)
 
     set_coordinator_state(ZB_COORD_STATE_RUNNING);
     ESP_LOGI(TAG, "Zigbee coordinator running");
+
+    /* Put 802.15.4 below Wi-Fi for normal operation.
+     *
+     * This has to happen here rather than only when a permit_join window
+     * closes, which is where it used to be set. A gateway that boots and never
+     * pairs anything would otherwise keep the driver default, and the driver
+     * default is what cost a third of every Wi-Fi packet. */
+#if CONFIG_ESP_COEX_SW_COEXIST_ENABLE
+    {
+        esp_ieee802154_coex_config_t coex_normal = {
+            .idle = IEEE802154_IDLE,
+            .txrx = IEEE802154_LOW,
+            .txrx_at = IEEE802154_LOW,
+        };
+        esp_ieee802154_set_coex_config(coex_normal);
+        ESP_LOGI(TAG, "IEEE 802.15.4 coex priority set to LOW (Wi-Fi first)");
+    }
+#endif
 
     /* Publish Zigbee network ready event to event bus */
     event_publish(EVT_NETWORK_READY, NULL, 0);
