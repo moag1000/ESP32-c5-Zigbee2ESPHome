@@ -11,6 +11,8 @@
 #include "core/events/event_data.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "esp_task_wdt.h"
+#include "esp_attr.h"
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "cJSON.h"
@@ -29,6 +31,71 @@ static bool s_initialized = false;
 
 /** @brief Cached crash information */
 static crash_info_t s_crash_info = {0};
+
+/* ============================================================================
+ * Task Watchdog Breadcrumb
+ * ============================================================================ */
+
+/**
+ * @brief What the task watchdog saw, kept across the reboot it causes
+ *
+ * On 2026-08-10 this gateway hung for twenty minutes: off the network, silent
+ * on the serial console, and — because ESP_TASK_WDT_PANIC was unset — never
+ * rebooted. The panic handler now runs, but it prints to the console, and the
+ * console was exactly what had stopped working. A printed backtrace nobody can
+ * read is not evidence.
+ *
+ * RTC memory marked no-init survives a software reset, so the watchdog ISR can
+ * leave a note here and the next boot can read it. NVS cannot be used: this
+ * runs in interrupt context, where a flash write is not allowed.
+ */
+#define WDT_BREADCRUMB_MAGIC 0x57445431u   /* "WDT1" */
+
+typedef struct {
+    uint32_t magic;         /**< WDT_BREADCRUMB_MAGIC when the note is real */
+    uint32_t count;         /**< How many times the watchdog has fired */
+    uint32_t uptime_ms;     /**< Uptime when it fired */
+} wdt_breadcrumb_t;
+
+static RTC_NOINIT_ATTR wdt_breadcrumb_t s_wdt_breadcrumb;
+
+/**
+ * @brief Task watchdog ISR hook
+ *
+ * Overrides the weak placeholder in esp_task_wdt.h. Interrupt context, so no
+ * logging and no flash: this writes three words and returns, and the panic
+ * handler takes it from there.
+ */
+void esp_task_wdt_isr_user_handler(void)
+{
+    if (s_wdt_breadcrumb.magic != WDT_BREADCRUMB_MAGIC) {
+        s_wdt_breadcrumb.magic = WDT_BREADCRUMB_MAGIC;
+        s_wdt_breadcrumb.count = 0;
+    }
+    s_wdt_breadcrumb.count++;
+    s_wdt_breadcrumb.uptime_ms = (uint32_t)(esp_timer_get_time() / 1000);
+}
+
+/**
+ * @brief Report and clear a breadcrumb left by a previous boot
+ *
+ * Called once during init. A power cycle wipes RTC memory, so a note here
+ * always means the watchdog fired on the boot before this one — which is the
+ * distinction that took a hardware reset and a boot counter to establish the
+ * first time.
+ */
+static void consume_wdt_breadcrumb(void)
+{
+    if (s_wdt_breadcrumb.magic != WDT_BREADCRUMB_MAGIC) {
+        return;   /* cold boot, or nothing to report */
+    }
+
+    ESP_LOGW(TAG, "Task watchdog fired on the previous boot (%lu time(s), last at %lu ms uptime)",
+             (unsigned long)s_wdt_breadcrumb.count,
+             (unsigned long)s_wdt_breadcrumb.uptime_ms);
+
+    s_wdt_breadcrumb.magic = 0;
+}
 
 /* ============================================================================
  * Reset Reason Helpers
@@ -196,6 +263,8 @@ esp_err_t crash_reporter_init(void)
     }
 
     s_initialized = true;
+
+    consume_wdt_breadcrumb();
 
     /* Log the reset reason */
     if (s_crash_info.was_crash) {
