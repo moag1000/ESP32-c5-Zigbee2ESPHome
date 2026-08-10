@@ -1354,6 +1354,131 @@ def extract_definitions_from_file(filepath):
     return devices
 
 
+# ============================================================================
+# Explicit exposes arrays
+# ============================================================================
+
+# Semantic builders — e.battery(), e.temperature() and friends. Each stands for
+# a complete entity, so they reuse the expose shapes the modernExtend map
+# already produces rather than inventing a second set that could drift.
+#
+# Access codes follow zigbee2mqtt: 1 STATE, 2 SET, 3 STATE_SET, 5 STATE_GET,
+# 7 ALL. Types follow zb_expose_type_t: 0 light, 1 switch, 2 sensor, 3 binary
+# sensor, 4 cover, 5 lock, 6 climate, 7 fan, 8 select, 9 number, 11 text.
+EXPOSE_SEMANTIC = {
+    "battery":            {"t": 2, "f": 0, "dc": "battery",     "u": "%",   "sc": "measurement", "p": "battery",     "ac": 1},
+    "battery_voltage":    {"t": 2, "f": 0, "dc": "voltage",     "u": "mV",  "sc": "measurement", "p": "voltage",     "ac": 1},
+    "temperature":        {"t": 2, "f": 0, "dc": "temperature", "u": "°C", "sc": "measurement", "p": "temperature", "ac": 1},
+    "device_temperature": {"t": 2, "f": 0, "dc": "temperature", "u": "°C", "sc": "measurement", "p": "device_temperature", "ac": 1},
+    "humidity":           {"t": 2, "f": 0, "dc": "humidity",    "u": "%",   "sc": "measurement", "p": "humidity",    "ac": 1},
+    "pressure":           {"t": 2, "f": 0, "dc": "pressure",    "u": "hPa", "sc": "measurement", "p": "pressure",    "ac": 1},
+    "illuminance":        {"t": 2, "f": 0, "dc": "illuminance", "u": "lx",  "sc": "measurement", "p": "illuminance", "ac": 1},
+    "soil_moisture":      {"t": 2, "f": 0, "dc": "humidity",    "u": "%",   "sc": "measurement", "p": "soil_moisture", "ac": 1},
+    "co2":                {"t": 2, "f": 0, "dc": "carbon_dioxide", "u": "ppm", "sc": "measurement", "p": "co2",     "ac": 1},
+    "power":              {"t": 2, "f": 0, "dc": "power",       "u": "W",   "sc": "measurement", "p": "power",       "ac": 1},
+    "energy":             {"t": 2, "f": 0, "dc": "energy",      "u": "kWh", "sc": "total_increasing", "p": "energy", "ac": 1},
+    "voltage":            {"t": 2, "f": 0, "dc": "voltage",     "u": "V",   "sc": "measurement", "p": "voltage",     "ac": 1},
+    "current":            {"t": 2, "f": 0, "dc": "current",     "u": "A",   "sc": "measurement", "p": "current",     "ac": 1},
+    "linkquality":        {"t": 2, "f": 0,                       "u": "lqi", "sc": "measurement", "p": "linkquality", "ac": 1},
+    "occupancy":          {"t": 3, "f": 0, "dc": "motion",                   "p": "occupancy",   "ac": 1},
+    "presence":           {"t": 3, "f": 0, "dc": "presence",                 "p": "presence",    "ac": 1},
+    "contact":            {"t": 3, "f": 0, "dc": "door",                     "p": "contact",     "ac": 1},
+    "water_leak":         {"t": 3, "f": 0, "dc": "moisture",                 "p": "water_leak",  "ac": 1},
+    "smoke":              {"t": 3, "f": 0, "dc": "smoke",                    "p": "smoke",       "ac": 1},
+    "gas":                {"t": 3, "f": 0, "dc": "gas",                      "p": "gas",         "ac": 1},
+    "vibration":          {"t": 3, "f": 0, "dc": "vibration",                "p": "vibration",   "ac": 1},
+    "tamper":             {"t": 3, "f": 0, "dc": "tamper",                   "p": "tamper",      "ac": 1},
+    "battery_low":        {"t": 3, "f": 0, "dc": "battery",                  "p": "battery_low", "ac": 1},
+    "carbon_monoxide":    {"t": 3, "f": 0, "dc": "carbon_monoxide",          "p": "carbon_monoxide", "ac": 1},
+    "switch":             {"t": 1, "f": 0,                                   "p": "state",       "ac": 3},
+    "lock":               {"t": 5, "f": 0,                                   "p": "state",       "ac": 3},
+    "cover":              {"t": 4, "f": 0,                                   "p": "state",       "ac": 3},
+    "cover_position":     {"t": 4, "f": 32,                                  "p": "state",       "ac": 3},
+    "action":             {"t": 11, "f": 0,                                  "p": "action",      "ac": 1},
+}
+
+# z2m access constants, as they appear in source
+EXPOSE_ACCESS = {
+    "STATE": 1, "SET": 2, "STATE_SET": 3, "GET": 4, "STATE_GET": 5, "ALL": 7,
+}
+
+# Generic builders: (read-only type, writable type)
+EXPOSE_GENERIC = {
+    "numeric": (2, 9),    # sensor / number
+    "binary":  (3, 1),    # binary sensor / switch
+    "enum":    (2, 8),    # sensor / select
+    "text":    (11, 11),  # text either way
+    "list":    (11, 11),
+}
+
+
+def _parse_exposes_array(exposes_str):
+    """Turn an explicit exposes: [...] array into expose dicts.
+
+    The extractor only ever walked modernExtend calls, so 35 % of upstream
+    definitions arrived with no exposes at all and the 318 .withCategory()
+    annotations had nothing to attach to.
+
+    Only the builders above are understood. Anything else — e.composite(),
+    e.climate(), device-specific helpers — is skipped rather than guessed at,
+    because a wrong entity type in Home Assistant is worse than a missing one:
+    it shows up, misbehaves, and looks like the gateway's fault.
+    """
+    exposes = []
+    if not exposes_str:
+        return exposes
+
+    for call in split_extend_calls(exposes_str):
+        call = call.strip()
+        if not call:
+            continue
+
+        m = re.match(r'(?:\w+\.)*e\.(\w+)\s*\(', call)
+        if not m:
+            m = re.match(r'e\.(\w+)\s*\(', call)
+        if not m:
+            continue
+        builder = m.group(1)
+
+        entry = None
+        if builder in EXPOSE_SEMANTIC:
+            entry = dict(EXPOSE_SEMANTIC[builder])
+        elif builder in EXPOSE_GENERIC:
+            name_m = re.match(r'(?:\w+\.)*e\.\w+\s*\(\s*["\']([^"\']+)["\']', call)
+            if not name_m:
+                continue
+            acc = 1
+            acc_m = re.search(r'\bea\.(\w+)', call)
+            if acc_m:
+                acc = EXPOSE_ACCESS.get(acc_m.group(1), 1)
+            ro_t, rw_t = EXPOSE_GENERIC[builder]
+            entry = {
+                "t": rw_t if (acc & 2) else ro_t,
+                "f": 0,
+                "p": name_m.group(1),
+                "ac": acc,
+            }
+        else:
+            continue
+
+        # Chained builder methods. withProperty() has to win over the name,
+        # since that is exactly what it is for.
+        unit_m = re.search(r'\.withUnit\(\s*["\']([^"\']*)["\']\s*\)', call)
+        if unit_m:
+            entry["u"] = unit_m.group(1)
+
+        prop_m = re.search(r'\.withProperty\(\s*["\']([^"\']+)["\']\s*\)', call)
+        if prop_m:
+            entry["p"] = prop_m.group(1)
+
+        cat_m = re.search(r'\.withCategory\(\s*["\']([a-z]+)["\']\s*\)', call)
+        if cat_m and cat_m.group(1) in ("config", "diagnostic"):
+            entry["cat"] = cat_m.group(1)
+
+        exposes.append(entry)
+
+    return exposes
+
 def _parse_definition_block(block, file_manuf):
     """Parse a single definition block and return a list of device dicts.
 
@@ -1488,6 +1613,34 @@ def _parse_definition_block(block, file_manuf):
     # Deduplicate fz/tz entries
     device["fz"] = deduplicate_entries(device["fz"])
     device["tz"] = deduplicate_entries(device["tz"])
+
+    # Explicit exposes arrays, which the extend path never sees.
+    #
+    # Placed after fz/tz are complete on purpose: an expose is only kept when
+    # something actually feeds it. Without that filter this added 4164 exposes
+    # with no matching converter key — entities that appear in Home Assistant
+    # and then stay empty forever, which is worse than not appearing at all.
+    # With it, everything kept here has a source to read from or a way to be
+    # written.
+    #
+    # Added rather than replacing what the extend path found: a definition can
+    # carry both, and duplicates by property are dropped so a device declaring
+    # e.switch() next to m.onOff() does not end up with two switches.
+    exposes_str = extract_bracket_content(block, "exposes")
+    parsed_exposes = _parse_exposes_array(exposes_str)
+    if parsed_exposes:
+        served = {x.get("k") for x in device["fz"]} | {x.get("k") for x in device["tz"]}
+        seen_props = {e.get("p") for e in device["e"]}
+        added = 0
+        for e in parsed_exposes:
+            prop = e.get("p")
+            if prop in seen_props or prop not in served:
+                continue
+            seen_props.add(prop)
+            device["e"].append(e)
+            added += 1
+        if added and device["_coverage"] == "NO_MATCH":
+            device["_coverage"] = "PARTIAL"
 
     # Include if we got converter info, OR always include with at least model/vendor info
     if device["fz"] or device["e"]:

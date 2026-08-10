@@ -1,1 +1,1 @@
-{"devices":[{"m":"KKZ-MO021","mf":"TUYATEC-smmlguju","v":"Hej","d":"PIR sensor","src":"z2m","pri":2,"fz":[{"c":1,"a":33,"k":"battery","fn":"fz_battery"}],"_compat":true}]}
+{"devices":[{"m":"KKZ-MO021","mf":"TUYATEC-smmlguju","v":"Hej","d":"PIR sensor","src":"z2m","pri":2,"fz":[{"c":1,"a":33,"k":"battery","fn":"fz_battery"}],"e":[{"t":2,"f":0,"dc":"battery","u":"%","sc":"measurement","p":"battery","ac":1}],"_compat":true}]}

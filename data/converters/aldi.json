@@ -1,1 +1,1 @@
-{"devices":[{"m":"141L100RC","mf":"Aldi","v":"Aldi","d":"MEGOS switch and dimming light remote control","src":"z2m","pri":2,"fz":[{"c":6,"a":0,"k":"action","fn":"fz_on_off"},{"c":8,"a":0,"k":"action","fn":"fz_brightness"}],"_compat":true}]}
+{"devices":[{"m":"141L100RC","mf":"Aldi","v":"Aldi","d":"MEGOS switch and dimming light remote control","src":"z2m","pri":2,"fz":[{"c":6,"a":0,"k":"action","fn":"fz_on_off"},{"c":8,"a":0,"k":"action","fn":"fz_brightness"}],"e":[{"t":11,"f":0,"p":"action","ac":1}],"_compat":true}]}
