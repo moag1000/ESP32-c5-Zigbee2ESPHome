@@ -50,6 +50,7 @@ extern test_stats_t run_zb_tuya_parse_tests(void);
 #endif
 #ifdef TEST_SUITE_ESPHOME_PROTOCOL
 extern test_stats_t run_esphome_protocol_tests(void);
+extern test_stats_t run_esphome_execute_service_tests(void);
 #endif
 #ifdef TEST_SUITE_ESPHOME_ENTITY_MIRROR
 extern test_stats_t run_esphome_entity_mirror_tests(void);
@@ -163,6 +164,7 @@ static void test_runner_task(void *pvParameters)
 #endif
 #ifdef TEST_SUITE_ESPHOME_PROTOCOL
     RUN_SUITE(run_esphome_protocol_tests, "ESPHome Protocol");
+    RUN_SUITE(run_esphome_execute_service_tests, "ESPHome ExecuteService");
 #endif
 #ifdef TEST_SUITE_ESPHOME_ENTITY_MIRROR
     RUN_SUITE(run_esphome_entity_mirror_tests, "ESPHome Entity Mirror");

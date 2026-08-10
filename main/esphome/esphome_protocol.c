@@ -1097,3 +1097,142 @@ esp_err_t esphome_protocol_test(void)
     ESP_LOGI(TAG, "=== All Protocol Tests PASSED ===");
     return ESP_OK;
 }
+
+
+/* ============================================================================
+ * ExecuteServiceRequest
+ * ============================================================================ */
+
+/** Decode one ExecuteServiceArgument submessage. See the header for the layout. */
+static void decode_service_argument(esphome_buffer_t *sub,
+                                    esphome_service_arg_value_t *out,
+                                    bool *present)
+{
+    *present = false;
+
+    while (esphome_buffer_remaining(sub) > 0) {
+        uint32_t field_num;
+        protobuf_wire_type_t wire_type;
+
+        if (esphome_decode_tag(sub, &field_num, &wire_type) != ESP_OK) {
+            return;
+        }
+
+        switch (field_num) {
+            case 1: /* bool_ */
+                if (esphome_decode_bool(sub, &out->bool_value) != ESP_OK) return;
+                out->type = ESPHOME_SERVICE_ARG_BOOL;
+                *present = true;
+                break;
+
+            case 2: { /* legacy_int, a plain int32 */
+                uint32_t v = 0;
+                if (esphome_decode_uint32(sub, &v) != ESP_OK) return;
+                out->int_value = (int32_t)v;
+                out->type = ESPHOME_SERVICE_ARG_INT;
+                *present = true;
+                break;
+            }
+
+            case 3: /* float_ */
+                if (esphome_decode_float(sub, &out->float_value) != ESP_OK) return;
+                out->type = ESPHOME_SERVICE_ARG_FLOAT;
+                *present = true;
+                break;
+
+            case 4: /* string_ */
+                if (esphome_decode_string(sub, out->string_value,
+                                          sizeof(out->string_value)) != ESP_OK) return;
+                out->type = ESPHOME_SERVICE_ARG_STRING;
+                *present = true;
+                break;
+
+            case 5: { /* int_, sint32 — zigzag */
+                uint64_t raw = 0;
+                if (esphome_decode_varint(sub, &raw) != ESP_OK) return;
+                out->int_value = (int32_t)((raw >> 1) ^ (~(raw & 1) + 1));
+                out->type = ESPHOME_SERVICE_ARG_INT;
+                *present = true;
+                break;
+            }
+
+            default:
+                /* 6-9 are the repeated array forms. No service here declares an
+                 * array argument, so Home Assistant will not send one; skipping
+                 * keeps the read position honest if that ever changes. */
+                if (esphome_skip_field(sub, wire_type) != ESP_OK) return;
+                break;
+        }
+    }
+}
+
+esp_err_t esphome_decode_execute_service(const uint8_t *payload,
+                                         size_t payload_len,
+                                         uint32_t *key,
+                                         esphome_service_arg_value_t *args,
+                                         bool *arg_present,
+                                         size_t max_args,
+                                         size_t *arg_count)
+{
+    if (payload == NULL || payload_len == 0 || key == NULL || args == NULL ||
+        arg_present == NULL || arg_count == NULL || max_args == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    *key = 0;
+    *arg_count = 0;
+    memset(args, 0, max_args * sizeof(*args));
+    memset(arg_present, 0, max_args * sizeof(*arg_present));
+
+    esphome_buffer_t buf;
+    esphome_buffer_init(&buf, (uint8_t *)payload, payload_len);
+
+    while (esphome_buffer_remaining(&buf) > 0) {
+        uint32_t field_num;
+        protobuf_wire_type_t wire_type;
+
+        if (esphome_decode_tag(&buf, &field_num, &wire_type) != ESP_OK) {
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        if (field_num == 1) { /* key, fixed32 */
+            if (esphome_decode_fixed32(&buf, key) != ESP_OK) {
+                return ESP_ERR_INVALID_ARG;
+            }
+            continue;
+        }
+
+        if (field_num != 2) { /* nothing else is defined in this message */
+            if (esphome_skip_field(&buf, wire_type) != ESP_OK) {
+                return ESP_ERR_INVALID_ARG;
+            }
+            continue;
+        }
+
+        uint64_t sub_len = 0;
+        if (wire_type != PROTOBUF_WIRE_LEN ||
+            esphome_decode_varint(&buf, &sub_len) != ESP_OK ||
+            sub_len > esphome_buffer_remaining(&buf)) {
+            ESP_LOGW(TAG, "Malformed service argument");
+            return ESP_ERR_INVALID_ARG;
+        }
+
+        /* Refuse rather than truncate. Dropping the surplus and still reporting
+         * the full count would hand the callback an array shorter than the
+         * count says; dropping it silently would run a service on arguments the
+         * caller did not send. */
+        if (*arg_count >= max_args) {
+            ESP_LOGW(TAG, "More than %zu service arguments", max_args);
+            return ESP_ERR_INVALID_SIZE;
+        }
+
+        esphome_buffer_t sub;
+        esphome_buffer_init(&sub, buf.data + buf.position, (size_t)sub_len);
+        buf.position += (size_t)sub_len;
+
+        decode_service_argument(&sub, &args[*arg_count], &arg_present[*arg_count]);
+        (*arg_count)++;
+    }
+
+    return ESP_OK;
+}

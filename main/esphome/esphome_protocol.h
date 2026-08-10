@@ -22,6 +22,7 @@
 #include <stddef.h>
 #include "esp_err.h"
 #include "esphome_common.h"
+#include "esphome_services.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -429,6 +430,42 @@ esp_err_t esphome_build_empty_message(esphome_msg_type_t msg_type, uint8_t *outp
  * @return String name of message type
  */
 const char *esphome_msg_type_name(esphome_msg_type_t type);
+
+/**
+ * @brief Decode an ExecuteServiceRequest payload
+ *
+ * `repeated ExecuteServiceArgument args = 2` is a length-delimited submessage
+ * per argument, not a flat value per type. Its field numbers are not the
+ * obvious ones either:
+ *
+ *     1 bool_        2 legacy_int (int32)   3 float_
+ *     4 string_      5 int_ (sint32)        6-9 repeated arrays
+ *
+ * Field 5 is zigzag-encoded, so reading it as a plain varint turns 1 into 2.
+ *
+ * Proto3 omits fields holding their type's default, so `false`, `0`, `0.0` and
+ * "" all arrive as an *empty* submessage. `arg_present[i]` is false for those:
+ * the wire cannot say what type they are, and the caller is expected to take
+ * the type from the service declaration.
+ *
+ * @param[in]  payload     Message payload
+ * @param[in]  payload_len Payload length
+ * @param[out] key         Service key from field 1
+ * @param[out] args        Decoded values, zero-initialized by this function
+ * @param[out] arg_present One flag per argument; false means empty submessage
+ * @param[in]  max_args    Capacity of @p args and @p arg_present
+ * @param[out] arg_count   Number of arguments decoded
+ * @return ESP_OK on success
+ * @return ESP_ERR_INVALID_ARG on a malformed message
+ * @return ESP_ERR_INVALID_SIZE if the message carries more than @p max_args
+ */
+esp_err_t esphome_decode_execute_service(const uint8_t *payload,
+                                         size_t payload_len,
+                                         uint32_t *key,
+                                         esphome_service_arg_value_t *args,
+                                         bool *arg_present,
+                                         size_t max_args,
+                                         size_t *arg_count);
 
 /**
  * @brief Initialize protocol module

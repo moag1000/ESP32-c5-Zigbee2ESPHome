@@ -1781,148 +1781,25 @@ static esp_err_t handle_list_services_request(esphome_client_t *client, const es
 /**
  * @brief Handle ExecuteService message
  */
-/**
- * @brief Decode one ExecuteServiceArgument submessage
- *
- * Field numbers are the ones from ESPHome's api.proto, and they are not the
- * tidy 1=bool 2=int 3=float 4=string one might assume:
- *
- *     1 bool_        2 legacy_int (int32)   3 float_
- *     4 string_      5 int_ (sint32)        6-9 repeated arrays
- *
- * Field 5 is a sint32, so it is zigzag-encoded — reading it as a plain varint
- * turns -1 into 1 and 1 into 2.
- *
- * Proto3 omits fields that hold their default, so `false`, `0`, `0.0` and ""
- * all arrive as an *empty* submessage. The wire therefore cannot tell us the
- * type, and `present` is what the caller uses to decide whether it learned
- * anything at all.
- */
-static void decode_service_argument(esphome_buffer_t *sub,
-                                    esphome_service_arg_value_t *out,
-                                    bool *present)
-{
-    *present = false;
-
-    while (esphome_buffer_remaining(sub) > 0) {
-        uint32_t field_num;
-        protobuf_wire_type_t wire_type;
-
-        if (esphome_decode_tag(sub, &field_num, &wire_type) != ESP_OK) {
-            return;
-        }
-
-        switch (field_num) {
-            case 1: /* bool_ */
-                if (esphome_decode_bool(sub, &out->bool_value) != ESP_OK) return;
-                out->type = ESPHOME_SERVICE_ARG_BOOL;
-                *present = true;
-                break;
-
-            case 2: { /* legacy_int, a plain int32 */
-                uint32_t v = 0;
-                if (esphome_decode_uint32(sub, &v) != ESP_OK) return;
-                out->int_value = (int32_t)v;
-                out->type = ESPHOME_SERVICE_ARG_INT;
-                *present = true;
-                break;
-            }
-
-            case 3: /* float_ */
-                if (esphome_decode_float(sub, &out->float_value) != ESP_OK) return;
-                out->type = ESPHOME_SERVICE_ARG_FLOAT;
-                *present = true;
-                break;
-
-            case 4: /* string_ */
-                if (esphome_decode_string(sub, out->string_value,
-                                          sizeof(out->string_value)) != ESP_OK) return;
-                out->type = ESPHOME_SERVICE_ARG_STRING;
-                *present = true;
-                break;
-
-            case 5: { /* int_, sint32 — zigzag */
-                uint64_t raw = 0;
-                if (esphome_decode_varint(sub, &raw) != ESP_OK) return;
-                out->int_value = (int32_t)((raw >> 1) ^ (~(raw & 1) + 1));
-                out->type = ESPHOME_SERVICE_ARG_INT;
-                *present = true;
-                break;
-            }
-
-            default:
-                /* 6-9 are the repeated array forms. No service here declares an
-                 * array argument, so Home Assistant will not send one; skipping
-                 * keeps the read position honest if that ever changes. */
-                if (esphome_skip_field(sub, wire_type) != ESP_OK) return;
-                break;
-        }
-    }
-}
-
 static esp_err_t handle_execute_service(esphome_client_t *client, const esphome_message_t *msg)
 {
     if (!msg->payload || msg->payload_len == 0) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    esphome_buffer_t buf;
-    esphome_buffer_init(&buf, msg->payload, msg->payload_len);
-
     uint32_t key = 0;
     esphome_service_arg_value_t args[ESPHOME_MAX_SERVICE_ARGS] = {0};
     bool arg_present[ESPHOME_MAX_SERVICE_ARGS] = {0};
     size_t arg_count = 0;
 
-    while (esphome_buffer_remaining(&buf) > 0) {
-        uint32_t field_num;
-        protobuf_wire_type_t wire_type;
-
-        if (esphome_decode_tag(&buf, &field_num, &wire_type) != ESP_OK) {
-            break;
-        }
-
-        if (field_num == 1) { /* key, fixed32 */
-            if (esphome_decode_fixed32(&buf, &key) != ESP_OK) {
-                break;
-            }
-            continue;
-        }
-
-        if (field_num != 2) { /* nothing else is defined in this message */
-            if (esphome_skip_field(&buf, wire_type) != ESP_OK) {
-                break;
-            }
-            continue;
-        }
-
-        /* Field 2 is `repeated ExecuteServiceArgument args` — a length-delimited
-         * submessage per argument, not a flat value. Reading it as a flat field
-         * is what this code used to do, and it made every service call from Home
-         * Assistant fail: the length prefix was consumed as a bool, the
-         * submessage body was then parsed as top-level fields, and the argument
-         * count came out one too high. All three gateway services were
-         * unreachable from HA for as long as they have existed. */
-        uint64_t sub_len = 0;
-        if (wire_type != PROTOBUF_WIRE_LEN ||
-            esphome_decode_varint(&buf, &sub_len) != ESP_OK ||
-            sub_len > esphome_buffer_remaining(&buf)) {
-            ESP_LOGW(TAG, "Malformed service argument, dropping the call");
-            return ESP_ERR_INVALID_ARG;
-        }
-
-        esphome_buffer_t sub;
-        esphome_buffer_init(&sub, buf.data + buf.position, (size_t)sub_len);
-        buf.position += (size_t)sub_len;
-
-        if (arg_count >= ESPHOME_MAX_SERVICE_ARGS) {
-            ESP_LOGW(TAG, "More than %d service arguments, ignoring the rest",
-                     ESPHOME_MAX_SERVICE_ARGS);
-            continue;
-        }
-
-        decode_service_argument(&sub, &args[arg_count], &arg_present[arg_count]);
-        arg_count++;
+    esp_err_t ret = esphome_decode_execute_service(msg->payload, msg->payload_len,
+                                                   &key, args, arg_present,
+                                                   ESPHOME_MAX_SERVICE_ARGS,
+                                                   &arg_count);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Dropping malformed ExecuteServiceRequest: %s",
+                 esp_err_to_name(ret));
+        return ret;
     }
 
     /* The declared type wins over the wire.

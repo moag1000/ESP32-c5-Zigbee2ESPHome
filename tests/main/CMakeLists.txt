@@ -55,6 +55,12 @@ set(TEST_SRCS
     "../unit/test_esphome_protocol.c"
     "../../main/esphome/esphome_protocol.c"
 
+    # The ExecuteServiceRequest decoder lives in esphome_protocol.c (listed
+    # above) precisely so it can be tested: reading it out of the API handler
+    # would have dragged in the socket server and the service registry. It was
+    # wrong for as long as the gateway had services, and nothing noticed.
+    "../unit/test_esphome_execute_service.c"
+
     # The entity mirror needs memory_manager_ng (already above) and event_bus,
     # which comes in with the zb_diagnostics suite along with its perf_metrics
     # mock. Nothing else: the mirror deliberately does not depend on the device
