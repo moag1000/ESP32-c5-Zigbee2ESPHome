@@ -107,6 +107,40 @@ static void action_auto_clear_cb(void *arg)
  * Forward Declarations - Event Handlers
  * ============================================================================ */
 
+/** One-shot timer that collapses a burst of interviews into one disconnect */
+static esp_timer_handle_t s_rediscover_timer = NULL;
+
+static void rediscovery_timer_cb(void *arg)
+{
+    (void)arg;
+    ESP_LOGI(TAG, "Disconnecting ESPHome clients to trigger entity re-discovery");
+    esphome_api_disconnect_all_clients();
+}
+
+static void schedule_rediscovery(void)
+{
+    if (s_rediscover_timer == NULL) {
+        const esp_timer_create_args_t args = {
+            .callback = rediscovery_timer_cb,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "esph_rediscover",
+        };
+        if (esp_timer_create(&args, &s_rediscover_timer) != ESP_OK) {
+            ESP_LOGW(TAG, "No re-discovery timer — disconnecting immediately");
+            esphome_api_disconnect_all_clients();
+            return;
+        }
+    }
+
+    if (esp_timer_is_active(s_rediscover_timer)) {
+        ESP_LOGD(TAG, "Re-discovery already pending, folding this interview in");
+        return;
+    }
+
+    esp_timer_start_once(s_rediscover_timer,
+                         (uint64_t)ESPHOME_REDISCOVERY_DELAY_MS * 1000);
+}
+
 static void handle_device_state_changed(event_type_t type, void *data,
                                          size_t data_size, void *ctx);
 static void handle_device_joined(event_type_t type, void *data,
@@ -2013,10 +2047,20 @@ static void handle_device_interviewed(event_type_t type, void *data,
     esphome_adapter_sync_device(evt->ieee_addr);
 
     /* Force HA client reconnect so it re-requests ListEntities and discovers
-     * the newly registered entities.  The ESPHome HA integration reconnects
-     * automatically within seconds after a server-initiated disconnect. */
-    ESP_LOGI(TAG, "Disconnecting ESPHome clients to trigger entity re-discovery");
-    esphome_api_disconnect_all_clients();
+     * the newly registered entities. The ESPHome HA integration reconnects
+     * automatically within seconds after a server-initiated disconnect.
+     *
+     * Collapsed into one disconnect per burst. Provisioning at boot can
+     * complete several interviews in quick succession, and one disconnect each
+     * means Home Assistant is thrown off and re-enumerates repeatedly — which
+     * is why measurements taken right after a flash always looked bad.
+     *
+     * Armed only if not already armed, deliberately. Restarting the timer on
+     * every interview would push it out for as long as interviews keep
+     * arriving, so a long burst would never trigger the re-discovery it exists
+     * for. That is exactly how the Wi-Fi watchdog in this project managed never
+     * to fire: reset by the event it was watching for. */
+    schedule_rediscovery();
 }
 
 /* ============================================================================

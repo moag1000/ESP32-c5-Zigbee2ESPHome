@@ -136,6 +136,17 @@ extern "C" {
  */
 #define ESPHOME_LOGIN_IDLE_TIMEOUT_MS       30000
 
+/** @brief How long interviews are collected before one re-discovery disconnect
+ *
+ * Sized from a measurement, not from taste: two back-to-back reconfigure calls
+ * produced interview completions 20.6 s apart, because an interview holds the
+ * radio for about that long. A 5 s window collapsed nothing at all. 30 s folds
+ * consecutive interviews into one disconnect and costs Home Assistant at most
+ * 30 s before it sees the new entities — next to an interview that already took
+ * 20 s, that is not the slow part.
+ */
+#define ESPHOME_REDISCOVERY_DELAY_MS        30000
+
 /** @brief Maximum connection idle time before disconnect (seconds) */
 #define ESPHOME_MAX_IDLE_TIME           120
 
