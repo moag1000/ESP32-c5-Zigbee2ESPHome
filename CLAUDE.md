@@ -432,9 +432,15 @@ eine Neustartschleife. Und bewusst ueberhaupt, weil das Geraet nach 15 Minuten
 ohne Netz fuer Home Assistant ohnehin nicht existiert und der Zustand seit
 2026-08-06 einen Neustart uebersteht.
 
-**Noch nicht beobachtet:** dass eine der beiden Stufen tatsaechlich feuert.
-Dafuer muesste der AP fuenf Minuten am Stueck verschwinden. Die Logik ist
-geprueft, das Verhalten nicht.
+**Inzwischen beobachtet.** Hier stand "noch nicht beobachtet"; seit 2026-08-08
+sind beide Stufen mehrfach gelaufen und haben das Geraet ohne Zutun
+zurueckgeholt.
+
+**Was er nicht kann, seit 2026-08-10 belegt:** Wenn der Task haengt, in dem er
+lebt, laeuft er gar nicht mehr. Beide Haenger an diesem Tag hatten diese Form --
+er hat kein einziges Mal ausgeloest, nachweisbar am Bootzaehler. Dafuer gibt es
+jetzt den Task-Watchdog, siehe weiter unten; auch der faengt diesen Fall nicht,
+weil blockierte Tasks den Idle-Task nicht aushungern.
 
 ## Der Boot-Scan war kaputt (und hat in die Irre gefuehrt)
 
@@ -485,6 +491,150 @@ nicht immer ein Fehler im Pruefling.
 Alle uebrigen `recv()`-Aufrufe in `esphome_api_server.c` wurden mitgeprueft und
 sind begrenzt.
 
+## Zigbee hat ein Drittel der WLAN-Pakete gekostet (behoben 2026-08-10)
+
+Das Gateway verlor **dauerhaft rund ein Drittel seiner WLAN-Pakete**, waehrend
+es selbst `rssi -47`, `signal_quality 100` und `disconnect_count 0` meldete. Es
+sieht den Verlust nicht -- kein Diagnosewert im Geraet zeigt ihn an.
+
+Sichtbar war er nur an den Folgen, und die sahen nach lauter Einzelfehlern aus:
+API-Logins von 2 bis 9 Sekunden statt einer halben, Entity-Aufzaehlung mit
+60-Sekunden-Timeout, MQTT ohne PING_RESP, Alarme im Monitoring.
+
+Gemessen von einem Mac aus, in einer Sitzung:
+
+| Ziel | Verlust | RTT |
+|------|---------|-----|
+| Router (Kontrolle) | 0,0 % | 20 ms |
+| anderer ESP32, 2,4 GHz | 0,0 % | -- |
+| dieses Gateway, 2,4 GHz | 8-12 % | -- |
+| dieses Gateway, 5 GHz | 29-38 % | 92-164 ms |
+
+Der andere ESP32 schliesst Netz und AP aus. Der Wegwerf-Build auf 2,4 GHz --
+noetig, weil dieses Geraet der einzige 5-GHz-Client hier ist -- drittelt den
+Verlust und zeigt damit auf den Bandwechsel: fuer jede 802.15.4-Scheibe muss
+das Funkteil das 5-GHz-Band verlassen.
+
+**Die Ursache war eine Prioritaet.** 802.15.4 lief dauerhaft auf `MIDDLE`.
+Auf `LOW` fuer den Normalbetrieb:
+
+    Verlust   29-38 %          ->  0,0 % (dreimal 100 Pakete)
+    RTT       92-164 ms        ->  26 ms
+    API       2,2-8,7 s Login  ->  0,50-0,55 s
+              2-40 s Liste, 2 von 5 Fehlschlaege -> 0,64-0,73 s, 6 von 6
+
+Gegengemessen, weil Zigbee dafuer Funkzeit abgibt: `online=2, offline=0` ueber
+fuenf Minuten, null Fehlerzeilen, ein verpasstes ACK vom batteriebetriebenen
+Vibrationssensor, das sich selbst erholte. Fuer diese Rate fehlt ein
+Vorher-Wert, sie ist also genannt und nicht abgehakt.
+
+**Beim Pairing gilt weiter MIDDLE.** Ein beitretendes Geraet hat ein kurzes
+Zeitfenster, und eine verpasste Assoziation ist ein Nutzer, der vergeblich
+drueckt. Der Preis ist umgekehrt: waehrend eines offenen permit_join-Fensters
+verliert WLAN wieder rund 30 % -- zwei Minuten lang, und das erklaert
+Messungen kurz nach dem Boot, wo der Auto-permit_join laeuft.
+
+Gesetzt wird die Prioritaet jetzt auch in `zb_coordinator_start()`, nicht nur
+beim Ablauf eines permit_join-Timers. Vorher war das der einzige Weg dorthin,
+ein Gateway ohne Pairing behielt also den Treiber-Default -- und der war die
+Einstellung, die das Drittel kostete.
+
+## ESPHome-Service-Aufrufe kamen nie an (behoben 2026-08-10)
+
+`permit_join`, `remove_device` und `reconfigure_device` waren korrekt
+angekuendigt, standen in der HA-Serviceliste und taten **nichts**. Jeder Aufruf
+scheiterte an:
+
+    W ESPHOME_SVC: Argument count mismatch for 'reconfigure_device': got 2, expected 1
+
+`ExecuteServiceRequest` traegt `repeated ExecuteServiceArgument args = 2`, also
+eine verschachtelte Nachricht je Argument. Gelesen wurden die Felder 2 bis 5 der
+**aeusseren** Nachricht als bool/int/float/string -- ein flaches Layout, das es
+im Protokoll nicht gibt. Auf dem Draht wurde damit das Laengenpraefix der
+Submessage als bool verbraucht, deren Rumpf als weitere Felder geparst, und die
+Argumentzahl kam eins zu hoch heraus.
+
+Fallstricke der Submessage, die beim Nachbauen zaehlen: die Feldnummern sind
+nicht die naheliegenden (`1 bool_`, `2 legacy_int`, `3 float_`, `4 string_`,
+`5 int_`), und Feld 5 ist ein `sint32`, also Zigzag -- als einfacher Varint
+gelesen wird aus 1 eine 2. Der Typ kommt jetzt aus der Service-Deklaration
+statt vom Draht, weil proto3 Default-Werte weglaesst: `permit_join(0)` kommt
+als **leere** Submessage an und traegt keinerlei Typinformation.
+
+Der Decoder liegt in `esphome_protocol.c`, damit er testbar ist -- im Handler
+haette er Socket-Server und Service-Registry mitgeschleppt. 13 Tests, der erste
+davon der echte aioesphomeapi-Rahmen.
+
+## Der Task-Watchdog hat nur protokolliert (behoben 2026-08-10)
+
+Beide Watchdogs waren an, einer davon wirkungslos: `ESP_TASK_WDT_PANIC` war
+nicht gesetzt, ein ausgehungerter Task erzeugte also eine Logzeile und keinen
+Neustart -- und bei toter Konsole nicht einmal die. Der Interrupt-Watchdog
+(300 ms) setzt zwar zurueck, faengt aber nur abgeschaltete Interrupts.
+
+Belegt am Geraet: das Gateway war zwanzig Minuten weg, seriell stumm, und der
+eigene Bootzaehler zeigt 388 davor und 389 nach einem Hardware-Reset -- in dem
+Fenster hat **nichts** neu gestartet.
+
+Jetzt `CONFIG_ESP_TASK_WDT_PANIC=y` mit Timeout 30 s statt 10 s. Bewusst
+grosszuegig: dieses Projekt hatte schon eine Neustartschleife, und der Bootpfad
+liest Megabytes aus LittleFS.
+
+Nachgewiesen mit einem Wegwerf-Build, der einen Task absichtlich aufhaengt:
+
+    W (91915)  WDT_PROBE: blocking the CPU on purpose now
+    E (121913) task_wdt: Task watchdog got triggered
+    rst:0xc (SW_CPU)
+    W (3215)   CRASH_RPT: Task watchdog fired on the previous boot
+
+Die letzte Zeile ist ein Breadcrumb in `RTC_NOINIT_ATTR`-Speicher, den der
+ISR-Hook schreibt. NVS geht dort nicht -- Interruptkontext, kein Flash-Schreiben.
+Ein Stromzyklus loescht ihn, was richtig ist: ueberlebt die Notiz, war es der
+Boot davor.
+
+**Was er nicht faengt, und das gehoert dazu:** Tasks, die auf I/O blockieren,
+hungern den Idle-Task nicht aus. Der Watchdog wird also weiter gefuettert,
+waehrend nichts Nuetzliches laeuft. Beide Haenger vom 2026-08-10 hatten genau
+diese Form.
+
+## Zwei Haenger, die nur ein Stromzyklus loest (offen)
+
+Am 2026-08-10 zweimal gesehen, und es sind **nicht** dieselben:
+
+1. Nach rund zwanzig Minuten Betrieb verstummte die serielle Konsole, waehrend
+   Netz und MQTT noch liefen. Danach fiel das Geraet ganz vom Netz.
+2. Direkt nach einem Flash kam es gar nicht erst hoch -- der Bootzaehler ging
+   ueber den Stromzyklus von 403 auf 404, der haengende Boot hat also nicht
+   einmal `crash_reporter_init` bei ~3 s erreicht.
+
+Beide Male reagierte weder ein DTR-Reset noch esptool (`No serial data
+received`), auch das ROM war also stumm. Nur Abziehen des USB-Steckers half.
+
+**Verdacht, unbestaetigt:** die USB-Serial/JTAG-Konsole laeuft als Secondary
+Console, und beide Faelle folgten auf haeufiges Oeffnen und Schliessen dieses
+Ports durch die Testwerkzeuge; die Konsole stirbt zuerst. Dass esptool ebenfalls
+scheitert, geht ueber diese Erklaerung hinaus. Konsequenz bis zur Klaerung:
+Zustand ueber MQTT (`zigbee2mqtt/bridge/state`) lesen, nicht seriell.
+
+## Aqara-Batterie steckt in 0xFF01 (behoben 2026-08-10)
+
+Aqara-Geraete implementieren **kein** genPowerCfg. Die Batteriespannung liegt in
+einem herstellerspezifischen Attribut auf dem Basic-Cluster, als Folge von
+Tag/Typ/Wert in einem String:
+
+    0x01  Batteriespannung in mV   uint16
+    0x03  Geraetetemperatur in °C  int8
+    0x0A  Kurzadresse des Parents  uint16
+
+Deshalb zeigte der Vibrationssensor gar keine Batterie, waehrend der Fingerbot
+daneben 66 % meldete. Parser in `zb_lumi.c`, 12 Tests. Das Format verzeiht
+nichts: die Eintraege haben keine eigene Laenge, eine falsche Typbreite
+verschiebt also jeden folgenden Lesevorgang und liefert trotzdem plausible
+Zahlen. Ein unbekannter Typ beendet den Lauf, statt seine Breite zu raten.
+
+**Nicht am Geraet bestaetigt:** der Sensor meldet nur beim Aufwachen und hat es
+in der Beobachtungszeit nicht getan.
+
 ## Uebertragbar auf andere ESP32-C5-Projekte
 
 Was hier gelernt wurde und anderswo genauso gilt:
@@ -518,9 +668,11 @@ Was hier gelernt wurde und anderswo genauso gilt:
    frueh im Boot (Stack-Initialisierung), nicht im Betrieb. Wer Luft schaffen
    will, muss dort messen.
 
-5. **`esp_coex_preference_set()` wird oft vergessen.** Dieses Projekt ruft es
-   nicht; bei Dreifachfunk (WiFi + BLE + 802.15.4) legt es fest, wer im
-   Zweifel gewinnt.
+5. **Nicht `esp_coex_preference_set()` -- das ist der falsche Regler.** Hier
+   stand er als vergessener Hebel fuer Dreifachfunk. Er ist im IDF-Header als
+   deprecated markiert und laut Doku auf Bluetooth/A2DP gemuenzt. Fuer
+   WiFi gegen 802.15.4 zaehlt `esp_ieee802154_set_coex_config()` -- siehe den
+   Abschnitt oben, das war ein Drittel aller WLAN-Pakete.
 
 ### BLE: die Abschaltung ist neu zu bewerten
 
@@ -664,8 +816,9 @@ Sub-device info is provided in `DeviceInfoResponse` via `esphome_api_handlers.c`
 | LED Status Manager | ~1KB | done |
 | mmWave Presence Sensor (S3KM1110) | ~1KB | done |
 | Neustartgrund + Boot-Zaehler | ~0 | done -- Diagnose-Entities, seit 2026-08-07 |
-| ESPHome Service Calls | ~1KB | done -- `permit_join`, `remove_device`, `reconfigure_device`; bis 2026-08-07 registriert, aber nie angekuendigt |
-| BLE Scanner | -- | **deaktiviert** (Code im Baum, nicht kompiliert) |
+| WLAN-Trennungen + Grund | ~0 | done -- Diagnose-Entities, seit 2026-08-10 |
+| ESPHome Service Calls | ~1KB | done -- `permit_join`, `remove_device`, `reconfigure_device`; bis 2026-08-07 nie angekuendigt, bis 2026-08-10 nie ausgefuehrt (Argument-Dekoder, siehe oben) |
+| BLE Scanner | -- | aktiv seit 2026-08-05, passiv; kostet WLAN nichts messbares (2026-08-10 gegengemessen: Verlust mit Scanner 30-36 %, ohne 29-32 %) |
 | ESPHome BLE Proxy | -- | **deaktiviert** |
 
 **Hardware:** 384KB SRAM, 8MB PSRAM.
@@ -794,6 +947,11 @@ eigenverursacht erkennbar war.
 
 Wer nur den Quelltext pruefen will, braucht das Geraet nicht -- `idf.py build`
 reicht.
+
+Stand 2026-08-10: **159 Tests, 0 Fehler.** Neu dazugekommen sind die Suiten fuer
+den Tuya-Datenpunkt-Parser, den ExecuteService-Dekoder und den Aqara-0xFF01-
+Parser -- alle drei lesen eine Laenge vom Draht und indizieren damit, also genau
+die Form, an der dieses Projekt schon einmal einen Pufferueberlauf hatte.
 
 ## Architecture
 
