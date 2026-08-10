@@ -893,13 +893,13 @@ static void permit_join_timer_callback(void *arg)
     {
         esp_ieee802154_coex_config_t coex_normal = {
             .idle = IEEE802154_IDLE,
-            .txrx = IEEE802154_LOW,
-            .txrx_at = IEEE802154_LOW,
+            .txrx = IEEE802154_MIDDLE,
+            .txrx_at = IEEE802154_MIDDLE,
         };
         esp_zb_lock_acquire(GW_TIMEOUT_VERY_LONG_TICKS);
         esp_ieee802154_set_coex_config(coex_normal);
         esp_zb_lock_release();
-        ESP_LOGD(TAG, "IEEE 802.15.4 coex priority back to LOW (timer expired)");
+        ESP_LOGD(TAG, "IEEE 802.15.4 coex priority confirmed MIDDLE (timer expired)");
     }
 #endif
 
@@ -1062,21 +1062,28 @@ static void esp_zb_task(void *pvParameters)
     set_coordinator_state(ZB_COORD_STATE_RUNNING);
     ESP_LOGI(TAG, "Zigbee coordinator running");
 
-    /* Put 802.15.4 below Wi-Fi for normal operation.
+    /* Set the normal-operation coexistence priority explicitly.
      *
      * This has to happen here rather than only when a permit_join window
      * closes, which is where it used to be set. A gateway that boots and never
-     * pairs anything would otherwise keep the driver default, and the driver
-     * default is what cost a third of every Wi-Fi packet. */
+     * pairs anything would otherwise keep whatever the driver defaults to.
+     *
+     * MIDDLE, not LOW. Lowering it to LOW removed 33 % Wi-Fi packet loss, which
+     * was real and measured — but Zigbee devices then started dropping to
+     * offline repeatedly in normal use. Availability polling is an active
+     * transmit-and-wait, so it is exactly what a lowered txrx priority starves,
+     * and a Zigbee gateway that loses its devices has failed at its job no
+     * matter how clean the Wi-Fi looks. The Wi-Fi problem is real and stays
+     * open; it does not get solved at this price. */
 #if CONFIG_ESP_COEX_SW_COEXIST_ENABLE
     {
         esp_ieee802154_coex_config_t coex_normal = {
             .idle = IEEE802154_IDLE,
-            .txrx = IEEE802154_LOW,
-            .txrx_at = IEEE802154_LOW,
+            .txrx = IEEE802154_MIDDLE,
+            .txrx_at = IEEE802154_MIDDLE,
         };
         esp_ieee802154_set_coex_config(coex_normal);
-        ESP_LOGI(TAG, "IEEE 802.15.4 coex priority set to LOW (Wi-Fi first)");
+        ESP_LOGI(TAG, "IEEE 802.15.4 coex priority set to MIDDLE");
     }
 #endif
 
