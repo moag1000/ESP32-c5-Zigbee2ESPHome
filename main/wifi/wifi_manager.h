@@ -34,11 +34,21 @@ extern "C" {
 
 /** @brief Driver restarts the watchdog will try before rebooting instead
  *
- * Three firings is about fifteen minutes with no network. Restarting the WiFi
- * driver is the cheaper move and is tried first; a reboot is the one recovery
- * this chip has been observed to respond to after it stops finding the AP.
+ * Restarting the Wi-Fi driver is the cheap move and is tried first; a reboot is
+ * the recovery this chip has actually been observed to respond to once it stops
+ * finding its access point.
+ *
+ * Two, not three, and the difference is measured: across four outages the
+ * driver restart ran eight times and recovered the link zero times — every one
+ * of them ended at the reboot. Three strikes made every outage about fourteen
+ * minutes, of which the first ten were spent on a step that has never worked.
+ * Two halves that to roughly eight.
+ *
+ * Not one, because eight samples are enough to call the driver restart rarely
+ * useful and not enough to call it useless, and it costs a few seconds against
+ * a reboot that costs the Zigbee network a re-form.
  */
-#define WIFI_MGR_WATCHDOG_MAX_STRIKES       3
+#define WIFI_MGR_WATCHDOG_MAX_STRIKES       2
 
 /** @brief Mutex acquisition timeout for state operations (ms) */
 #define WIFI_MGR_STATE_MUTEX_TIMEOUT_MS     100
