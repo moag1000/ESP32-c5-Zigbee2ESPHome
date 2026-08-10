@@ -529,6 +529,48 @@ void esphome_api_client_task(void *pvParameters)
     };
     setsockopt(client->socket, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
+    /* A send must be able to give up, or the slot is gone for good.
+     *
+     * Only a receive timeout was set here. When a client vanishes without
+     * closing — killed, unplugged, or routed away — the peer sends no RST, so
+     * the server keeps pushing state updates until the send buffer fills and
+     * then blocks in send() forever. The client task never reaches its cleanup
+     * path, its slot never frees, and after enough of those the gateway
+     * accepts a connection and drops it immediately. Observed on 2026-08-10:
+     * every new connection refused with a broken pipe while the device
+     * reported one connected client, and the slots never came back. Home
+     * Assistant keeps working only until its own connection drops once.
+     *
+     * The retry loop in esphome_api_send_raw_bytes() was written for exactly
+     * this and could never run: without SO_SNDTIMEO a blocking socket does not
+     * return EAGAIN, it just waits. */
+    struct timeval send_timeout = {
+        .tv_sec = ESPHOME_SEND_TIMEOUT_MS / 1000,
+        .tv_usec = (ESPHOME_SEND_TIMEOUT_MS % 1000) * 1000,
+    };
+    if (setsockopt(client->socket, SOL_SOCKET, SO_SNDTIMEO,
+                   &send_timeout, sizeof(send_timeout)) != 0) {
+        /* Loud, because silently not having this is the bug it fixes. */
+        ESP_LOGE(TAG, "Client %d: no send timeout (errno=%d) — a dead peer will "
+                      "hold this slot", client_id, errno);
+    }
+
+    /* Keepalive as the second line of defence: a client that goes quiet
+     * without ever making us write to it would otherwise sit in its slot until
+     * the idle budget runs out, and a subscribed client is never idle from the
+     * server's point of view. */
+    int keepalive = 1;
+    int keep_idle = ESPHOME_KEEPALIVE_IDLE_SEC;
+    int keep_intvl = ESPHOME_KEEPALIVE_INTERVAL_SEC;
+    int keep_count = ESPHOME_KEEPALIVE_COUNT;
+    if (setsockopt(client->socket, SOL_SOCKET, SO_KEEPALIVE, &keepalive, sizeof(keepalive)) != 0 ||
+        setsockopt(client->socket, IPPROTO_TCP, TCP_KEEPIDLE, &keep_idle, sizeof(keep_idle)) != 0 ||
+        setsockopt(client->socket, IPPROTO_TCP, TCP_KEEPINTVL, &keep_intvl, sizeof(keep_intvl)) != 0 ||
+        setsockopt(client->socket, IPPROTO_TCP, TCP_KEEPCNT, &keep_count, sizeof(keep_count)) != 0) {
+        ESP_LOGW(TAG, "Client %d: keepalive not fully configured (errno=%d)",
+                 client_id, errno);
+    }
+
 #ifdef CONFIG_ESPHOME_NOISE_ENCRYPTION
     /* Protocol detection: peek at first byte to determine Noise vs plaintext.
      * Noise frames always use 0x01 indicator. Plaintext uses 0x00. */

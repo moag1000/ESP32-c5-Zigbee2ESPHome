@@ -136,6 +136,22 @@ extern "C" {
  */
 #define ESPHOME_LOGIN_IDLE_TIMEOUT_MS       30000
 
+/** @brief How long a single send may block before the client is dropped
+ *
+ * Without this the socket blocks forever when a peer vanishes without closing,
+ * the client task never reaches its cleanup, and its slot is lost for good.
+ */
+#define ESPHOME_SEND_TIMEOUT_MS             5000
+
+/** @brief Seconds of silence before TCP keepalive probing starts */
+#define ESPHOME_KEEPALIVE_IDLE_SEC          30
+
+/** @brief Seconds between TCP keepalive probes */
+#define ESPHOME_KEEPALIVE_INTERVAL_SEC      10
+
+/** @brief Unanswered keepalive probes before the connection is dead */
+#define ESPHOME_KEEPALIVE_COUNT             3
+
 /** @brief How long interviews are collected before one re-discovery disconnect
  *
  * Sized from a measurement, not from taste: two back-to-back reconfigure calls
