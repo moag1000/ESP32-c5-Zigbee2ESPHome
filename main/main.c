@@ -35,6 +35,7 @@
 #include "zigbee/zb_binding.h"
 #include "zigbee/zb_groups.h"
 #include "zigbee/zb_backup.h"
+#include "zigbee/zb_hvac_dehumid.h"
 #include "zigbee/zb_reporting.h"
 #include "zigbee/zb_topology.h"
 #include "zigbee/zb_router.h"
@@ -441,6 +442,23 @@ static void zigbee_stack_start(void)
      * cluster to the coordinator before configuring reporting, and a device
      * only delivers reports to the entries in its binding table. This module
      * had no caller either, so every bind attempt returned INVALID_STATE. */
+    /* The dehumidification cluster handler was reachable and dead.
+     *
+     * zb_callbacks.c calls zb_dehumid_handle_report() from the ZCL report path,
+     * and that function's first statement is a check on s_dehumid_initialized —
+     * which nothing ever set. A dehumidifier in the network would have had its
+     * reports delivered to a handler that returned INVALID_STATE and logged
+     * nothing. The init itself only clears its own static state, so wiring it
+     * costs nothing and cannot fail.
+     *
+     * Untested against a real device: there is none here. What is tested is
+     * that the gateway still boots and behaves with it initialized. */
+    ret = zb_dehumid_init();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG_ZIGBEE, "Dehumidification init failed: %s (continuing)",
+                 esp_err_to_name(ret));
+    }
+
     /* Groups and backup were never initialized either. Backup is the one that
      * bites: bridge_request_handler reaches zb_backup_process_mqtt_*() from the
      * MQTT bridge, and every one of those calls returned INVALID_STATE. Groups

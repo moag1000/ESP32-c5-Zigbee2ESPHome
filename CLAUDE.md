@@ -114,7 +114,12 @@ Neustart nicht kennen und ihn sonst blind ueberschreiben wuerden.
 
 ### Der Rest des Sweeps (2026-08-06)
 
-`zb_groups_init()` und `zb_backup_init()` sind jetzt ebenfalls verdrahtet.
+`zb_groups_init()`, `zb_backup_init()` und `zb_dehumid_init()` sind jetzt
+ebenfalls verdrahtet. Der Entfeuchter-Fall war der stillste: `zb_callbacks.c`
+reicht ZCL-Reports an `zb_dehumid_handle_report()` weiter, und dessen erste
+Anweisung prueft `s_dehumid_initialized` -- das nie jemand setzte. Ein
+Entfeuchter im Netz haette Reports geschickt, die im Handler in Zeile eins
+verworfen worden waeren, ohne Log. Ungetestet gegen ein echtes Geraet.
 Backup war der schaedliche Fall: `bridge_request_handler` erreicht
 `zb_backup_process_mqtt_*()` ueber die MQTT-Bridge, und jeder dieser Aufrufe
 lief ins `ESP_ERR_INVALID_STATE`. Groups ist die Abhaengigkeit -- das Backup
