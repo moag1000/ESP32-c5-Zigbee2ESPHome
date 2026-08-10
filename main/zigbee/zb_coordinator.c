@@ -1062,30 +1062,18 @@ static void esp_zb_task(void *pvParameters)
     set_coordinator_state(ZB_COORD_STATE_RUNNING);
     ESP_LOGI(TAG, "Zigbee coordinator running");
 
-    /* Set the normal-operation coexistence priority explicitly.
+    /* Deliberately no coexistence priority is set here.
      *
-     * This has to happen here rather than only when a permit_join window
-     * closes, which is where it used to be set. A gateway that boots and never
-     * pairs anything would otherwise keep whatever the driver defaults to.
+     * Setting it at coordinator start looked like a gap worth closing — the
+     * normal-operation value was otherwise only applied when a permit_join
+     * window expired. Doing so broke Wi-Fi association outright: the
+     * coordinator starts before the Wi-Fi connect window, so raising 802.15.4
+     * to MIDDLE at this point means the station tries to associate while
+     * Zigbee already holds priority. Observed 2026-08-11 as reason 200 and 201
+     * in a loop, for over half an hour, with the access point present and this
+     * developer's laptop associated to it the whole time.
      *
-     * MIDDLE, not LOW. Lowering it to LOW removed 33 % Wi-Fi packet loss, which
-     * was real and measured — but Zigbee devices then started dropping to
-     * offline repeatedly in normal use. Availability polling is an active
-     * transmit-and-wait, so it is exactly what a lowered txrx priority starves,
-     * and a Zigbee gateway that loses its devices has failed at its job no
-     * matter how clean the Wi-Fi looks. The Wi-Fi problem is real and stays
-     * open; it does not get solved at this price. */
-#if CONFIG_ESP_COEX_SW_COEXIST_ENABLE
-    {
-        esp_ieee802154_coex_config_t coex_normal = {
-            .idle = IEEE802154_IDLE,
-            .txrx = IEEE802154_MIDDLE,
-            .txrx_at = IEEE802154_MIDDLE,
-        };
-        esp_ieee802154_set_coex_config(coex_normal);
-        ESP_LOGI(TAG, "IEEE 802.15.4 coex priority set to MIDDLE");
-    }
-#endif
+     * The radio belongs to the station until it is on the network. */
 
     /* Publish Zigbee network ready event to event bus */
     event_publish(EVT_NETWORK_READY, NULL, 0);

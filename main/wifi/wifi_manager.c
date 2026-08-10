@@ -280,7 +280,27 @@ static void wifi_watchdog_callback(void *arg)
      * state survives one. Deliberately not sooner: an access point that is
      * simply switched off overnight should not cost a reboot every five
      * minutes, and this project has had a restart loop before. */
-    if (s_watchdog_strikes >= WIFI_MGR_WATCHDOG_MAX_STRIKES && s_had_connection) {
+    /* Two thresholds, because "never connected" is not the same situation.
+     *
+     * The guard below used to be s_had_connection alone, and it had a hole
+     * worth more than the case it protected: a gateway that boots and never
+     * reaches the network never reboots at all. Seen on 2026-08-11 — twenty-five
+     * minutes of driver restarts logging "strike 5/2", "strike 6/2", while the
+     * access point sat there and this Mac was associated to it the whole time.
+     * The counter passed its limit five times over and nothing happened.
+     *
+     * So: a device that had the network and lost it reboots after
+     * WIFI_MGR_WATCHDOG_MAX_STRIKES, because a reboot is proven to recover that
+     * state. A device that has never been on the network since boot waits
+     * longer — WIFI_MGR_WATCHDOG_COLD_STRIKES, roughly half an hour — and then
+     * reboots anyway. The original worry stands and is priced in: an access
+     * point switched off overnight now costs one reboot every half hour instead
+     * of none, which is the cheaper mistake compared with a gateway that is
+     * simply gone until someone notices. */
+    uint8_t reboot_after = s_had_connection ? WIFI_MGR_WATCHDOG_MAX_STRIKES
+                                            : WIFI_MGR_WATCHDOG_COLD_STRIKES;
+
+    if (s_watchdog_strikes >= reboot_after) {
         /* Only worth rebooting if this device has been on the network at least
          * once since it booted.
          *
@@ -291,8 +311,9 @@ static void wifi_watchdog_callback(void *arg)
          * tearing down the Zigbee network each time. This project has had a
          * restart loop before and it is not worth repeating for a case the
          * reboot cannot fix anyway. */
-        ESP_LOGE(TAG, "WiFi watchdog: %u driver restarts did not help — rebooting",
-                 s_watchdog_strikes);
+        ESP_LOGE(TAG, "WiFi watchdog: %u driver restarts did not help (%s) — rebooting",
+                 s_watchdog_strikes,
+                 s_had_connection ? "had a connection this boot" : "never connected");
         vTaskDelay(pdMS_TO_TICKS(200));  /* let the log drain */
         esp_restart();
     }

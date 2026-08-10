@@ -50,6 +50,16 @@ extern "C" {
  */
 #define WIFI_MGR_WATCHDOG_MAX_STRIKES       2
 
+/** @brief Strikes before rebooting when the device never connected since boot
+ *
+ * Longer than WIFI_MGR_WATCHDOG_MAX_STRIKES on purpose: without a prior
+ * connection there is no proof an access point exists at all, so the reboot is
+ * a guess rather than a known cure. Half an hour is long enough that a router
+ * switched off overnight costs little, and short enough that a gateway which
+ * simply failed to associate at boot does not stay gone.
+ */
+#define WIFI_MGR_WATCHDOG_COLD_STRIKES      6
+
 /** @brief Mutex acquisition timeout for state operations (ms) */
 #define WIFI_MGR_STATE_MUTEX_TIMEOUT_MS     100
 
