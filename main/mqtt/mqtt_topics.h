@@ -250,6 +250,24 @@ esp_err_t mqtt_topic_ha_discovery(const char *component, const char *device_id,
 esp_err_t mqtt_topic_sanitize_name(const char *name, char *sanitized, size_t buf_len);
 
 /**
+ * @brief Replace the characters that break an MQTT topic with underscores
+ *
+ * Removes '#', '+', '/' and control characters. Spaces are left alone — they
+ * are legal in a topic and several entities already publish under names that
+ * contain them.
+ *
+ * The topic builders apply this on the way out, so a caller resolving a name
+ * taken back off a topic has to apply it to the candidate names it compares
+ * against, or a device whose friendly name needed stripping will never match.
+ *
+ * @param[in]  name    Name to clean, NUL-terminated
+ * @param[out] out     Destination buffer, always NUL-terminated
+ * @param[in]  out_len Size of @p out
+ */
+void mqtt_topic_strip_breakers(const char *name, char *out, size_t out_len);
+
+
+/**
  * @brief Extract friendly name from device topic
  *
  * Extracts device friendly name from a topic like "zigbee2mqtt/[name]/set"

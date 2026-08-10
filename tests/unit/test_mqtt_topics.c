@@ -314,6 +314,95 @@ static void test_set_topic_matches_bridge_subscription(void)
  * Suite
  * ============================================================================ */
 
+
+/* ============================================================================
+ * Topic builders must not emit a name that breaks the topic
+ * ============================================================================ */
+
+/**
+ * A wildcard in a friendly name used to reach the wire.
+ *
+ * Friendly names come from the manufacturer and model strings a device reports
+ * during its interview, so a device on the air picks them. '#' and '+' make a
+ * published topic malformed; '/' quietly adds a level, and
+ * mqtt_topic_extract_friendly_name() then reads back only the first one.
+ */
+static void test_builders_strip_wildcards_and_separators(void)
+{
+    char topic[MQTT_TOPIC_MAX_LEN];
+
+    TEST_ASSERT_EQUAL(ESP_OK, mqtt_topic_device_state("Bad#Name", topic, sizeof(topic)));
+    TEST_ASSERT_EQUAL_STRING("zigbee2mqtt/Bad_Name", topic);
+
+    TEST_ASSERT_EQUAL(ESP_OK, mqtt_topic_device_set("Plus+Name", topic, sizeof(topic)));
+    TEST_ASSERT_EQUAL_STRING("zigbee2mqtt/Plus_Name/set", topic);
+
+    TEST_ASSERT_EQUAL(ESP_OK, mqtt_topic_device_get("Kitchen/Lamp", topic, sizeof(topic)));
+    TEST_ASSERT_EQUAL_STRING("zigbee2mqtt/Kitchen_Lamp/get", topic);
+
+    TEST_ASSERT_EQUAL(ESP_OK,
+                      mqtt_topic_device_availability("Ctrl\tName", topic, sizeof(topic)));
+    TEST_ASSERT_EQUAL_STRING("zigbee2mqtt/Ctrl_Name/availability", topic);
+}
+
+/**
+ * Spaces stay.
+ *
+ * They are legal in a topic, and gateway entities already publish under
+ * "Free Heap" and "WiFi Signal". Rewriting those would break every existing
+ * automation for a cosmetic gain.
+ */
+static void test_builders_keep_spaces(void)
+{
+    char topic[MQTT_TOPIC_MAX_LEN];
+    TEST_ASSERT_EQUAL(ESP_OK, mqtt_topic_device_state("Free Heap", topic, sizeof(topic)));
+    TEST_ASSERT_EQUAL_STRING("zigbee2mqtt/Free Heap", topic);
+}
+
+/** An ordinary name passes through untouched. */
+static void test_builders_leave_ordinary_names_alone(void)
+{
+    char topic[MQTT_TOPIC_MAX_LEN];
+    TEST_ASSERT_EQUAL(ESP_OK, mqtt_topic_device_state("lumi.vibration.aq1",
+                                                      topic, sizeof(topic)));
+    TEST_ASSERT_EQUAL_STRING("zigbee2mqtt/lumi.vibration.aq1", topic);
+}
+
+/**
+ * The name read back off a topic matches the stripped form, not the original.
+ *
+ * This is why callers resolving a device have to strip their candidates too —
+ * an exact compare against the registry would miss every device whose name
+ * needed stripping.
+ */
+static void test_stripped_name_is_what_comes_back(void)
+{
+    char topic[MQTT_TOPIC_MAX_LEN];
+    char name[MQTT_TOPIC_MAX_LEN];
+    char stripped[MQTT_TOPIC_MAX_LEN];
+
+    TEST_ASSERT_EQUAL(ESP_OK, mqtt_topic_device_set("Kitchen/Lamp", topic, sizeof(topic)));
+    TEST_ASSERT_EQUAL(ESP_OK, mqtt_topic_extract_friendly_name(topic, name, sizeof(name)));
+
+    mqtt_topic_strip_breakers("Kitchen/Lamp", stripped, sizeof(stripped));
+    TEST_ASSERT_EQUAL_STRING(stripped, name);
+    TEST_ASSERT_EQUAL_STRING("Kitchen_Lamp", name);
+}
+
+/** Stripping never overruns its buffer and always terminates. */
+static void test_strip_truncates_safely(void)
+{
+    char big[300];
+    memset(big, 'x', sizeof(big) - 1);
+    big[sizeof(big) - 1] = '\0';
+    big[0] = '#';
+
+    char out[16];
+    mqtt_topic_strip_breakers(big, out, sizeof(out));
+    TEST_ASSERT_EQUAL(sizeof(out) - 1, strlen(out));
+    TEST_ASSERT_EQUAL('_', out[0]);
+}
+
 static const test_case_t mqtt_topics_tests[] = {
     {"state_topic_shape",        test_state_topic_shape},
     {"four_topics_distinct",     test_four_topics_are_distinct_and_share_a_prefix},
@@ -333,6 +422,11 @@ static const test_case_t mqtt_topics_tests[] = {
     {"matches_hash",             test_matches_multi_level_wildcard},
     {"matches_null",             test_matches_null_is_false_not_a_crash},
     {"set_topic_matches_sub",    test_set_topic_matches_bridge_subscription},
+    {"builders_strip_wildcards",  test_builders_strip_wildcards_and_separators},
+    {"builders_keep_spaces",      test_builders_keep_spaces},
+    {"builders_pass_ordinary",    test_builders_leave_ordinary_names_alone},
+    {"stripped_name_round_trip",  test_stripped_name_is_what_comes_back},
+    {"strip_truncates_safely",    test_strip_truncates_safely},
 };
 
 test_stats_t run_mqtt_topics_tests(void)

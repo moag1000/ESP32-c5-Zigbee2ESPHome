@@ -17,13 +17,49 @@ static const char *TAG = "MQTT_TOPIC";
 /**
  * @brief Build device state topic
  */
+/**
+ * @brief Strip the characters that break an MQTT topic out of a device name
+ *
+ * Not the same job as mqtt_topic_sanitize_name(), which produces an
+ * identifier. This one removes only what MQTT itself cannot carry:
+ *
+ *   '#' and '+'  wildcards; a published topic containing either is malformed
+ *                and a broker is entitled to reject the publish
+ *   '/'          a level separator; "Kitchen/Lamp" silently becomes two levels,
+ *                and mqtt_topic_extract_friendly_name() then reads back
+ *                "Kitchen" and routes commands at whatever answers to that
+ *   control characters
+ *
+ * Spaces are deliberately left alone. They are legal in a topic, several
+ * gateway entities already publish under names containing them, and rewriting
+ * those would break existing automations for a cosmetic gain.
+ *
+ * Friendly names are not ours to trust: they come from the manufacturer and
+ * model strings a device reports during its interview, so a device on the air
+ * picks them.
+ */
+void mqtt_topic_strip_breakers(const char *name, char *out, size_t out_len)
+{
+    size_t i = 0;
+    for (; name[i] != '\0' && i + 1 < out_len; i++) {
+        unsigned char c = (unsigned char)name[i];
+        out[i] = (c == '#' || c == '+' || c == '/' || c < 0x20 || c == 0x7F)
+                     ? '_'
+                     : name[i];
+    }
+    out[i] = '\0';
+}
+
 esp_err_t mqtt_topic_device_state(const char *friendly_name, char *topic_buf, size_t buf_len)
 {
     if (!friendly_name || !topic_buf || buf_len == 0) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    int ret = snprintf(topic_buf, buf_len, "%s/%s", MQTT_BASE_TOPIC, friendly_name);
+    char safe_name[MQTT_TOPIC_MAX_LEN];
+    mqtt_topic_strip_breakers(friendly_name, safe_name, sizeof(safe_name));
+
+    int ret = snprintf(topic_buf, buf_len, "%s/%s", MQTT_BASE_TOPIC, safe_name);
     if (ret < 0 || ret >= buf_len) {
         ESP_LOGE(TAG, "Buffer too small for device state topic");
         return ESP_ERR_NO_MEM;
@@ -41,7 +77,10 @@ esp_err_t mqtt_topic_device_set(const char *friendly_name, char *topic_buf, size
         return ESP_ERR_INVALID_ARG;
     }
 
-    int ret = snprintf(topic_buf, buf_len, "%s/%s/set", MQTT_BASE_TOPIC, friendly_name);
+    char safe_name[MQTT_TOPIC_MAX_LEN];
+    mqtt_topic_strip_breakers(friendly_name, safe_name, sizeof(safe_name));
+
+    int ret = snprintf(topic_buf, buf_len, "%s/%s/set", MQTT_BASE_TOPIC, safe_name);
     if (ret < 0 || ret >= buf_len) {
         ESP_LOGE(TAG, "Buffer too small for device set topic");
         return ESP_ERR_NO_MEM;
@@ -59,7 +98,10 @@ esp_err_t mqtt_topic_device_get(const char *friendly_name, char *topic_buf, size
         return ESP_ERR_INVALID_ARG;
     }
 
-    int ret = snprintf(topic_buf, buf_len, "%s/%s/get", MQTT_BASE_TOPIC, friendly_name);
+    char safe_name[MQTT_TOPIC_MAX_LEN];
+    mqtt_topic_strip_breakers(friendly_name, safe_name, sizeof(safe_name));
+
+    int ret = snprintf(topic_buf, buf_len, "%s/%s/get", MQTT_BASE_TOPIC, safe_name);
     if (ret < 0 || ret >= buf_len) {
         ESP_LOGE(TAG, "Buffer too small for device get topic");
         return ESP_ERR_NO_MEM;
@@ -77,8 +119,11 @@ esp_err_t mqtt_topic_device_availability(const char *friendly_name, char *topic_
         return ESP_ERR_INVALID_ARG;
     }
 
+    char safe_name[MQTT_TOPIC_MAX_LEN];
+    mqtt_topic_strip_breakers(friendly_name, safe_name, sizeof(safe_name));
+
     int ret = snprintf(topic_buf, buf_len, "%s/%s/availability",
-                      MQTT_BASE_TOPIC, friendly_name);
+                      MQTT_BASE_TOPIC, safe_name);
     if (ret < 0 || ret >= buf_len) {
         ESP_LOGE(TAG, "Buffer too small for device availability topic");
         return ESP_ERR_NO_MEM;

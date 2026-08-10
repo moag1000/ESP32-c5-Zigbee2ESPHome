@@ -32,6 +32,39 @@
 #include "cJSON.h"
 #include <string.h>
 
+/**
+ * @brief Resolve a name taken off a topic back to a device
+ *
+ * The topic builders replace '/', '#' and '+' before publishing, so a device
+ * whose friendly name contains any of them never matches on an exact compare.
+ * Falls back to comparing the stripped forms.
+ */
+static bool match_stripped_name(device_t *dev, void *ctx)
+{
+    struct { const char *want; device_t *found; } *c = ctx;
+    if (dev->friendly_name[0] == '\0') {
+        return true;
+    }
+    char stripped[MQTT_TOPIC_MAX_LEN];
+    mqtt_topic_strip_breakers(dev->friendly_name, stripped, sizeof(stripped));
+    if (strcmp(stripped, c->want) == 0) {
+        c->found = dev;
+        return false;
+    }
+    return true;
+}
+
+static device_t *resolve_topic_device(const char *name)
+{
+    device_t *dev = device_registry_get_by_name(name);
+    if (dev != NULL) {
+        return dev;
+    }
+    struct { const char *want; device_t *found; } ctx = { name, NULL };
+    device_registry_iterate(match_stripped_name, &ctx);
+    return ctx.found;
+}
+
 static const char *TAG = "CMD_HANDLER";
 
 /* Statistics */
@@ -121,7 +154,7 @@ esp_err_t command_handler_process(const char *topic, const char *payload, size_t
     ESP_LOGD(TAG, "Friendly name: %s", friendly_name);
 
     /* Find device by friendly name (avoids stack allocation) */
-    device_t *target_device = device_registry_get_by_name(friendly_name);
+    device_t *target_device = resolve_topic_device(friendly_name);
     if (target_device == NULL) {
         ESP_LOGW(TAG, "Device not found: %s", friendly_name);
         s_command_errors++;

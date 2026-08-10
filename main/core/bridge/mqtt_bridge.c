@@ -28,6 +28,39 @@
 #include "core/gateway_timeouts.h"
 #include <string.h>
 
+/**
+ * @brief Resolve a name taken off a topic back to a device
+ *
+ * The topic builders replace '/', '#' and '+' before publishing, so a device
+ * whose friendly name contains any of them never matches on an exact compare.
+ * Falls back to comparing the stripped forms.
+ */
+static bool match_stripped_name(device_t *dev, void *ctx)
+{
+    struct { const char *want; device_t *found; } *c = ctx;
+    if (dev->friendly_name[0] == '\0') {
+        return true;
+    }
+    char stripped[MQTT_TOPIC_MAX_LEN];
+    mqtt_topic_strip_breakers(dev->friendly_name, stripped, sizeof(stripped));
+    if (strcmp(stripped, c->want) == 0) {
+        c->found = dev;
+        return false;
+    }
+    return true;
+}
+
+static device_t *resolve_topic_device(const char *name)
+{
+    device_t *dev = device_registry_get_by_name(name);
+    if (dev != NULL) {
+        return dev;
+    }
+    struct { const char *want; device_t *found; } ctx = { name, NULL };
+    device_registry_iterate(match_stripped_name, &ctx);
+    return ctx.found;
+}
+
 static const char *TAG = "MQTT_BRIDGE";
 
 /* Bridge state mutex for start/stop transitions */
@@ -504,7 +537,7 @@ esp_err_t mqtt_bridge_handle_command(const char *topic, const char *payload, siz
         char friendly_name[MQTT_MEDIUM_STR_MAX_LEN];
         if (mqtt_topic_extract_friendly_name(topic, friendly_name, sizeof(friendly_name)) == ESP_OK) {
             /* Find device by name directly using NG registry */
-            device_t *device = device_registry_get_by_name(friendly_name);
+            device_t *device = resolve_topic_device(friendly_name);
             if (device != NULL) {
                 /* Publish via event bus - handler reads from device_registry_get_state() */
                 evt_device_state_t evt = {
