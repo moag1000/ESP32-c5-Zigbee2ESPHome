@@ -491,7 +491,7 @@ nicht immer ein Fehler im Pruefling.
 Alle uebrigen `recv()`-Aufrufe in `esphome_api_server.c` wurden mitgeprueft und
 sind begrenzt.
 
-## Zigbee hat ein Drittel der WLAN-Pakete gekostet (behoben 2026-08-10)
+## Zigbee kostet ein Drittel der WLAN-Pakete (offen, Stand 2026-08-11)
 
 Das Gateway verlor **dauerhaft rund ein Drittel seiner WLAN-Pakete**, waehrend
 es selbst `rssi -47`, `signal_quality 100` und `disconnect_count 0` meldete. Es
@@ -528,16 +528,76 @@ fuenf Minuten, null Fehlerzeilen, ein verpasstes ACK vom batteriebetriebenen
 Vibrationssensor, das sich selbst erholte. Fuer diese Rate fehlt ein
 Vorher-Wert, sie ist also genannt und nicht abgehakt.
 
-**Beim Pairing gilt weiter MIDDLE.** Ein beitretendes Geraet hat ein kurzes
-Zeitfenster, und eine verpasste Assoziation ist ein Nutzer, der vergeblich
-drueckt. Der Preis ist umgekehrt: waehrend eines offenen permit_join-Fensters
-verliert WLAN wieder rund 30 % -- zwei Minuten lang, und das erklaert
-Messungen kurz nach dem Boot, wo der Auto-permit_join laeuft.
+**Und dann wieder zurueckgenommen.** Auf LOW gingen die Zigbee-Geraete im
+normalen Betrieb wiederholt offline. Verfuegbarkeitspruefung ist ein aktives
+Senden-und-Warten, also genau das, was eine gesenkte txrx-Prioritaet
+aushungert. Der Gegentest von oben war zu schwach, um das zu sehen: fuenf
+Minuten `online=2` beweisen bei einem Batteriegeraet mit 86400 s Timeout fast
+nichts, und das eine verpasste ACK wurde notiert und dann durchgewunken.
 
-Gesetzt wird die Prioritaet jetzt auch in `zb_coordinator_start()`, nicht nur
-beim Ablauf eines permit_join-Timers. Vorher war das der einzige Weg dorthin,
-ein Gateway ohne Pairing behielt also den Treiber-Default -- und der war die
-Einstellung, die das Drittel kostete.
+**Stand heute: MIDDLE, Verlust wieder da (26,7 % nachgemessen).** Beide Seiten
+sind jetzt vermessen, es ist also eine echte Abwaegung und kein Versehen in
+einer Richtung. Ein Zigbee-Gateway, das seine Geraete verliert, hat seine
+Aufgabe verfehlt, egal wie sauber die WLAN-Kurve aussieht.
+
+Naechste Ansaetze, keiner davon probiert: `txrx` und `txrx_at` sind getrennte
+Knoepfe und lassen sich einzeln senken; die Prioritaet liesse sich situativ
+anheben statt dauerhaft; oder man geht die WLAN-Seite an, wo der C5 als
+20-MHz-Client an einem AP mit 160 MHz Bandbreite haengt, dessen Block bis in
+den DFS-Bereich reicht. Wichtig bei jedem Versuch: **beide Seiten im selben
+Lauf messen** -- Verlust und RTT gegen einen Kontroll-Host, und
+Zigbee-Verfuegbarkeit plus No-ACK-Warnungen ueber eine Stunde, nicht fuenf
+Minuten.
+
+## Die Priorität gehoert nicht in den Koordinatorstart (2026-08-11)
+
+Der Versuch, die Koexistenzprioritaet sauber schon in `zb_coordinator_start()`
+zu setzen, hat **die WLAN-Assoziation komplett zerstoert**. Der Koordinator
+startet absichtlich vor dem WLAN-Verbindungsfenster; 802.15.4 dort auf MIDDLE
+zu heben heisst, dass die Station zu assoziieren versucht, waehrend Zigbee
+bereits Vorrang hat.
+
+    reason 200 (BEACON_TIMEOUT) und reason 201 (NO_AP_FOUND), ueber 40 Minuten
+    -- bei anwesendem AP, an dem der Laptop des Entwicklers durchgehend hing.
+
+Sechs Zeilen wieder entfernt, danach IP nach 27 Sekunden. Das ist die zweite
+Lektion dieses Projekts ueber dieses Zeitfenster, und sie zeigt in dieselbe
+Richtung wie die erste: **das Funkteil gehoert der Station, bis sie im Netz
+ist.**
+
+## Der WLAN-Watchdog startete nie neu, wenn er nie verbunden war (behoben 2026-08-11)
+
+Die Eskalation zum Neustart hing an `s_had_connection`. Ein Gateway, das
+bootet und **nie** ins Netz kommt, hat damit nie neu gestartet -- es hat alle
+fuenf Minuten den Treiber neu gestartet und dabei sein eigenes Limit
+protokolliert:
+
+    W WIFI_MGR: WiFi watchdog: still disconnected after 5 min (strike 5/2)
+    W WIFI_MGR: WiFi watchdog: still disconnected after 5 min (strike 6/2)
+
+25 Minuten lang, Zaehler weit ueber dem Maximum, ohne Wirkung. Der Schutz
+selbst ist richtig -- ein Neustart hilft nicht gegen einen abgeschalteten
+Router, und ohne ihn wuerde ein Router, der ueber Nacht aus ist, alle 15
+Minuten einen Neustart kosten. Jetzt gibt es zwei Schwellen:
+`WIFI_MGR_WATCHDOG_MAX_STRIKES` (2) nach einem Verbindungsverlust, und
+`WIFI_MGR_WATCHDOG_COLD_STRIKES` (6, gut eine halbe Stunde), wenn seit dem Boot
+nie eine Verbindung bestand. Ein nachts abgeschalteter Router kostet damit
+einen Neustart pro halbe Stunde -- der billigere Fehler gegenueber einem
+Gateway, das einfach weg bleibt.
+
+## Der serielle Port startet das Geraet neu
+
+pyserial setzt beim Oeffnen DTR, und der USB-Serial/JTAG des C5 loest darauf
+einen Reset aus. Jeder Mitschnitt beginnt also mit einem Neustart. Folgen, die
+das am 2026-08-10/11 hatte:
+
+- Messungen, die aussahen wie ein Absturz, waren der eigene Verbindungsaufbau
+- der WLAN-Watchdog kam nie an seine fuenf Minuten, weil jede Beobachtung seinen
+  Zaehler zurueckgesetzt hat
+
+**Fuer Zustandsabfragen deshalb MQTT nehmen** (`zigbee2mqtt/bridge/state`), nicht
+Serial. Seriell nur, wenn ein Bootlog wirklich gebraucht wird -- und dann im
+Wissen, dass man ihn selbst ausloest.
 
 ## ESPHome-Service-Aufrufe kamen nie an (behoben 2026-08-10)
 
