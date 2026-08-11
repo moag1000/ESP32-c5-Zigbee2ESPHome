@@ -888,7 +888,15 @@ static void permit_join_timer_callback(void *arg)
         esp_timer_stop(s_permit_join_update_timer);
     }
 
-    /* Drop IEEE 802.15.4 back below Wi-Fi now that pairing is over */
+    /* Back to normal priority now that pairing is over.
+     *
+     * Both fields carry the same value, and that is a measured result rather
+     * than laziness. Splitting them — txrx MIDDLE to protect the availability
+     * poll, txrx_at LOW to give Wi-Fi the scheduled transmissions — was tried
+     * on 2026-08-11 and bought nothing: 29-35 % packet loss, indistinguishable
+     * from everything at MIDDLE. Since everything at LOW measures 0 %, txrx is
+     * the whole lever and txrx_at contributes nothing. There is no split that
+     * satisfies both radios. */
 #if CONFIG_ESP_COEX_SW_COEXIST_ENABLE
     {
         esp_ieee802154_coex_config_t coex_normal = {
@@ -899,7 +907,7 @@ static void permit_join_timer_callback(void *arg)
         esp_zb_lock_acquire(GW_TIMEOUT_VERY_LONG_TICKS);
         esp_ieee802154_set_coex_config(coex_normal);
         esp_zb_lock_release();
-        ESP_LOGD(TAG, "IEEE 802.15.4 coex priority confirmed MIDDLE (timer expired)");
+        ESP_LOGD(TAG, "IEEE 802.15.4 coex priority confirmed MIDDLE");
     }
 #endif
 
