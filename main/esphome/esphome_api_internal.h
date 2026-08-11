@@ -98,9 +98,6 @@ typedef struct {
     psram_task_handle_t psram_task;                 /**< PSRAM-backed client handler task */
     uint8_t rx_buffer[ESPHOME_RX_BUFFER_SIZE];      /**< Receive buffer */
     size_t rx_buffer_len;                           /**< Bytes in receive buffer */
-    uint8_t tx_buffer[ESPHOME_TX_BUFFER_SIZE];      /**< Coalescing transmit buffer */
-    size_t tx_buffer_len;                           /**< Bytes waiting to be flushed */
-    bool tx_coalescing;                             /**< Collect small writes instead of sending each */
 #ifdef CONFIG_ESPHOME_NOISE_ENCRYPTION
     esphome_noise_ctx_t *noise_ctx;                 /**< Noise encryption context */
     bool encryption_enabled;                        /**< True if encryption is active */
@@ -189,27 +186,6 @@ uint8_t esphome_api_count_active_clients(void);
  * @return Index of free slot, or -1 if all slots are in use
  */
 int esphome_api_find_free_client_slot(void);
-
-/**
- * @brief Start collecting outgoing messages instead of sending each on its own
- *
- * Entity enumeration writes 63 small messages. Each one on its own socket write
- * is its own round trip, and on a lossy link its own chance to be retransmitted
- * — measured at 34 s for a list that takes 0.6 s on a clean one. Collected into
- * full segments it is three or four packets instead of sixty-three.
- *
- * Must be paired with esphome_api_tx_flush(). Anything larger than the buffer
- * is sent directly, so a big message is never delayed waiting for company.
- */
-void esphome_api_tx_begin(esphome_client_t *client);
-
-/**
- * @brief Send whatever is collected and stop collecting
- *
- * Safe to call when nothing was collected or when collecting was never started.
- */
-esp_err_t esphome_api_tx_flush(esphome_client_t *client);
-
 
 /**
  * @brief Get client ID from client pointer
