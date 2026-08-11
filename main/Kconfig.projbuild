@@ -98,8 +98,30 @@ menu "ESP32-C5 Zigbee2MQTT Gateway Configuration"
                 association failure on its own does not. Costs a few seconds of
                 boot time, so leave it off in normal operation.
 
+        config WIFI_FORCE_2GHZ
+            bool "Force 2.4GHz Band"
+            default n
+            help
+                Keep this device on 2.4GHz and never use 5GHz.
+
+                Sounds backwards on a dual-band chip that shares 2.4GHz with
+                Zigbee, and it was — until it was measured. On one access point
+                running 160MHz on 5GHz, this gateway lost 29-38 % of its
+                packets there and 8-12 % on 2.4GHz. Three times better on the
+                band it supposedly should avoid.
+
+                The likely reason is not the band but the width: a 160MHz block
+                anchored at channel 36 spans channels 36 to 64, and the upper
+                half of that is DFS, which this chip cannot handle. The access
+                point's 2.4GHz radio is 20MHz wide and has no such problem.
+
+                Turn this on only if 5GHz measures worse on your network, and
+                measure both before deciding. Costs throughput, which matters
+                for OTA updates and not much else here.
+
         config WIFI_PREFER_5GHZ
             bool "Prefer 5GHz Band"
+            depends on !WIFI_FORCE_2GHZ
             default y
             help
                 When enabled, prefer 5GHz WiFi networks over 2.4GHz networks

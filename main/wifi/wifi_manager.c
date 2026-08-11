@@ -151,6 +151,37 @@ bool wifi_manager_credentials_known_good(const char *ssid)
     return (ret == ESP_OK) && (strcmp(stored, ssid) == 0);
 }
 
+/**
+ * @brief The band mode this device should use when things are going well
+ *
+ * Normally 5GHz-only when preferred, otherwise whatever the driver picks. With
+ * WIFI_FORCE_2GHZ it is 2.4GHz and stays there, including through the fallback
+ * paths — the point of forcing it is that 5GHz is the broken option here, so
+ * "fall back to AUTO" would fall back into the problem.
+ */
+static wifi_band_mode_t preferred_band_mode(void)
+{
+#if CONFIG_WIFI_FORCE_2GHZ
+    return WIFI_BAND_MODE_2G_ONLY;
+#elif defined(CONFIG_WIFI_PREFER_5GHZ)
+    return WIFI_BAND_MODE_5G_ONLY;
+#else
+    return WIFI_BAND_MODE_AUTO;
+#endif
+}
+
+/**
+ * @brief The band mode to fall back to after repeated failures
+ */
+static wifi_band_mode_t fallback_band_mode(void)
+{
+#if CONFIG_WIFI_FORCE_2GHZ
+    return WIFI_BAND_MODE_2G_ONLY;
+#else
+    return WIFI_BAND_MODE_AUTO;
+#endif
+}
+
 /** @brief Record that @p ssid authenticated us. Best effort. */
 static void mark_credentials_known_good(const char *ssid)
 {
@@ -396,7 +427,7 @@ static void reconnect_timer_callback(void *arg)
 #ifdef CONFIG_WIFI_PREFER_5GHZ
     if (failures >= WIFI_RECONNECT_FAIL_THRESHOLD && !s_wifi.band_fallback_active) {
         ESP_LOGW(TAG, "Multiple reconnect failures (%d), switching to AUTO band mode", failures);
-        esp_err_t band_ret = esp_wifi_set_band_mode(WIFI_BAND_MODE_AUTO);
+        esp_err_t band_ret = esp_wifi_set_band_mode(fallback_band_mode());
         if (band_ret == ESP_OK) {
             if (xSemaphoreTake(s_wifi.state_mutex, pdMS_TO_TICKS(WIFI_MGR_TIMER_MUTEX_TIMEOUT_MS)) == pdTRUE) {
                 s_wifi.band_fallback_active = true;
@@ -508,7 +539,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                 /* Only restore 5GHz preference if we're actually connected to 5GHz
                  * If we're on 2.4GHz (via fallback), keep AUTO mode to maintain stability */
                 if (connected_5ghz) {
-                    esp_wifi_set_band_mode(WIFI_BAND_MODE_5G_ONLY);
+                    esp_wifi_set_band_mode(preferred_band_mode());
                     ESP_LOGD(TAG, "Restored 5GHz-only band mode");
                 } else if (s_wifi.band_fallback_active) {
                     ESP_LOGI(TAG, "Keeping AUTO band mode (connected to 2.4GHz via fallback)");
@@ -603,7 +634,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                 /* After multiple failures, switch to AUTO band mode */
                 if (consecutive_failures >= WIFI_RECONNECT_FAIL_THRESHOLD && !s_wifi.band_fallback_active) {
                     ESP_LOGW(TAG, "Switching to AUTO band mode after %d failures", consecutive_failures);
-                    esp_err_t band_ret = esp_wifi_set_band_mode(WIFI_BAND_MODE_AUTO);
+                    esp_err_t band_ret = esp_wifi_set_band_mode(fallback_band_mode());
                     if (band_ret == ESP_OK) {
                         if (xSemaphoreTake(s_wifi.state_mutex, pdMS_TO_TICKS(WIFI_MGR_EVENT_MUTEX_TIMEOUT_MS)) == pdTRUE) {
                             s_wifi.band_fallback_active = true;
@@ -1032,17 +1063,29 @@ esp_err_t wifi_manager_init(void)
         }
     }
 
-#ifdef CONFIG_WIFI_PREFER_5GHZ
-    /* Use AUTO band mode with rssi_5g_adjustment to prefer 5GHz.
-     * Previously used 5G_ONLY which caused a 45s timeout when 5GHz AP
-     * had weak signal (DHCP fails), delaying Zigbee coordinator start. */
-    esp_err_t band_ret = esp_wifi_set_band_mode(WIFI_BAND_MODE_AUTO);
-    if (band_ret == ESP_OK) {
-        ESP_LOGI(TAG, "WiFi band mode set to AUTO (5GHz preferred via RSSI adjustment)");
-    } else {
-        ESP_LOGW(TAG, "AUTO band mode failed: %s", esp_err_to_name(band_ret));
+    /* Set the band mode before the first association attempt.
+     *
+     * Deliberately outside any preference ifdef. This block used to sit inside
+     * CONFIG_WIFI_PREFER_5GHZ, so turning that off — which is exactly what
+     * WIFI_FORCE_2GHZ does — compiled away the only call that set a band at
+     * all, and the driver's default quietly put the station back on 5GHz. The
+     * setting appeared to do nothing.
+     *
+     * With 5GHz preferred this is AUTO rather than 5G_ONLY: 5G_ONLY caused a
+     * 45 s timeout when the 5GHz AP was weak, and that delayed the Zigbee
+     * coordinator. With 2.4GHz forced it is 2G_ONLY, because AUTO would find
+     * its way back to the band being avoided. */
+    {
+        wifi_band_mode_t initial_mode = fallback_band_mode();
+        esp_err_t band_ret = esp_wifi_set_band_mode(initial_mode);
+        if (band_ret == ESP_OK) {
+            ESP_LOGI(TAG, "WiFi band mode set to %s",
+                     initial_mode == WIFI_BAND_MODE_2G_ONLY ? "2.4GHz only" :
+                     initial_mode == WIFI_BAND_MODE_5G_ONLY ? "5GHz only" : "AUTO");
+        } else {
+            ESP_LOGW(TAG, "Band mode set failed: %s", esp_err_to_name(band_ret));
+        }
     }
-#endif
 
     /* Scan only after the band mode is set.
      *
