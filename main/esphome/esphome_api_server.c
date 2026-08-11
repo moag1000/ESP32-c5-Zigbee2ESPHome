@@ -38,10 +38,108 @@ static const char *TAG = "ESPHOME_SRV";
  * ============================================================================ */
 
 /**
+ * @brief Write bytes straight to the socket, no coalescing
+ */
+static esp_err_t send_to_socket(esphome_client_t *client, const uint8_t *data, size_t len)
+{
+    size_t total_sent = 0;
+    int retry_count = 0;
+    const int max_retries = 5;
+
+    while (total_sent < len && retry_count < max_retries) {
+        ssize_t sent = send(client->socket, data + total_sent, len - total_sent, 0);
+
+        if (sent < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                retry_count++;
+                ESP_LOGD(TAG, "Send would block, retry %d/%d", retry_count, max_retries);
+                vTaskDelay(ESPHOME_DELAY_MINIMAL_TICKS);
+                continue;
+            }
+            ESP_LOGE(TAG, "Send failed: errno=%d", errno);
+            client->state = ESPHOME_CLIENT_DISCONNECTED;
+            return ESP_FAIL;
+        }
+
+        if (sent == 0) {
+            ESP_LOGW(TAG, "Connection closed during send");
+            client->state = ESPHOME_CLIENT_DISCONNECTED;
+            return ESP_FAIL;
+        }
+
+        total_sent += sent;
+        retry_count = 0;
+    }
+
+    if (total_sent != len) {
+        ESP_LOGE(TAG, "Failed to send: %zu/%zu bytes", total_sent, len);
+        client->state = ESPHOME_CLIENT_DISCONNECTED;
+        return ESP_FAIL;
+    }
+
+    return ESP_OK;
+}
+
+void esphome_api_tx_begin(esphome_client_t *client)
+{
+    if (client == NULL) {
+        return;
+    }
+    client->tx_buffer_len = 0;
+    client->tx_coalescing = true;
+}
+
+esp_err_t esphome_api_tx_flush(esphome_client_t *client)
+{
+    if (client == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    client->tx_coalescing = false;
+
+    if (client->tx_buffer_len == 0) {
+        return ESP_OK;
+    }
+
+    size_t len = client->tx_buffer_len;
+    client->tx_buffer_len = 0;   /* cleared first: a failed flush must not be resent */
+    return send_to_socket(client, client->tx_buffer, len);
+}
+
+/**
  * @brief Send raw bytes to client (internal helper)
+ *
+ * While coalescing is active the bytes are collected instead of written, and
+ * the buffer is flushed whenever the next message would not fit. A message
+ * larger than the buffer bypasses collection entirely rather than being split.
  */
 esp_err_t esphome_api_send_raw_bytes(esphome_client_t *client, const uint8_t *data, size_t len)
 {
+    if (client != NULL && client->tx_coalescing && len <= sizeof(client->tx_buffer)) {
+        if (client->tx_buffer_len + len > sizeof(client->tx_buffer)) {
+            size_t pending = client->tx_buffer_len;
+            client->tx_buffer_len = 0;
+            esp_err_t ret = send_to_socket(client, client->tx_buffer, pending);
+            if (ret != ESP_OK) {
+                return ret;
+            }
+        }
+        memcpy(client->tx_buffer + client->tx_buffer_len, data, len);
+        client->tx_buffer_len += len;
+        return ESP_OK;
+    }
+
+    /* Not collecting, or too big to collect: anything already waiting has to go
+     * out first, or the stream arrives out of order. */
+    if (client != NULL && client->tx_buffer_len > 0) {
+        size_t pending = client->tx_buffer_len;
+        client->tx_buffer_len = 0;
+        esp_err_t ret = send_to_socket(client, client->tx_buffer, pending);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+    }
+
     size_t total_sent = 0;
     int retry_count = 0;
     const int max_retries = 5;

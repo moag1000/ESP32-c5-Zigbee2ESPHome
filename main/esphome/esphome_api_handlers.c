@@ -860,6 +860,12 @@ static esp_err_t handle_list_entities_request(esphome_client_t *client, const es
         .result = ESP_OK,
     };
 
+    /* Collect the whole burst into full segments instead of one write per
+     * entity. Sixty-three small writes are sixty-three round trips, and on a
+     * lossy link sixty-three chances to be retransmitted — measured at 34 s for
+     * a list that takes 0.6 s when the link is clean. */
+    esphome_api_tx_begin(client);
+
     ESP_LOGI(TAG, "Enumerating entities...");
     esphome_entities_enumerate(esphome_api_list_entities_callback, &ctx);
     ESP_LOGI(TAG, "Entity enumeration complete, result=%d", ctx.result);
@@ -895,6 +901,13 @@ static esp_err_t handle_list_entities_request(esphome_client_t *client, const es
                                                  output, sizeof(output), &output_len);
     if (ret == ESP_OK) {
         ret = esphome_api_send_message(client, output, output_len);
+    }
+
+    /* Flush unconditionally, including on every failure path above: leaving the
+     * buffer armed would attach these bytes to whatever is sent next. */
+    esp_err_t flush_ret = esphome_api_tx_flush(client);
+    if (ret == ESP_OK) {
+        ret = flush_ret;
     }
 
     return (ctx.result == ESP_OK) ? ret : ctx.result;
