@@ -53,6 +53,7 @@ static crash_info_t s_crash_info = {0};
 
 typedef struct {
     uint32_t magic;         /**< WDT_BREADCRUMB_MAGIC when the note is real */
+    uint32_t wifi_reboots;  /**< Consecutive reboots the Wi-Fi watchdog ordered */
     uint32_t count;         /**< How many times the watchdog has fired */
     uint32_t uptime_ms;     /**< Uptime when it fired */
 } wdt_breadcrumb_t;
@@ -95,6 +96,36 @@ static void consume_wdt_breadcrumb(void)
              (unsigned long)s_wdt_breadcrumb.uptime_ms);
 
     s_wdt_breadcrumb.magic = 0;
+}
+
+/* ============================================================================
+ * Wi-Fi reboot backoff
+ * ============================================================================ */
+
+uint32_t crash_reporter_wifi_reboot_count(void)
+{
+    if (s_wdt_breadcrumb.magic != WDT_BREADCRUMB_MAGIC) {
+        return 0;
+    }
+    return s_wdt_breadcrumb.wifi_reboots;
+}
+
+void crash_reporter_note_wifi_reboot(void)
+{
+    if (s_wdt_breadcrumb.magic != WDT_BREADCRUMB_MAGIC) {
+        s_wdt_breadcrumb.magic = WDT_BREADCRUMB_MAGIC;
+        s_wdt_breadcrumb.count = 0;
+        s_wdt_breadcrumb.uptime_ms = 0;
+        s_wdt_breadcrumb.wifi_reboots = 0;
+    }
+    s_wdt_breadcrumb.wifi_reboots++;
+}
+
+void crash_reporter_clear_wifi_reboots(void)
+{
+    if (s_wdt_breadcrumb.magic == WDT_BREADCRUMB_MAGIC) {
+        s_wdt_breadcrumb.wifi_reboots = 0;
+    }
 }
 
 /* ============================================================================

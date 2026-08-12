@@ -60,6 +60,15 @@ extern "C" {
  */
 #define WIFI_MGR_WATCHDOG_COLD_STRIKES      6
 
+/** @brief Reboots the watchdog may order before it gives up on rebooting
+ *
+ * Counted in RTC memory across the reboots themselves and cleared once the
+ * network comes back. Three is roughly half an hour of trying; past that the
+ * access point is not coming back for reasons a reboot cannot touch, and
+ * continuing to restart only costs the Zigbee network its uptime.
+ */
+#define WIFI_MGR_WATCHDOG_MAX_REBOOTS       3
+
 /** @brief Mutex acquisition timeout for state operations (ms) */
 #define WIFI_MGR_STATE_MUTEX_TIMEOUT_MS     100
 

@@ -167,6 +167,25 @@ bool crash_reporter_is_initialized(void);
  */
 esp_err_t crash_reporter_reset_boot_count(void);
 
+/**
+ * @brief How many reboots in a row the Wi-Fi watchdog has ordered
+ *
+ * Held in RTC memory, so it survives a software reset and is wiped by a power
+ * cycle. Used to back the watchdog off: rebooting every ten minutes into an
+ * access point that is not there tears down the Zigbee network each time and
+ * fixes nothing.
+ *
+ * @return Consecutive watchdog reboots, 0 after a power cycle
+ */
+uint32_t crash_reporter_wifi_reboot_count(void);
+
+/** @brief Record that the Wi-Fi watchdog is about to reboot */
+void crash_reporter_note_wifi_reboot(void);
+
+/** @brief Reset the counter after the network comes back */
+void crash_reporter_clear_wifi_reboots(void);
+
+
 #ifdef __cplusplus
 }
 #endif

@@ -17,6 +17,7 @@
 #include "freertos/semphr.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
+#include "core/monitoring/crash_reporter.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "nvs.h"
@@ -331,7 +332,23 @@ static void wifi_watchdog_callback(void *arg)
     uint8_t reboot_after = s_had_connection ? WIFI_MGR_WATCHDOG_MAX_STRIKES
                                             : WIFI_MGR_WATCHDOG_COLD_STRIKES;
 
-    if (s_watchdog_strikes >= reboot_after) {
+    /* Back off after repeated reboots that changed nothing.
+     *
+     * Observed on 2026-08-12: twenty reboots, all reason "software", roughly
+     * one every ten minutes, while the access point stayed unreachable. Each
+     * one tore down the Zigbee network and rebuilt it, and none of them
+     * helped. A reboot is a good move once; as a loop it is pure damage.
+     *
+     * The count lives in RTC memory, so it survives the reboots it is counting
+     * and is wiped by a power cycle. Past the limit the driver restart still
+     * runs every five minutes — recovery is still being attempted, just
+     * without dragging Zigbee down with it. */
+    uint32_t prior_reboots = crash_reporter_wifi_reboot_count();
+    if (prior_reboots >= WIFI_MGR_WATCHDOG_MAX_REBOOTS) {
+        ESP_LOGW(TAG, "WiFi watchdog: %lu reboots did not help — not rebooting again, "
+                      "driver restarts continue",
+                 (unsigned long)prior_reboots);
+    } else if (s_watchdog_strikes >= reboot_after) {
         /* Only worth rebooting if this device has been on the network at least
          * once since it booted.
          *
@@ -345,6 +362,7 @@ static void wifi_watchdog_callback(void *arg)
         ESP_LOGE(TAG, "WiFi watchdog: %u driver restarts did not help (%s) — rebooting",
                  s_watchdog_strikes,
                  s_had_connection ? "had a connection this boot" : "never connected");
+        crash_reporter_note_wifi_reboot();
         vTaskDelay(pdMS_TO_TICKS(200));  /* let the log drain */
         esp_restart();
     }
@@ -519,6 +537,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
                 }
                 s_watchdog_strikes = 0;
                 s_had_connection = true;
+                crash_reporter_clear_wifi_reboots();
 
                 /* Update stats and reset retry counters with mutex protection */
                 if (xSemaphoreTake(s_wifi.state_mutex, pdMS_TO_TICKS(WIFI_MGR_EVENT_MUTEX_TIMEOUT_MS)) == pdTRUE) {
