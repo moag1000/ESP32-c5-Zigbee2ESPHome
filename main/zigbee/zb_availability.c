@@ -722,6 +722,31 @@ esp_err_t zb_availability_handle_timeout(uint16_t short_addr)
     return ESP_OK;
 }
 
+esp_err_t zb_availability_report_delivery_failure(uint16_t short_addr)
+{
+    device_t *dev = device_registry_get_by_short_addr(short_addr);
+    if (dev == NULL) {
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    device_avail_meta_t *meta = &dev->proto.zigbee.avail_meta;
+    if (meta->backoff_multiplier == 0) {
+        return ESP_ERR_INVALID_STATE;   /* not tracked */
+    }
+
+    meta->consecutive_failures++;
+
+    ESP_LOGW(TAG, "Delivery to 0x%04X failed (failures=%d/%d)",
+             short_addr, meta->consecutive_failures, ZB_AVAIL_MAX_FAILURES);
+
+    if (meta->consecutive_failures >= ZB_AVAIL_MAX_FAILURES &&
+        dev_to_zb_avail(dev->availability) != ZB_AVAIL_OFFLINE) {
+        set_device_state(dev, ZB_AVAIL_OFFLINE);
+    }
+
+    return ESP_OK;
+}
+
 esp_err_t zb_availability_mark_offline(uint16_t short_addr)
 {
     device_t *dev = device_registry_get_by_short_addr(short_addr);
@@ -931,23 +956,24 @@ static bool timeout_check_iterator(device_t *dev, void *ctx)
         }
     }
 
-    /* Check if device has timed out (battery/unknown devices only).
-     * Skip when last_seen == 0: device was loaded from NVS but hasn't been
-     * seen since boot — we can't determine elapsed time without a valid
-     * timestamp, so don't mark offline prematurely. */
-    if (dev->last_seen != 0) {
-        uint32_t timeout = get_device_timeout(meta);
-        uint32_t elapsed = (tc->now > dev->last_seen) ? (tc->now - dev->last_seen) : 0;
-
-        if (dev->availability == DEV_AVAIL_ONLINE && elapsed > timeout) {
-            if (meta->power_type == (uint8_t)ZB_AVAIL_POWER_BATTERY ||
-                meta->power_type == (uint8_t)ZB_AVAIL_POWER_UNKNOWN) {
-                if (tc->offline_count < DEVICE_REGISTRY_MAX_DEVICES) {
-                    tc->offline_addrs[tc->offline_count++] = dev->proto.zigbee.short_addr;
-                }
-            }
-        }
-    }
+    /* Silence alone no longer makes a device offline.
+     *
+     * A sleepy sensor that has not spoken for a day is not unreachable — it is
+     * asleep, which is its job. Marking it offline for that took away the one
+     * thing a user actually wants from it: the ability to send it something and
+     * have the gateway try. What proves a device gone is a delivery that
+     * fails, and that arrives as a missing MAC or APS acknowledgement, counted
+     * in consecutive_failures by zb_availability_report_delivery_failure().
+     *
+     * Mains-powered routers are unaffected: they are actively polled, and a
+     * ping that goes unanswered still counts as a failure above.
+     *
+     * The old rule marked a battery device offline once elapsed time passed
+     * get_device_timeout(), which for those devices is 24 hours — long enough
+     * to look harmless and still wrong in both directions: it hid a device that
+     * had genuinely fallen off the network for most of a day, and it demoted
+     * one that was merely quiet. */
+    (void)get_device_timeout;   /* still used for the router ping schedule */
 
     return true;  /* Continue */
 }

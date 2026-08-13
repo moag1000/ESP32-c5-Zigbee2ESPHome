@@ -1082,6 +1082,12 @@ void zb_callback_signal_handler(esp_zb_app_signal_t *signal_struct)
                         s_unavail_last_log_us = now_us;
                         s_unavail_suppress = 0;
                     }
+                    /* This is what decides availability now. Silence does
+                     * not: a sleepy sensor is supposed to be quiet, and it
+                     * stays reachable until the gateway has actually tried to
+                     * send it something and failed. */
+                    zb_availability_report_delivery_failure(unavail_params->short_addr);
+
                     cmd_retry_on_unavailable(unavail_params->short_addr);
                 } else {
                     ESP_LOGW(TAG, "Device unavailable signal (no params)");

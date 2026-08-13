@@ -396,6 +396,27 @@ esp_err_t zb_availability_handle_timeout(uint16_t short_addr);
  */
 esp_err_t zb_availability_mark_offline(uint16_t short_addr);
 
+/**
+ * @brief Report that a frame could not be delivered to a device
+ *
+ * Called when the stack reports a missing MAC or APS acknowledgement. This —
+ * not silence — is what marks a device offline: after
+ * ZB_AVAIL_MAX_FAILURES failed deliveries in a row. A sleepy battery sensor
+ * therefore stays reachable in Home Assistant no matter how long it has been
+ * quiet, and only drops out once the gateway has actually tried to reach it
+ * and failed.
+ *
+ * The counter is cleared by zb_availability_update_last_seen(), so a single
+ * successful exchange restores the device.
+ *
+ * @param short_addr Device short address
+ * @return ESP_OK on success
+ * @return ESP_ERR_NOT_FOUND if the device is unknown
+ * @return ESP_ERR_INVALID_STATE if the device is not tracked
+ */
+esp_err_t zb_availability_report_delivery_failure(uint16_t short_addr);
+
+
 /* ============================================================================
  * Utility Functions
  * ============================================================================ */
