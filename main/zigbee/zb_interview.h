@@ -335,6 +335,24 @@ esp_err_t zb_interview_handle_read_attr_resp(uint16_t short_addr,
                                                const void *value,
                                                size_t value_len);
 
+/**
+ * @brief Guess a manufacturer name from a model string
+ *
+ * Sleepy battery devices report their model over the Basic cluster as soon as
+ * they join and then go to sleep, often without ever sending a manufacturer.
+ * The converter DB is keyed on both, so without this the device is unmatchable
+ * — an Aqara sensor stays at mfr='(empty)' model='lumi.vibration.aq1' and gets
+ * only its diagnostic entities.
+ *
+ * Prefix-based and deliberately narrow: it covers vendors whose model strings
+ * are unambiguous, and returns NULL rather than guessing. A wrong manufacturer
+ * binds a wrong converter, which is worse than binding none.
+ *
+ * @param model Model string, may be NULL or empty
+ * @return Manufacturer name as a static string, or NULL if unknown
+ */
+const char *zb_interview_infer_manufacturer(const char *model);
+
 #ifdef __cplusplus
 }
 #endif

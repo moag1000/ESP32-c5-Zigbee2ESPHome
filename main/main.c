@@ -69,6 +69,7 @@ extern const zb_converter_def_t *conv_generic_for_capabilities(uint32_t caps);
 
 /* LittleFS + State Persistence */
 #include "core/littlefs_mount.h"
+#include "zigbee/zb_interview.h"
 #if CONFIG_STATE_PERSISTENCE_ENABLE
 #include "core/state_persistence.h"
 #endif
@@ -777,6 +778,19 @@ void app_main(void)
             }
 
             const zb_converter_def_t *conv = NULL;
+
+            /* A sleepy device that only ever reported its model comes back
+             * from persistence with an empty manufacturer, and the DB is keyed
+             * on both — so it would never match. Fill it in from the model
+             * prefix first, the same way the interview does. */
+            if (dev->manufacturer[0] == '\0' && dev->model[0] != '\0') {
+                const char *inferred = zb_interview_infer_manufacturer(dev->model);
+                if (inferred != NULL) {
+                    snprintf(dev->manufacturer, sizeof(dev->manufacturer), "%s", inferred);
+                    ESP_LOGI(TAG_MAIN, "Inferred manufacturer '%s' from model '%s'",
+                             inferred, dev->model);
+                }
+            }
 
             /* Priority 1: Exact manufacturer+model match */
             if (dev->model[0] != '\0') {

@@ -27,6 +27,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
+#include "freertos/task.h"
 #include "core/gateway_timeouts.h"
 #include "freertos/timers.h"
 #include "esp_heap_caps.h"
@@ -351,7 +352,7 @@ esp_err_t zb_interview_deinit(void)
  * @param model  Device model string
  * @return Inferred manufacturer string, or NULL if unknown
  */
-static const char *infer_manufacturer_from_model(const char *model)
+const char *zb_interview_infer_manufacturer(const char *model)
 {
     if (model == NULL || model[0] == '\0') {
         return NULL;
@@ -427,7 +428,7 @@ esp_err_t zb_interview_start(uint64_t ieee_addr, uint16_t short_addr)
     if (device != NULL && device->model[0] != '\0' && is_known_sleepy_device(device->model)) {
         /* Infer manufacturer from model prefix if missing */
         if (device->manufacturer[0] == '\0') {
-            const char *inferred = infer_manufacturer_from_model(device->model);
+            const char *inferred = zb_interview_infer_manufacturer(device->model);
             if (inferred != NULL) {
                 strncpy(device->manufacturer, inferred, sizeof(device->manufacturer) - 1);
                 device->manufacturer[sizeof(device->manufacturer) - 1] = '\0';
@@ -1364,6 +1365,94 @@ static esp_err_t request_basic_cluster_attributes(zb_interview_context_t *ctx)
  * If we don't receive a response within the timeout, complete the interview
  * without manufacturer/model information.
  */
+/** @brief Stack for the interview finish task, in bytes */
+#define INTERVIEW_FINISH_TASK_STACK 8192
+
+/** @brief Priority of the interview finish task */
+#define INTERVIEW_FINISH_TASK_PRIO  5
+
+/** @brief What a deferred interview completion needs to know */
+typedef struct {
+    uint16_t              short_addr;
+    zb_interview_status_t status;
+} interview_finish_job_t;
+
+/**
+ * @brief Run interview_complete() on a task with enough stack
+ */
+static void interview_finish_task(void *arg)
+{
+    interview_finish_job_t *job = (interview_finish_job_t *)arg;
+
+    if (xSemaphoreTake(s_mutex, GW_TIMEOUT_LONG_TICKS) == pdTRUE) {
+        /* Look the context up again instead of carrying the pointer across the
+         * task switch — the slot can be released while this task waits here. */
+        zb_interview_context_t *ctx = find_context_by_short(job->short_addr);
+        if (ctx != NULL && ctx->in_use) {
+            interview_complete(ctx, job->status);
+        }
+        xSemaphoreGive(s_mutex);
+    } else {
+        ESP_LOGE(TAG, "Interview finish for 0x%04X gave up waiting for the lock",
+                 job->short_addr);
+    }
+
+    /* The stack size here is a judgement call about how deep a LittleFS read
+     * plus a cJSON parse goes. Report what was actually left so it stays a
+     * measurement rather than an assumption. */
+    ESP_LOGI(TAG, "Interview finish task done, %u bytes of stack were never used",
+             (unsigned)(uxTaskGetStackHighWaterMark(NULL) * sizeof(StackType_t)));
+
+    mem_ng_free(job);
+    vTaskDelete(NULL);
+}
+
+/**
+ * @brief Finish an interview that ended on a FreeRTOS timer callback
+ *
+ * interview_complete() calls zb_converter_find() on both of its paths — the
+ * salvage one and the successful one — and that reads the converter DB out of
+ * LittleFS and parses it with cJSON. The FreeRTOS timer service task has
+ * CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH bytes of stack, 2048 here, which is
+ * nowhere near enough:
+ *
+ *     ***ERROR*** A stack overflow in task Tmr Svc has been detected.
+ *
+ * It panicked rather than failing visibly, so the device came back from the
+ * reboot with conv=none and only its diagnostic entities. Every other caller of
+ * interview_complete() is a ZDO or ZCL callback on the Zigbee task, where the
+ * stack is ample; only the two timer callbacks need this detour.
+ *
+ * The caller must NOT hold s_mutex — the worker takes it itself, exactly as
+ * every direct caller of interview_complete() does.
+ *
+ * @param ctx    Interview context, read only for its short address
+ * @param status Status to complete the interview with
+ */
+static void interview_finish_deferred(zb_interview_context_t *ctx,
+                                      zb_interview_status_t status)
+{
+    if (ctx == NULL) {
+        return;
+    }
+
+    interview_finish_job_t *job = mem_ng_calloc(1, sizeof(*job), MEM_CAP_INTERNAL);
+    if (job == NULL) {
+        ESP_LOGE(TAG, "Out of memory finishing the interview for 0x%04X",
+                 ctx->short_addr);
+        return;
+    }
+    job->short_addr = ctx->short_addr;
+    job->status     = status;
+
+    if (xTaskCreate(interview_finish_task, "zb_iv_fin", INTERVIEW_FINISH_TASK_STACK,
+                    job, INTERVIEW_FINISH_TASK_PRIO, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "Could not start the interview finish task for 0x%04X",
+                 ctx->short_addr);
+        mem_ng_free(job);
+    }
+}
+
 static void basic_read_timeout_callback(TimerHandle_t timer)
 {
     zb_interview_context_t *ctx = (zb_interview_context_t *)pvTimerGetTimerID(timer);
@@ -1376,10 +1465,12 @@ static void basic_read_timeout_callback(TimerHandle_t timer)
 
     /* Complete the interview without the Basic cluster attributes */
     xSemaphoreTake(s_mutex, GW_TIMEOUT_LONG_TICKS);
-    if (ctx->in_use && ctx->status == ZB_INTERVIEW_STATUS_BASIC_INFO) {
-        interview_complete(ctx, ZB_INTERVIEW_STATUS_COMPLETE);
-    }
+    bool finish = (ctx->in_use && ctx->status == ZB_INTERVIEW_STATUS_BASIC_INFO);
     xSemaphoreGive(s_mutex);
+
+    if (finish) {
+        interview_finish_deferred(ctx, ZB_INTERVIEW_STATUS_COMPLETE);
+    }
 }
 
 /**
@@ -1442,7 +1533,7 @@ static void interview_complete(zb_interview_context_t *ctx, zb_interview_status_
              * Sleepy devices often report model but never manufacturer. */
             const char *mfr = salvage_dev->manufacturer;
             if (mfr[0] == '\0') {
-                mfr = infer_manufacturer_from_model(salvage_dev->model);
+                mfr = zb_interview_infer_manufacturer(salvage_dev->model);
                 if (mfr != NULL) {
                     strncpy(salvage_dev->manufacturer, mfr, sizeof(salvage_dev->manufacturer) - 1);
                     salvage_dev->manufacturer[sizeof(salvage_dev->manufacturer) - 1] = '\0';
@@ -1785,8 +1876,8 @@ static void timeout_callback(TimerHandle_t timer)
         is_known_sleepy_device(timeout_dev->model)) {
         ESP_LOGI(TAG, "Interview timeout for 0x%04X — sleepy device %s, skipping retries",
                  ctx->short_addr, timeout_dev->model);
-        interview_complete(ctx, ZB_INTERVIEW_STATUS_TIMEOUT);
         xSemaphoreGive(s_mutex);
+        interview_finish_deferred(ctx, ZB_INTERVIEW_STATUS_TIMEOUT);
         return;
     }
 
@@ -1818,8 +1909,8 @@ static void timeout_callback(TimerHandle_t timer)
     }
 
     ESP_LOGW(TAG, "Interview timeout for device 0x%04X, no retries left", ctx->short_addr);
-    interview_complete(ctx, ZB_INTERVIEW_STATUS_TIMEOUT);
     xSemaphoreGive(s_mutex);
+    interview_finish_deferred(ctx, ZB_INTERVIEW_STATUS_TIMEOUT);
 }
 
 /**
