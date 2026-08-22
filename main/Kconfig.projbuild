@@ -98,8 +98,26 @@ menu "ESP32-C5 Zigbee2MQTT Gateway Configuration"
                 association failure on its own does not. Costs a few seconds of
                 boot time, so leave it off in normal operation.
 
+        config WIFI_FORCE_5GHZ
+            bool "Force 5GHz Band"
+            default n
+            help
+                Keep this device on 5GHz and never fall back to 2.4GHz.
+
+                Ohne diese Option startet der Treiber im AUTO-Modus und wählt
+                nach Signalstärke, mit WIFI_5GHZ_RSSI_ADJUSTMENT als Bonus für
+                5 GHz. Steht ein starker 2,4-GHz-Accesspoint daneben, gewinnt
+                der — auch wenn 5 GHz ausdrücklich gewünscht ist.
+
+                Zum Messen ist das unbrauchbar: man weiß nicht, welches Band
+                man gerade testet. Diese Option erzwingt es.
+
+                Vorsicht im Betrieb: ist 5 GHz schwach oder weg, gibt es keinen
+                Rückfall, und die Assoziation läuft in einen Timeout.
+
         config WIFI_FORCE_2GHZ
             bool "Force 2.4GHz Band"
+            depends on !WIFI_FORCE_5GHZ
             default n
             help
                 Keep this device on 2.4GHz and never use 5GHz.

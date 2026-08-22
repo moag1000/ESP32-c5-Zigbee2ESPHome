@@ -162,7 +162,9 @@ bool wifi_manager_credentials_known_good(const char *ssid)
  */
 static wifi_band_mode_t preferred_band_mode(void)
 {
-#if CONFIG_WIFI_FORCE_2GHZ
+#if CONFIG_WIFI_FORCE_5GHZ
+    return WIFI_BAND_MODE_5G_ONLY;
+#elif CONFIG_WIFI_FORCE_2GHZ
     return WIFI_BAND_MODE_2G_ONLY;
 #elif defined(CONFIG_WIFI_PREFER_5GHZ)
     return WIFI_BAND_MODE_5G_ONLY;
@@ -176,7 +178,12 @@ static wifi_band_mode_t preferred_band_mode(void)
  */
 static wifi_band_mode_t fallback_band_mode(void)
 {
-#if CONFIG_WIFI_FORCE_2GHZ
+#if CONFIG_WIFI_FORCE_5GHZ
+    /* Kein Rückfall auf AUTO: der Sinn dieser Option ist, dass gemessen wird,
+     * was sie behauptet. Ein stiller Wechsel auf 2,4 GHz würde genau die Frage
+     * verfälschen, die sie beantworten soll. */
+    return WIFI_BAND_MODE_5G_ONLY;
+#elif CONFIG_WIFI_FORCE_2GHZ
     return WIFI_BAND_MODE_2G_ONLY;
 #else
     return WIFI_BAND_MODE_AUTO;
