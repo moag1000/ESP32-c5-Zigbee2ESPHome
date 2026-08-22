@@ -122,6 +122,26 @@ esp_err_t bridge_request_restart(void);
 esp_err_t bridge_request_factory_reset(void);
 
 /**
+ * @brief Wipe the Zigbee network, keeping Wi-Fi and gateway settings
+ *
+ * Erases every Zigbee NVS namespace and the Zigbee storage partitions, then
+ * restarts. Wi-Fi credentials and gateway configuration survive.
+ *
+ * @return does not return on success
+ */
+esp_err_t bridge_request_network_reset(void);
+
+/**
+ * @brief Erase Wi-Fi and gateway settings, keeping the Zigbee network
+ *
+ * The counterpart to bridge_request_network_reset(): paired devices stay,
+ * the device forgets how to reach the network it was on.
+ *
+ * @return does not return on success
+ */
+esp_err_t bridge_request_config_reset(void);
+
+/**
  * @brief Handle network map request
  *
  * Generates and publishes a network topology map with all devices.

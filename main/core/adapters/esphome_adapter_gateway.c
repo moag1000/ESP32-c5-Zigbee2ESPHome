@@ -29,6 +29,13 @@
 #include "core/device/device_registry.h"
 #include "core/events/event_bus.h"
 #include "core/led_status_manager.h"
+#include "core/bridge/bridge_request_handler.h"
+#include "esphome/esphome_api.h"
+#include "esp_wifi.h"
+#include "esp_sntp.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include <time.h>
 #include "esp_log.h"
 #include "esp_timer.h"
 #include <stdio.h>
@@ -68,6 +75,30 @@ static const char *TAG = "gw_entities";
 
 #define GW_KEY_MMWAVE_PRESENCE     0x40000010
 #define GW_KEY_MMWAVE_DISTANCE     0x40000011
+
+/* Actions and diagnostics that used to exist only over MQTT.
+ *
+ * ha_bridge_discovery.c publishes 37 entities for this gateway, and none of
+ * them were reachable over the ESPHome API — including the factory reset. On a
+ * gateway configured with ESPHome as the primary integration, that means the
+ * one action you need when the network is in a bad state lives on the
+ * transport most likely to be unavailable. */
+#define GW_KEY_FACTORY_RESET       0x40000012
+#define GW_KEY_NETWORK_RESET       0x40000013
+#define GW_KEY_CONFIG_RESET        0x40000014
+#define GW_KEY_RESTART             0x40000015
+#define GW_KEY_WAS_CRASH           0x40000016
+#define GW_KEY_TIME_SYNCED         0x40000017
+#define GW_KEY_WIFI_BAND           0x40000018
+#define GW_KEY_WIFI_IP             0x40000019
+#define GW_KEY_WIFI_HOSTNAME       0x4000001A
+#define GW_KEY_WIFI_QUALITY        0x4000001B
+#define GW_KEY_WIFI_UPTIME         0x4000001C
+#define GW_KEY_WIFI_CONNECTS       0x4000001D
+#define GW_KEY_API_CLIENTS         0x4000001E
+#define GW_KEY_BLE_STATUS          0x4000001F
+#define GW_KEY_BLE_DEVICES         0x40000020
+#define GW_KEY_CURRENT_TIME        0x40000021
 #endif
 
 /* ============================================================================
@@ -79,6 +110,12 @@ static float s_permit_join_duration = 120.0f;  /* Default 120s */
 static bool s_ota_mode_active = false;
 static bool s_ota_initialized = false;
 static esp_timer_handle_t s_ota_timeout_timer = NULL;
+
+/** @brief Pushes the gateway diagnostics on a fixed period */
+static esp_timer_handle_t s_diag_timer = NULL;
+
+/** @brief How often the gateway diagnostics are refreshed */
+#define GW_DIAG_INTERVAL_S      30
 
 #define OTA_MODE_TIMEOUT_S  600  /* 10 minutes auto-disable */
 
@@ -264,6 +301,70 @@ static void on_device_count_change(event_type_t type, void *data, size_t data_si
     /* Update device count whenever a device joins or leaves */
     size_t count = device_registry_count();
     esphome_entity_update_sensor(GW_KEY_DEVICE_COUNT, (float)count);
+}
+
+static void diag_timer_cb(void *arg)
+{
+    (void)arg;
+    esphome_adapter_gateway_update_state();
+}
+
+/* ============================================================================
+ * Destructive actions
+ * ============================================================================ */
+
+/**
+ * @brief Run a reset on its own task
+ *
+ * Every one of these ends in esp_restart(), and factory reset spends seconds
+ * erasing NVS and two flash partitions first. Running that inside the button
+ * callback would block the ESPHome client task that still holds the
+ * connection, so Home Assistant would never see the press acknowledged and
+ * would report a failure for an action that in fact succeeded.
+ *
+ * The short delay serves the same purpose: it lets the response leave before
+ * the device stops answering.
+ */
+static void reset_task(void *arg)
+{
+    esp_err_t (*aktion)(void) = (esp_err_t (*)(void))arg;
+    vTaskDelay(pdMS_TO_TICKS(700));
+    aktion();
+    vTaskDelete(NULL);   /* not reached: aktion() restarts the device */
+}
+
+static esp_err_t start_reset(esp_err_t (*aktion)(void), const char *was)
+{
+    ESP_LOGW(TAG, "%s requested from Home Assistant", was);
+    if (xTaskCreate(reset_task, "gw_reset", 4096, (void *)aktion, 5, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "Could not start reset task - running inline");
+        return aktion();
+    }
+    return ESP_OK;
+}
+
+static esp_err_t gw_factory_reset_command(esphome_entity_key_t key)
+{
+    (void)key;
+    return start_reset(bridge_request_factory_reset, "Factory reset");
+}
+
+static esp_err_t gw_network_reset_command(esphome_entity_key_t key)
+{
+    (void)key;
+    return start_reset(bridge_request_network_reset, "Network reset");
+}
+
+static esp_err_t gw_config_reset_command(esphome_entity_key_t key)
+{
+    (void)key;
+    return start_reset(bridge_request_config_reset, "Config reset");
+}
+
+static esp_err_t gw_restart_command(esphome_entity_key_t key)
+{
+    (void)key;
+    return start_reset(bridge_request_restart, "Restart");
 }
 
 /* ============================================================================
@@ -575,7 +676,254 @@ esp_err_t esphome_adapter_gateway_register(void)
     /* Push initial values */
     esphome_adapter_gateway_update_state();
 
+    /* Keep pushing them.
+     *
+     * This used to be the only call, which meant every gateway diagnostic was
+     * a snapshot of the first seconds after boot: Wi-Fi band, IP address and
+     * signal quality were captured before the station had even associated, and
+     * then never corrected. Boot count and reset reason are genuinely fixed
+     * for the life of a boot, but the rest is not, and a diagnostic that never
+     * changes is worse than none — it looks current. */
+    if (s_diag_timer == NULL) {
+        const esp_timer_create_args_t args = {
+            .callback = diag_timer_cb,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name = "gw_diag",
+        };
+        if (esp_timer_create(&args, &s_diag_timer) == ESP_OK) {
+            esp_timer_start_periodic(s_diag_timer,
+                                     (uint64_t)GW_DIAG_INTERVAL_S * 1000000);
+            ESP_LOGI(TAG, "Gateway diagnostics refresh every %d s", GW_DIAG_INTERVAL_S);
+        } else {
+            ESP_LOGW(TAG, "No diagnostics timer — values stay at their boot state");
+        }
+    }
+
     s_gw_initialized = true;
+
+    /* --- Actions that previously existed only over MQTT --- */
+
+    /* Factory Reset is disabled by default on purpose.
+     *
+     * It erases NVS, both Zigbee storage partitions and the persisted device
+     * state — the whole Zigbee network, every pairing. There is no undo and no
+     * confirmation dialog on a Home Assistant button, so it should not sit on a
+     * dashboard next to Permit Join waiting to be hit by accident. Enabling it
+     * is one toggle in Home Assistant, and that toggle is the confirmation. */
+
+    {
+        esphome_button_config_t cfg = {0};
+        cfg.key = GW_KEY_FACTORY_RESET;
+        cfg.device_id = 0;
+        strncpy(cfg.name, "Factory Reset", sizeof(cfg.name) - 1);
+        snprintf(cfg.unique_id, sizeof(cfg.unique_id), "zbgw_factory_reset");
+        strncpy(cfg.icon, "mdi:nuke", sizeof(cfg.icon) - 1);
+        cfg.device_class = ESPHOME_BUTTON_CLASS_NONE;
+        cfg.disabled_by_default = true;
+        cfg.press_callback = gw_factory_reset_command;
+        esphome_entity_register_button(&cfg);
+    }
+
+    /* Network Reset keeps Wi-Fi and gateway settings, drops the Zigbee network.
+     * Also destructive, also disabled by default. */
+
+    {
+        esphome_button_config_t cfg = {0};
+        cfg.key = GW_KEY_NETWORK_RESET;
+        cfg.device_id = 0;
+        strncpy(cfg.name, "Network Reset", sizeof(cfg.name) - 1);
+        snprintf(cfg.unique_id, sizeof(cfg.unique_id), "zbgw_network_reset");
+        strncpy(cfg.icon, "mdi:lan-disconnect", sizeof(cfg.icon) - 1);
+        cfg.device_class = ESPHOME_BUTTON_CLASS_NONE;
+        cfg.disabled_by_default = true;
+        cfg.press_callback = gw_network_reset_command;
+        esphome_entity_register_button(&cfg);
+    }
+
+    /* Config Reset is the mirror image: paired devices stay, the Wi-Fi
+     * credentials go. Recovering from it needs the captive portal. */
+
+    {
+        esphome_button_config_t cfg = {0};
+        cfg.key = GW_KEY_CONFIG_RESET;
+        cfg.device_id = 0;
+        strncpy(cfg.name, "Config Reset", sizeof(cfg.name) - 1);
+        snprintf(cfg.unique_id, sizeof(cfg.unique_id), "zbgw_config_reset");
+        strncpy(cfg.icon, "mdi:cog-refresh", sizeof(cfg.icon) - 1);
+        cfg.device_class = ESPHOME_BUTTON_CLASS_NONE;
+        cfg.disabled_by_default = true;
+        cfg.press_callback = gw_config_reset_command;
+        esphome_entity_register_button(&cfg);
+    }
+
+    /* Restart is harmless and stays enabled. */
+
+    {
+        esphome_button_config_t cfg = {0};
+        cfg.key = GW_KEY_RESTART;
+        cfg.device_id = 0;
+        strncpy(cfg.name, "Restart", sizeof(cfg.name) - 1);
+        snprintf(cfg.unique_id, sizeof(cfg.unique_id), "zbgw_restart");
+        strncpy(cfg.icon, "mdi:restart", sizeof(cfg.icon) - 1);
+        cfg.device_class = ESPHOME_BUTTON_CLASS_NONE;
+        cfg.disabled_by_default = false;
+        cfg.press_callback = gw_restart_command;
+        esphome_entity_register_button(&cfg);
+    }
+
+    /* --- Diagnostics that previously existed only over MQTT --- */
+
+    {
+        esphome_binary_sensor_config_t cfg = {0};
+        cfg.key = GW_KEY_WAS_CRASH;
+        cfg.device_id = 0;
+        strncpy(cfg.name, "Last Reset Was Crash", sizeof(cfg.name) - 1);
+        snprintf(cfg.unique_id, sizeof(cfg.unique_id), "zbgw_was_crash");
+        strncpy(cfg.icon, "mdi:alert-octagon", sizeof(cfg.icon) - 1);
+        cfg.entity_category = 2;
+        cfg.disabled_by_default = false;
+        esphome_entity_register_binary_sensor(&cfg);
+    }
+
+    {
+        esphome_binary_sensor_config_t cfg = {0};
+        cfg.key = GW_KEY_TIME_SYNCED;
+        cfg.device_id = 0;
+        strncpy(cfg.name, "Time Synchronized", sizeof(cfg.name) - 1);
+        snprintf(cfg.unique_id, sizeof(cfg.unique_id), "zbgw_time_synced");
+        strncpy(cfg.icon, "mdi:clock-check", sizeof(cfg.icon) - 1);
+        cfg.entity_category = 2;
+        cfg.disabled_by_default = false;
+        esphome_entity_register_binary_sensor(&cfg);
+    }
+
+    {
+        esphome_text_sensor_config_t cfg = {0};
+        cfg.key = GW_KEY_WIFI_BAND;
+        cfg.device_id = 0;
+        strncpy(cfg.name, "WiFi Band", sizeof(cfg.name) - 1);
+        snprintf(cfg.unique_id, sizeof(cfg.unique_id), "zbgw_wifi_band");
+        strncpy(cfg.icon, "mdi:wifi", sizeof(cfg.icon) - 1);
+        cfg.entity_category = 2;
+        cfg.disabled_by_default = false;
+        esphome_entity_register_text_sensor(&cfg);
+    }
+
+    {
+        esphome_text_sensor_config_t cfg = {0};
+        cfg.key = GW_KEY_WIFI_IP;
+        cfg.device_id = 0;
+        strncpy(cfg.name, "WiFi IP", sizeof(cfg.name) - 1);
+        snprintf(cfg.unique_id, sizeof(cfg.unique_id), "zbgw_wifi_ip");
+        strncpy(cfg.icon, "mdi:ip-network", sizeof(cfg.icon) - 1);
+        cfg.entity_category = 2;
+        cfg.disabled_by_default = false;
+        esphome_entity_register_text_sensor(&cfg);
+    }
+
+    {
+        esphome_text_sensor_config_t cfg = {0};
+        cfg.key = GW_KEY_WIFI_HOSTNAME;
+        cfg.device_id = 0;
+        strncpy(cfg.name, "WiFi Hostname", sizeof(cfg.name) - 1);
+        snprintf(cfg.unique_id, sizeof(cfg.unique_id), "zbgw_wifi_hostname");
+        strncpy(cfg.icon, "mdi:dns", sizeof(cfg.icon) - 1);
+        cfg.entity_category = 2;
+        cfg.disabled_by_default = false;
+        esphome_entity_register_text_sensor(&cfg);
+    }
+
+    {
+        esphome_text_sensor_config_t cfg = {0};
+        cfg.key = GW_KEY_CURRENT_TIME;
+        cfg.device_id = 0;
+        strncpy(cfg.name, "Current Time", sizeof(cfg.name) - 1);
+        snprintf(cfg.unique_id, sizeof(cfg.unique_id), "zbgw_current_time");
+        strncpy(cfg.icon, "mdi:clock", sizeof(cfg.icon) - 1);
+        cfg.entity_category = 2;
+        cfg.disabled_by_default = false;
+        esphome_entity_register_text_sensor(&cfg);
+    }
+
+    {
+        esphome_text_sensor_config_t cfg = {0};
+        cfg.key = GW_KEY_BLE_STATUS;
+        cfg.device_id = 0;
+        strncpy(cfg.name, "BLE Status", sizeof(cfg.name) - 1);
+        snprintf(cfg.unique_id, sizeof(cfg.unique_id), "zbgw_ble_status");
+        strncpy(cfg.icon, "mdi:bluetooth", sizeof(cfg.icon) - 1);
+        cfg.entity_category = 2;
+        cfg.disabled_by_default = false;
+        esphome_entity_register_text_sensor(&cfg);
+    }
+
+    {
+        esphome_sensor_config_t cfg = {0};
+        cfg.key = GW_KEY_WIFI_QUALITY;
+        cfg.device_id = 0;
+        strncpy(cfg.name, "WiFi Signal Quality", sizeof(cfg.name) - 1);
+        snprintf(cfg.unique_id, sizeof(cfg.unique_id), "zbgw_wifi_quality");
+        strncpy(cfg.icon, "mdi:wifi-strength-3", sizeof(cfg.icon) - 1);
+        strncpy(cfg.unit_of_measurement, "%", sizeof(cfg.unit_of_measurement) - 1);
+        cfg.accuracy_decimals = 0;
+        cfg.entity_category = 2;
+        cfg.disabled_by_default = false;
+        esphome_entity_register_sensor(&cfg);
+    }
+
+    {
+        esphome_sensor_config_t cfg = {0};
+        cfg.key = GW_KEY_WIFI_UPTIME;
+        cfg.device_id = 0;
+        strncpy(cfg.name, "WiFi Uptime", sizeof(cfg.name) - 1);
+        snprintf(cfg.unique_id, sizeof(cfg.unique_id), "zbgw_wifi_uptime");
+        strncpy(cfg.icon, "mdi:timer-outline", sizeof(cfg.icon) - 1);
+        strncpy(cfg.unit_of_measurement, "s", sizeof(cfg.unit_of_measurement) - 1);
+        cfg.accuracy_decimals = 0;
+        cfg.entity_category = 2;
+        cfg.disabled_by_default = false;
+        esphome_entity_register_sensor(&cfg);
+    }
+
+    {
+        esphome_sensor_config_t cfg = {0};
+        cfg.key = GW_KEY_WIFI_CONNECTS;
+        cfg.device_id = 0;
+        strncpy(cfg.name, "WiFi Connects", sizeof(cfg.name) - 1);
+        snprintf(cfg.unique_id, sizeof(cfg.unique_id), "zbgw_wifi_connects");
+        strncpy(cfg.icon, "mdi:wifi-plus", sizeof(cfg.icon) - 1);
+        cfg.accuracy_decimals = 0;
+        cfg.entity_category = 2;
+        cfg.disabled_by_default = false;
+        esphome_entity_register_sensor(&cfg);
+    }
+
+    {
+        esphome_sensor_config_t cfg = {0};
+        cfg.key = GW_KEY_API_CLIENTS;
+        cfg.device_id = 0;
+        strncpy(cfg.name, "API Clients", sizeof(cfg.name) - 1);
+        snprintf(cfg.unique_id, sizeof(cfg.unique_id), "zbgw_api_clients");
+        strncpy(cfg.icon, "mdi:account-network", sizeof(cfg.icon) - 1);
+        cfg.accuracy_decimals = 0;
+        cfg.entity_category = 2;
+        cfg.disabled_by_default = false;
+        esphome_entity_register_sensor(&cfg);
+    }
+
+    {
+        esphome_sensor_config_t cfg = {0};
+        cfg.key = GW_KEY_BLE_DEVICES;
+        cfg.device_id = 0;
+        strncpy(cfg.name, "BLE Devices Seen", sizeof(cfg.name) - 1);
+        snprintf(cfg.unique_id, sizeof(cfg.unique_id), "zbgw_ble_devices");
+        strncpy(cfg.icon, "mdi:bluetooth-audio", sizeof(cfg.icon) - 1);
+        cfg.accuracy_decimals = 0;
+        cfg.entity_category = 2;
+        cfg.disabled_by_default = false;
+        esphome_entity_register_sensor(&cfg);
+    }
+
     ESP_LOGI(TAG, "Gateway entities registered");
 
     return ESP_OK;
@@ -600,15 +948,86 @@ void esphome_adapter_gateway_update_state(void)
                                      (float)crash_reporter_get_boot_count());
     }
 
-    /* WiFi disconnect statistics */
+    /* Was the last reset a crash? Cheap, and it is the first thing anyone
+     * wants to know when a gateway reappears unexpectedly. */
+    if (crash_reporter_is_initialized()) {
+        esphome_entity_update_binary_sensor(GW_KEY_WAS_CRASH, crash_reporter_was_crash());
+    }
+
+    /* WiFi statistics */
     {
         wifi_stats_t ws = {0};
         if (wifi_manager_get_stats(&ws) == ESP_OK) {
             esphome_entity_update_sensor(GW_KEY_WIFI_DISCONNECTS, (float)ws.disconnect_count);
             esphome_entity_update_text_sensor(GW_KEY_WIFI_LAST_REASON,
                 wifi_manager_disconnect_reason_str(ws.last_disconnect_reason));
+            esphome_entity_update_sensor(GW_KEY_WIFI_QUALITY, (float)ws.signal_quality);
+            esphome_entity_update_sensor(GW_KEY_WIFI_UPTIME, (float)ws.uptime_seconds);
+            esphome_entity_update_sensor(GW_KEY_WIFI_CONNECTS, (float)ws.connect_count);
         }
     }
+
+    /* Band, derived from the channel the station actually landed on.
+     *
+     * Not from the configured preference: this project has already shipped a
+     * setting that said 5 GHz while the driver sat on 2.4, and a diagnostic
+     * that repeats the configuration instead of measuring it would have hidden
+     * exactly that. */
+    if (wifi_manager_is_connected()) {
+        wifi_ap_record_t ap = {0};
+        if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+            esphome_entity_update_text_sensor(GW_KEY_WIFI_BAND,
+                ap.primary >= WIFI_MGR_5GHZ_CHANNEL_MIN ? "5GHz" : "2.4GHz");
+        } else {
+            esphome_entity_update_text_sensor(GW_KEY_WIFI_BAND, "unknown");
+        }
+
+        char ip[16] = {0};
+        if (wifi_manager_get_ip(ip, sizeof(ip)) == ESP_OK) {
+            esphome_entity_update_text_sensor(GW_KEY_WIFI_IP, ip);
+        }
+    } else {
+        esphome_entity_update_text_sensor(GW_KEY_WIFI_BAND, "not connected");
+        esphome_entity_update_text_sensor(GW_KEY_WIFI_IP, "-");
+    }
+
+    {
+        const char *host = wifi_manager_get_hostname();
+        esphome_entity_update_text_sensor(GW_KEY_WIFI_HOSTNAME, host ? host : "unknown");
+    }
+
+    /* Clock */
+    {
+        bool synced = (sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED);
+        esphome_entity_update_binary_sensor(GW_KEY_TIME_SYNCED, synced);
+
+        if (synced) {
+            time_t now;
+            struct tm tm_utc;
+            char stamp[32];
+            time(&now);
+            gmtime_r(&now, &tm_utc);
+            strftime(stamp, sizeof(stamp), "%Y-%m-%d %H:%M:%SZ", &tm_utc);
+            esphome_entity_update_text_sensor(GW_KEY_CURRENT_TIME, stamp);
+        } else {
+            esphome_entity_update_text_sensor(GW_KEY_CURRENT_TIME, "not synced");
+        }
+    }
+
+    /* How many clients hold an API connection. Four slots exist; knowing how
+     * many are taken is what turns "Home Assistant cannot connect" from a
+     * guess into a reading. */
+    esphome_entity_update_sensor(GW_KEY_API_CLIENTS, (float)esphome_api_get_client_count());
+
+    /* BLE */
+#if CONFIG_BT_SCANNER_ENABLED
+    esphome_entity_update_text_sensor(GW_KEY_BLE_STATUS,
+        ble_scanner_is_running() ? "scanning" : "stopped");
+    esphome_entity_update_sensor(GW_KEY_BLE_DEVICES, (float)ble_scanner_get_device_count());
+#else
+    esphome_entity_update_text_sensor(GW_KEY_BLE_STATUS, "disabled");
+    esphome_entity_update_sensor(GW_KEY_BLE_DEVICES, 0.0f);
+#endif
 
     /* Channel + PAN ID from network info */
     zb_network_info_t info = {0};

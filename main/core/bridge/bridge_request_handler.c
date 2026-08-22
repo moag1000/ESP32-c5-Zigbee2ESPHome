@@ -683,23 +683,17 @@ static int remove_dir_contents(const char *dir_path)
  * @brief Handle network reset request
  * Erases Zigbee network data, devices, and state but preserves WiFi/MQTT config.
  */
-static esp_err_t handle_network_reset(const char *topic, const char *payload, size_t len)
+/**
+ * @brief Wipe the Zigbee network, keeping Wi-Fi and gateway settings
+ *
+ * Split out of the MQTT handler so the ESPHome side can reach it too. The
+ * gateway is meant to be usable without an MQTT broker, and an action that
+ * only exists on one transport is an action that is missing the moment that
+ * transport is down.
+ */
+esp_err_t bridge_request_network_reset(void)
 {
-    (void)topic;
-    (void)payload;
-    (void)len;
     ESP_LOGI(TAG, "Network reset requested");
-
-    /* Publish response before reset */
-    cJSON *data = cJSON_CreateObject();
-    if (data != NULL) {
-        cJSON_AddStringToObject(data, "state", "resetting_network");
-        bridge_response_publish_ok(RESPONSE_TOPIC_RESET_NETWORK, data, get_current_transaction());
-        cJSON_Delete(data);
-    }
-
-    /* Wait for MQTT delivery */
-    vTaskDelay(pdMS_TO_TICKS(2000));
 
     /* Clear in-memory device registry, bindings, and NG persistence */
     ESP_LOGI(TAG, "Clearing device registry and bindings...");
@@ -773,27 +767,35 @@ static esp_err_t handle_network_reset(const char *topic, const char *payload, si
     return ESP_OK;
 }
 
-/**
- * @brief Handle config reset request
- * Erases WiFi and gateway config but preserves Zigbee network and devices.
- */
-static esp_err_t handle_config_reset(const char *topic, const char *payload, size_t len)
+static esp_err_t handle_network_reset(const char *topic, const char *payload, size_t len)
 {
     (void)topic;
     (void)payload;
     (void)len;
-    ESP_LOGI(TAG, "Config reset requested");
 
-    /* Publish response before reset */
     cJSON *data = cJSON_CreateObject();
     if (data != NULL) {
-        cJSON_AddStringToObject(data, "state", "resetting_config");
-        bridge_response_publish_ok(RESPONSE_TOPIC_RESET_CONFIG, data, get_current_transaction());
+        cJSON_AddStringToObject(data, "state", "resetting_network");
+        bridge_response_publish_ok(RESPONSE_TOPIC_RESET_NETWORK, data, get_current_transaction());
         cJSON_Delete(data);
     }
+    vTaskDelay(pdMS_TO_TICKS(2000));   /* let the response reach the broker */
 
-    /* Wait for MQTT delivery */
-    vTaskDelay(pdMS_TO_TICKS(2000));
+    return bridge_request_network_reset();
+}
+
+/**
+ * @brief Handle config reset request
+ * Erases WiFi and gateway config but preserves Zigbee network and devices.
+ */
+/**
+ * @brief Erase Wi-Fi and gateway settings, keeping the Zigbee network
+ *
+ * Split out of the MQTT handler for the same reason as the network reset.
+ */
+esp_err_t bridge_request_config_reset(void)
+{
+    ESP_LOGI(TAG, "Config reset requested");
 
     /* Erase WiFi and gateway config namespaces */
     static const char *config_namespaces[] = {
@@ -816,6 +818,23 @@ static esp_err_t handle_config_reset(const char *topic, const char *payload, siz
 
     /* Never reached */
     return ESP_OK;
+}
+
+static esp_err_t handle_config_reset(const char *topic, const char *payload, size_t len)
+{
+    (void)topic;
+    (void)payload;
+    (void)len;
+
+    cJSON *data = cJSON_CreateObject();
+    if (data != NULL) {
+        cJSON_AddStringToObject(data, "state", "resetting_config");
+        bridge_response_publish_ok(RESPONSE_TOPIC_RESET_CONFIG, data, get_current_transaction());
+        cJSON_Delete(data);
+    }
+    vTaskDelay(pdMS_TO_TICKS(2000));
+
+    return bridge_request_config_reset();
 }
 
 static esp_err_t handle_networkmap(const char *topic, const char *payload, size_t len)
