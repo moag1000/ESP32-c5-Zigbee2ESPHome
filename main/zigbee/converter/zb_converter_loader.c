@@ -57,6 +57,7 @@ typedef struct {
  * ============================================================================ */
 
 static index_entry_t *s_index;   /* PSRAM, allocated in load_index() */
+static size_t s_index_skipped = 0;
 static size_t s_index_count = 0;
 static size_t s_db_device_count = 0;
 
@@ -212,6 +213,24 @@ static esp_err_t load_index(void)
 
             const char *mfr = string_intern(entry->string);
 
+            /* An entry without a usable name is not an index entry.
+             *
+             * string_intern() returns NULL for a name it cannot take — too
+             * long, pool exhausted, or NULL to begin with — and storing that
+             * NULL here is how a single bad record took the whole gateway
+             * down. find_filename() walks this array with strcmp(), so one
+             * NULL manufacturer means a load access fault on the very next
+             * device lookup, every time, forever.
+             *
+             * Seen on 2026-08-22 while pairing: the merged database carries a
+             * Legrand name padded to 146 characters with NUL bytes, which is
+             * how those devices report themselves. The gateway crash-looped
+             * and the sensor never got identified. */
+            if (mfr == NULL) {
+                s_index_skipped++;
+                continue;
+            }
+
             /* Check for "files" array (split manufacturers like LUMI → lumi_1..3) */
             cJSON *files_arr = cJSON_GetObjectItem(entry, "files");
             if (files_arr != NULL && cJSON_IsArray(files_arr)) {
@@ -219,8 +238,10 @@ static esp_err_t load_index(void)
                 cJSON_ArrayForEach(f, files_arr) {
                     if (s_index_count >= MAX_INDEX_ENTRIES) break;
                     if (!cJSON_IsString(f)) continue;
+                    const char *fn = string_intern(cJSON_GetStringValue(f));
+                    if (fn == NULL) { s_index_skipped++; continue; }
                     s_index[s_index_count].manufacturer = mfr;
-                    s_index[s_index_count].filename = string_intern(cJSON_GetStringValue(f));
+                    s_index[s_index_count].filename = fn;
                     s_index_count++;
                 }
                 continue;
@@ -230,8 +251,10 @@ static esp_err_t load_index(void)
             cJSON *file_j = cJSON_GetObjectItem(entry, "file");
             if (file_j == NULL || !cJSON_IsString(file_j)) continue;
 
+            const char *fn = string_intern(cJSON_GetStringValue(file_j));
+            if (fn == NULL) { s_index_skipped++; continue; }
             s_index[s_index_count].manufacturer = mfr;
-            s_index[s_index_count].filename = string_intern(cJSON_GetStringValue(file_j));
+            s_index[s_index_count].filename = fn;
             s_index_count++;
         }
     } else {
@@ -256,9 +279,14 @@ static esp_err_t load_index(void)
             }
             if (!cJSON_IsString(entry)) continue;
 
-            s_index[s_index_count].manufacturer = string_intern(entry->string);
-            s_index[s_index_count].filename = string_intern(cJSON_GetStringValue(entry));
-            s_index_count++;
+            {
+                const char *m1 = string_intern(entry->string);
+                const char *f1 = string_intern(cJSON_GetStringValue(entry));
+                if (m1 == NULL || f1 == NULL) { s_index_skipped++; continue; }
+                s_index[s_index_count].manufacturer = m1;
+                s_index[s_index_count].filename = f1;
+                s_index_count++;
+            }
         }
     }
 
@@ -695,6 +723,7 @@ static const char *find_filename(const char *manufacturer)
 
     /* Exact match */
     for (size_t i = 0; i < s_index_count; i++) {
+        if (s_index[i].manufacturer == NULL) continue;
         if (strcmp(s_index[i].manufacturer, manufacturer) == 0) {
             return s_index[i].filename;
         }
@@ -702,6 +731,7 @@ static const char *find_filename(const char *manufacturer)
 
     /* Case-insensitive match (e.g. "LUMI" vs "lumi", "innr" vs "Innr") */
     for (size_t i = 0; i < s_index_count; i++) {
+        if (s_index[i].manufacturer == NULL) continue;
         if (strcasecmp(s_index[i].manufacturer, manufacturer) == 0) {
             return s_index[i].filename;
         }
@@ -711,6 +741,7 @@ static const char *find_filename(const char *manufacturer)
     size_t mlen = strlen(manufacturer);
     if (mlen >= 4 && manufacturer[0] == '_') {
         for (size_t i = 0; i < s_index_count; i++) {
+            if (s_index[i].manufacturer == NULL) continue;
             size_t idx_len = strlen(s_index[i].manufacturer);
             if (idx_len <= mlen &&
                 strncmp(s_index[i].manufacturer, manufacturer, idx_len) == 0) {
