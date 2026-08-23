@@ -676,6 +676,88 @@ Ports durch die Testwerkzeuge; die Konsole stirbt zuerst. Dass esptool ebenfalls
 scheitert, geht ueber diese Erklaerung hinaus. Konsequenz bis zur Klaerung:
 Zustand ueber MQTT (`zigbee2mqtt/bridge/state`) lesen, nicht seriell.
 
+## Der Timer-Task hatte 2 KB Stack fuer einen LittleFS-Lesevorgang (behoben 2026-08-23)
+
+Ein frisch gepairter Aqara-Vibrationssensor kam mit acht Entities in Home
+Assistant an, alle davon Diagnose. Im Log:
+
+    ZB_INTERVIEW: Interview timeout for 0x6078 — sleepy device lumi.vibration.aq1
+    ZB_INTERVIEW: Inferred manufacturer 'LUMI' from model 'lumi.vibration.aq1'
+    ***ERROR*** A stack overflow in task Tmr Svc has been detected.
+
+`interview_complete()` ruft `zb_converter_find()` auf **beiden** Pfaden -- dem
+Salvage-Pfad und dem erfolgreichen -- und das liest die Converter-DB aus
+LittleFS und parst sie mit cJSON. Zwei seiner neun Aufrufer sind
+FreeRTOS-Software-Timer-Callbacks (`timeout_callback`,
+`basic_read_timeout_callback`), es lief also auf dem Timer-Service-Task mit
+`CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH` = 2048 Byte.
+
+Die Warnung stand seit jeher **in derselben Funktion**, zwei Zeilen ueber dem
+Aufruf, der sie indirekt verletzt:
+
+    IMPORTANT: Do NOT call zb_converter_find() here!
+
+Ein Kommentar, der die Gefahr benennt, ist kein Schutz vor ihr. Beim Pruefen
+also nicht fragen "ist es dokumentiert?", sondern "was ruft es tatsaechlich?".
+
+Es hat **paniced statt sichtbar zu scheitern**, weshalb der abgeleitete
+Hersteller nie persistiert wurde und das Geraet nach dem Reboot mit
+`conv=none` zurueckkam. Die beiden Timer-Callbacks reichen die Vervollstaendigung
+jetzt an `interview_finish_deferred()` weiter -- ein kurzlebiger Task mit 8 KB
+Stack, der seinen High-Water-Mark loggt, damit die Groesse eine Messung bleibt
+und keine Annahme. Locking unveraendert: der Worker nimmt `s_mutex` selbst und
+loest den Kontext per `find_context_by_short()` neu auf, statt den Zeiger ueber
+den Task-Wechsel zu tragen. Die uebrigen sieben Aufrufer sind ZDO-/ZCL-Callbacks
+auf dem Zigbee-Task und rufen weiterhin direkt.
+
+### Der zweite Fehler daneben: der Boot-Rebind konnte nicht matchen
+
+Das haette allein noch ein Neu-Pairing gebraucht, denn das persistierte Geraet
+fand beim Boot ebenfalls keinen Converter:
+
+    No converter for 0x6078: mfr='(empty)' model='lumi.vibration.aq1'
+    Converter re-bind: 0 exact, 0 generic, 1 unmatched (of 1 devices)
+
+Ein Schlafgeraet meldet sein Modell direkt nach dem Join und schlaeft ein, bevor
+es je einen Hersteller sendet -- die DB schluesselt aber auf **beide**. Das
+Interview konnte den Hersteller aus dem Modellpraefix ableiten, der Rebind
+nicht, weil die Funktion `static` war. Sie heisst jetzt
+`zb_interview_infer_manufacturer()` und steht in `zb_interview.h`:
+
+    Inferred manufacturer 'LUMI' from model 'lumi.vibration.aq1'
+    Bound converter: 0x6078 -> Vibration sensor
+    Converter re-bind: 1 exact, 0 generic, 0 unmatched (of 1 devices)
+
+`caps` 0x00000080 -> 0x00010490, `exposes` 0 -> 14. **Ohne Neu-Pairing.**
+
+Die Ableitung ist bewusst eng (`lumi.`, `TRADFRI`/`SYMFONISK`, `SNZB-`) und gibt
+NULL zurueck statt zu raten -- ein falscher Hersteller bindet einen falschen
+Converter, und das ist schlimmer als gar keiner.
+
+### In Home Assistant gegengeprueft
+
+21 Entities registriert, 20 aktiv in HA, eine (`Zigbee Info`) absichtlich
+`disabled_by_default`. Mit echten Messwerten, nicht nur Registrierung:
+
+    sensor...._lqi                 255
+    sensor...._rssi                -30 dBm
+    sensor.aqara_..._angle_x/y/z   3.0 / 0.0 / 87.0
+    sensor.aqara_..._x/y/z_axis    53 / 6 / 1179
+
+`battery`, `voltage`, `device_temperature`, `strength` und
+`power_outage_count` stehen auf `unknown` -- die stecken im 0xFF01-Attribut, das
+dieses Geraet nur beim Aufwachen sendet (siehe naechster Abschnitt).
+
+**Fallstrick beim Nachpruefen in HA:** die object_ids sind uneinheitlich. Ein
+Teil der Entities steht unter `sensor.aqara_vibration_sensor_*`, ein anderer
+unter `sensor.0x00158d0002c4aab4_*` -- je nachdem, ob der Sub-Device-Name beim
+ersten Anlegen schon bekannt war. Ein Filter auf das Praefix zaehlt deshalb zu
+wenig. Und `lumi` als Suchstring matcht `illuminance`.
+
+**Noch nicht belegt:** der Tmr-Svc-Pfad selbst. Die Bindung klappt jetzt beim
+Boot, *bevor* ein Interview in den Timeout laufen kann -- der reparierte Pfad
+wird also gar nicht mehr betreten. Ihn zu beweisen braucht ein frisches Pairing.
+
 ## Aqara-Batterie steckt in 0xFF01 (behoben 2026-08-10)
 
 Aqara-Geraete implementieren **kein** genPowerCfg. Die Batteriespannung liegt in
