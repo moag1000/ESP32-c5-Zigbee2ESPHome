@@ -33,6 +33,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 #include <time.h>
 
 static const char *TAG = "diag_ent";
@@ -377,15 +378,25 @@ void esphome_adapter_diagnostics_update(const device_t *dev)
         return;
     }
 
-    /* LQI */
+    /* LQI. Zero is the "never measured" state, not a reading — the field is
+     * zeroed when a device is loaded from NVS and only the NWK neighbour table
+     * fills it. A real link quality of 0 would mean an unusable link, which is
+     * a different claim from "we have not heard this device yet". */
     esphome_entity_update_sensor(
         make_diag_key(dev->id, DIAG_TYPE_LQI),
-        (float)dev->proto.zigbee.lqi);
+        dev->proto.zigbee.lqi != 0 ? (float)dev->proto.zigbee.lqi : NAN);
 
-    /* RSSI */
+    /* RSSI.
+     *
+     * 0 dBm cannot come off a received Zigbee frame, so it is the "nothing
+     * measured yet" value rather than a reading — the field is zeroed on load
+     * and only the NWK neighbour table ever fills it. Publishing NaN makes Home
+     * Assistant show 'unknown', which is what it is. It used to publish a
+     * number derived from LQI, so a device that had never been heard from
+     * reported a confident -100 dBm. */
     esphome_entity_update_sensor(
         make_diag_key(dev->id, DIAG_TYPE_RSSI),
-        (float)dev->proto.zigbee.rssi);
+        dev->proto.zigbee.rssi != 0 ? (float)dev->proto.zigbee.rssi : NAN);
 
     /* Last Seen */
     if (dev->last_seen > 0) {

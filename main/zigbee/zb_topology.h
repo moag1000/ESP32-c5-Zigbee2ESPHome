@@ -65,6 +65,12 @@ extern "C" {
 /** @brief How often the coordinator's neighbour table is re-read for link quality */
 #define ZB_TOPOLOGY_LQI_REFRESH_MS      (15 * 60 * 1000)
 
+/** @brief Delay after the network is ready before the first link-quality read */
+#define ZB_TOPOLOGY_LQI_INITIAL_DELAY_MS (20 * 1000)
+
+/** @brief Delay after a device is heard from before reading its link quality */
+#define ZB_TOPOLOGY_LQI_ACTIVITY_DELAY_MS 500
+
 /**
  * @brief LQI request timeout in milliseconds
  */
@@ -595,6 +601,19 @@ SemaphoreHandle_t zb_topology_get_mutex(void);
  * @return ESP_FAIL if any test fails
  */
 esp_err_t zb_topology_test(void);
+
+/**
+ * @brief Note that a Zigbee device was just heard from
+ *
+ * Schedules a read of the local NWK neighbour table shortly afterwards. That
+ * table is the only source of a measured LQI and RSSI, and it only holds one
+ * for a device the stack has heard recently — for a sleepy end device that is
+ * the moment it transmits, not the fifteen-minute periodic refresh.
+ *
+ * Safe to call from the Zigbee task: the read itself happens on the timer task,
+ * and repeated calls inside the debounce window schedule a single read.
+ */
+void zb_topology_note_device_activity(void);
 
 #ifdef __cplusplus
 }

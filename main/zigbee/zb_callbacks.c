@@ -62,6 +62,7 @@
 #include "led/led_controller.h"
 #include "core/led_status_manager.h"
 #include "zigbee/zb_lumi.h"
+#include "zigbee/zb_topology.h"
 #endif
 
 static const char *TAG = "ZB_CB";
@@ -657,6 +658,11 @@ void zb_callback_report_attr(esp_zb_zcl_report_attr_message_t *message)
         device_registry_update_last_seen(device->id);
     }
     zb_availability_update_last_seen(short_addr);
+
+    /* A frame just arrived, so the stack has a fresh signal measurement for
+     * this device in its neighbour table. That is the only moment it has one
+     * for a sleepy end device — see zb_topology_note_device_activity(). */
+    zb_topology_note_device_activity();
 
     /* Retry any pending write commands for sleepy devices.
      * Aqara battery devices don't poll for indirect frames — we must

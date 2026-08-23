@@ -17,10 +17,13 @@
 #include "core/memory/memory_manager_ng.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "nwk/esp_zigbee_nwk.h"
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "cJSON.h"
 #include <string.h>
+#include <limits.h>
+#include <stdbool.h>
 #include <stdio.h>
 
 static const char *TAG = "ZB_TOPOLOGY";
@@ -71,6 +74,7 @@ static void topology_build_links(void);
 static uint32_t topology_get_timestamp(void);
 
 static esp_timer_handle_t s_lqi_timer = NULL;
+static esp_timer_handle_t s_lqi_initial_timer = NULL;
 
 /**
  * @brief Periodically re-read the coordinator's own neighbour table
@@ -78,9 +82,131 @@ static esp_timer_handle_t s_lqi_timer = NULL;
  * Only refreshes signal quality; it does not touch the topology scan state, so
  * it cannot collide with a Network Heal in progress.
  */
+/**
+ * @brief Copy link quality out of the local NWK neighbour table
+ *
+ * The stack keeps a neighbour table in RAM, and unlike the ZDO Mgmt_Lqi
+ * response its entries carry a **measured** RSSI alongside the LQI. Reading it
+ * costs no network traffic, needs no round trip, and covers sleepy children
+ * that only show up in the ZDO answer between their own transmissions.
+ *
+ * Before this, RSSI was invented: the ZDO path derived it from LQI as
+ * -100 + lqi*70/255, and Home Assistant showed the result as a dBm reading with
+ * device_class signal_strength. A freshly paired device with LQI 0 therefore
+ * reported exactly -100 dBm — a number that looks like a measurement of a
+ * barely-reachable device, for one sitting a metre away.
+ *
+ * @return How many devices were updated
+ */
+static size_t refresh_link_quality_from_nwk_table(void)
+{
+    esp_zb_nwk_info_iterator_t it = ESP_ZB_NWK_INFO_ITERATOR_INIT;
+    esp_zb_nwk_neighbor_info_t nbr;
+    size_t updated = 0;
+
+    esp_zb_lock_acquire(GW_TIMEOUT_VERY_LONG_TICKS);
+    while (esp_zb_nwk_get_next_neighbor(&it, &nbr) == ESP_OK) {
+        uint64_t ieee = 0;
+        memcpy(&ieee, nbr.ieee_addr, sizeof(ieee));
+
+        device_t *dev = device_registry_get(ieee);
+        if (dev == NULL && nbr.short_addr != 0xFFFF) {
+            dev = device_registry_get_by_short_addr(nbr.short_addr);
+        }
+        if (dev == NULL || dev->protocol != DEV_PROTOCOL_ZIGBEE) {
+            continue;
+        }
+
+        /* The stack fills these in only once it has actually heard the
+         * device. A restored table entry for a sleepy end device that has not
+         * transmitted since boot carries lqi 0 and rssi INT8_MAX — sentinels,
+         * not readings. Writing them through would replace a real measurement
+         * with a placeholder and, worse, publish 127 dBm as a signal strength.
+         * That is exactly what the first version of this function did. */
+        bool have_rssi = (nbr.rssi != INT8_MAX && nbr.rssi < 0);
+        bool have_lqi  = (nbr.lqi > 0);
+
+        if (have_lqi) {
+            dev->proto.zigbee.lqi = nbr.lqi;
+        }
+        if (have_rssi) {
+            dev->proto.zigbee.rssi = nbr.rssi;
+        }
+        if (have_lqi || have_rssi) {
+            updated++;
+        }
+    }
+    esp_zb_lock_release();
+
+    if (updated > 0) {
+        ESP_LOGD(TAG, "NWK neighbour table: measured link quality for %zu device(s)", updated);
+    }
+    return updated;
+}
+
+/**
+ * @brief Pull link quality in once, shortly after the network comes up
+ *
+ * The periodic refresh runs every ZB_TOPOLOGY_LQI_REFRESH_MS — fifteen minutes
+ * — and an esp_timer started with start_periodic does not fire at t=0. So for
+ * the first quarter of an hour after every reboot, every device reported LQI 0,
+ * and with the old derived RSSI that came out as a confident -100 dBm. Restarts
+ * are frequent enough here (a flash, a watchdog, a power cut) that this was the
+ * normal state rather than an edge case.
+ */
+void zb_topology_note_device_activity(void)
+{
+    /* The neighbour table only holds a measurement for a device the stack has
+     * recently heard, so the useful moment to read it is just after a frame
+     * arrives. Callers are on the Zigbee task and must not take the stack lock
+     * again, hence the hop onto the timer task. Debounced: a burst of reports
+     * schedules one read, not one per report. */
+    if (s_lqi_initial_timer == NULL || esp_timer_is_active(s_lqi_initial_timer)) {
+        return;
+    }
+    esp_timer_start_once(s_lqi_initial_timer,
+                         (uint64_t)ZB_TOPOLOGY_LQI_ACTIVITY_DELAY_MS * 1000);
+}
+
+static void lqi_initial_timer_callback(void *arg)
+{
+    (void)arg;
+    size_t n = refresh_link_quality_from_nwk_table();
+    if (n > 0) {
+        ESP_LOGI(TAG, "Link-quality read: %zu device(s) measured", n);
+    } else {
+        ESP_LOGD(TAG, "Link-quality read: nothing measured yet");
+    }
+}
+
+/**
+ * @brief Arm the one-shot initial read once the Zigbee network is formed
+ *
+ * The neighbour table is empty until the network exists, so this waits for the
+ * event rather than reading at init. The short delay after it lets already
+ * joined devices settle back into the table.
+ */
+static void topology_network_ready_handler(event_type_t type, void *data,
+                                           size_t data_size, void *user_ctx)
+{
+    (void)type; (void)data; (void)data_size; (void)user_ctx;
+
+    if (s_lqi_initial_timer == NULL) {
+        return;
+    }
+    if (esp_timer_is_active(s_lqi_initial_timer)) {
+        return;
+    }
+    esp_timer_start_once(s_lqi_initial_timer,
+                         (uint64_t)ZB_TOPOLOGY_LQI_INITIAL_DELAY_MS * 1000);
+}
+
 static void lqi_refresh_timer_callback(void *arg)
 {
     (void)arg;
+    /* Local table first — it is the only source of a real RSSI. The ZDO request
+     * still goes out because it also feeds the topology view. */
+    refresh_link_quality_from_nwk_table();
     zb_topology_request_neighbors(0x0000, 0);
 }
 
@@ -106,8 +232,9 @@ static void zdo_lqi_callback(const esp_zb_zdo_mgmt_lqi_rsp_t *rsp, void *user_ct
 
     /* Store the link quality per device.
      *
-     * This response is the only place the stack tells us how well it hears a
-     * device — the ZCL report callbacks carry no signal information at all.
+     * The ZCL report callbacks carry no signal information at all, so this and
+     * the local NWK neighbour table are the two sources; only the latter has a
+     * measured RSSI.
      * The values used to be discarded here, which is why every device reported
      * LQI 0 and RSSI 0 in Home Assistant and why "linkquality" was 0 in every
      * state message. */
@@ -127,10 +254,10 @@ static void zdo_lqi_callback(const esp_zb_zdo_mgmt_lqi_rsp_t *rsp, void *user_ct
         }
 
         dev->proto.zigbee.lqi = rec->lqi;
-        /* The neighbour table has no RSSI field. Derive an estimate from LQI so
-         * the entity shows something monotonic in signal strength rather than a
-         * flat zero: LQI 0..255 maps onto roughly -100..-30 dBm. */
-        dev->proto.zigbee.rssi = (int8_t)(-100 + (rec->lqi * 70) / 255);
+        /* RSSI is deliberately not touched here. The ZDO record carries none,
+         * and the estimate that used to stand in its place
+         * (-100 + lqi*70/255) was published as a dBm measurement.
+         * refresh_link_quality_from_nwk_table() reads the real one. */
         updated++;
     }
 
@@ -219,6 +346,21 @@ esp_err_t zb_topology_init(void)
         s_lqi_timer = NULL;
     }
 
+    /* One-shot companion, armed when the network comes up — see
+     * lqi_initial_timer_callback() for why the periodic timer alone is not
+     * enough. */
+    const esp_timer_create_args_t lqi_initial_args = {
+        .callback = lqi_initial_timer_callback,
+        .arg = NULL,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "topo_lqi_first"
+    };
+    if (esp_timer_create(&lqi_initial_args, &s_lqi_initial_timer) != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to create the initial LQI timer (continuing)");
+        s_lqi_initial_timer = NULL;
+    }
+    event_subscribe(EVT_NETWORK_READY, topology_network_ready_handler, NULL);
+
     s_initialized = true;
     ESP_LOGI(TAG, "Topology module initialized successfully");
     return ESP_OK;
@@ -236,6 +378,13 @@ esp_err_t zb_topology_deinit(void)
         esp_timer_stop(s_lqi_timer);
         esp_timer_delete(s_lqi_timer);
         s_lqi_timer = NULL;
+    }
+
+    event_unsubscribe(EVT_NETWORK_READY, topology_network_ready_handler);
+    if (s_lqi_initial_timer != NULL) {
+        esp_timer_stop(s_lqi_initial_timer);
+        esp_timer_delete(s_lqi_initial_timer);
+        s_lqi_initial_timer = NULL;
     }
 
     /* Stop any ongoing scan */
