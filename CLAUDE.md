@@ -676,6 +676,44 @@ Ports durch die Testwerkzeuge; die Konsole stirbt zuerst. Dass esptool ebenfalls
 scheitert, geht ueber diese Erklaerung hinaus. Konsequenz bis zur Klaerung:
 Zustand ueber MQTT (`zigbee2mqtt/bridge/state`) lesen, nicht seriell.
 
+## Die ESPHome-Sitzung stirbt, das WLAN nicht (gemessen 2026-08-23)
+
+Der Paketverlust aus dem Abschnitt weiter unten ist auch auf dem neuen Board mit
+**externer Antenne auf 5 GHz** da. Die Antenne hat ihn nicht behoben.
+
+Neu ist, wo genau er weh tut. Aus der Home-Assistant-History ueber zwei Stunden,
+ohne das Geraet anzufassen:
+
+    API Clients:      1 -> unavailable, 6x in 2 h
+                      09:44 (4,5 min)  09:59 (1,5)  10:03 (2)
+                      10:08 (1)        10:25 (0,5)  10:42 (0,5)
+    WiFi Disconnects: 0.0 durchgehend
+    Boot Count:       6 -> 7  (ein Flash, kein Crashloop)
+
+**Die WLAN-Assoziation haelt durchgehend, die ESPHome-TCP-Sitzung stirbt alle
+10-20 Minuten.** Also weder der Treiber noch ein Absturz -- die Verbindung
+erstickt am Verlust. Passend dazu 61 % ICMP-Verlust gegen einen Router mit 0 %,
+und das zweite Gateway in diesem Netz -- andere Hardware, normale
+ESPHome-Firmware -- verliert 80 %.
+
+**Fuer die Fehlersuche wichtig:** die HA-History ist hier das bessere Messgeraet
+als der serielle Port. Sie kostet nichts, stoert nichts, und `WiFi Disconnects`
+neben `API Clients` trennt die beiden Schichten sauber. Der serielle Port
+dagegen **startet das Geraet neu, wenn er geschlossen wird** -- ein
+abgebrochener Mitschnitt hat in dieser Sitzung genau das getan und Messwerte
+erzeugt (`LQI 0`, `RSSI -100`, `Last Seen unknown`), die nach einem defekten
+Geraet aussahen und Post-Reboot-Defaults waren.
+
+**Zugang zur HA-API:** URL und ein Long-Lived-Token liegen in
+`~/.config/kyoro/ha_config.json`. `GET {url}/api/states` und
+`GET {url}/api/history/period/{iso}?filter_entity_id=...`.
+
+**Fallstrick bei den Entity-IDs:** sie sind uneinheitlich. Ein Teil steht unter
+`sensor.aqara_vibration_sensor_*`, ein anderer unter
+`sensor.0x00158d0002c4aab4_*` -- je nachdem, ob der Sub-Device-Name beim ersten
+Anlegen schon bekannt war. Ein Filter auf ein Praefix zaehlt zu wenig. Und
+`lumi` als Suchstring matcht `illuminance`.
+
 ## MQTT-Discovery baute ein Geraet, das HA nie fuellen konnte (behoben 2026-08-23)
 
 In Home Assistant stand neben dem Gateway ein zweites Geraet, "Zigbee2MQTT
@@ -1136,7 +1174,7 @@ eigenverursacht erkennbar war.
 Wer nur den Quelltext pruefen will, braucht das Geraet nicht -- `idf.py build`
 reicht.
 
-Stand 2026-08-10: **159 Tests, 0 Fehler.** Neu dazugekommen sind die Suiten fuer
+Stand 2026-08-23: **163 Tests, 0 Fehler.** Neu dazugekommen sind die Suiten fuer
 den Tuya-Datenpunkt-Parser, den ExecuteService-Dekoder und den Aqara-0xFF01-
 Parser -- alle drei lesen eine Laenge vom Draht und indizieren damit, also genau
 die Form, an der dieses Projekt schon einmal einen Pufferueberlauf hatte.
