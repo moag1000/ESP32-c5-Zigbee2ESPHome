@@ -237,8 +237,18 @@ esp_err_t mqtt_bridge_start(void)
     vTaskDelay(pdMS_TO_TICKS(GW_WIFI_STABILIZE_DELAY_MS)); /* Small delay before discovery flood */
     ha_discovery_ng_publish_all();
 
-    /* Publish Home Assistant discovery for bridge entities (sensors, buttons, etc.) */
+    /* Publish Home Assistant discovery for bridge entities (sensors, buttons, etc.).
+     * A no-op under ESPHOME_PRIMARY_INTEGRATION — see the guard in that function. */
     ha_bridge_discovery_publish_all();
+
+#ifdef CONFIG_ESPHOME_PRIMARY_INTEGRATION
+    /* Discovery configs are retained, so no longer publishing them is not
+     * enough: what an earlier firmware sent is still sitting on the broker,
+     * and Home Assistant rebuilds the ghost gateway device from it on every
+     * restart. Clear it once per boot by publishing the empty retained
+     * payloads. Only the entities this gateway created are touched. */
+    ha_bridge_discovery_remove();
+#endif
 
     /* Publish FULL bridge state for HA sensors (contains all fields like device_count, channel, etc.)
      * IMPORTANT: This must be the ONLY retained publish to zigbee2mqtt/bridge/state

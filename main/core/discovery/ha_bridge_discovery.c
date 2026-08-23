@@ -1249,6 +1249,17 @@ esp_err_t ha_bridge_discovery_init(void)
 
 esp_err_t ha_bridge_discovery_publish_all(void)
 {
+#ifdef CONFIG_ESPHOME_PRIMARY_INTEGRATION
+    /* ESPHome owns the gateway's entities in this mode, and every MQTT state
+     * publisher is already suppressed for it — so these configs created a
+     * second gateway device in Home Assistant that nothing ever populated.
+     * Measured on the device: 37 entities, all permanently 'unavailable',
+     * re-sent in full on every broker reconnect over a link that was losing
+     * 43 % of its packets. ha_bridge_discovery_remove() clears what earlier
+     * firmware left retained on the broker. */
+    ESP_LOGD(TAG, "ESPHome is the primary integration — skipping bridge discovery");
+    return ESP_OK;
+#else
     REQUIRE_MQTT_CONNECTED(ESP_ERR_INVALID_STATE);
 
     if (!s_initialized) {
@@ -1427,6 +1438,7 @@ esp_err_t ha_bridge_discovery_publish_all(void)
     }
 
     return ret;
+#endif
 }
 
 esp_err_t ha_bridge_discovery_remove(void)
