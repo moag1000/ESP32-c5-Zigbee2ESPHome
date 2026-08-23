@@ -264,6 +264,110 @@ static void test_power_outage_count_beside_voltage(void)
     TEST_ASSERT_EQUAL(23, a.temperature_c);
 }
 
+
+/* ============================================================================
+ * The ZCL string length byte
+ *
+ * The attribute arrives length-prefixed, and three places used to strip that
+ * byte themselves. One of them — the converter's fz_xiaomi_ff01(), which is what
+ * actually runs once a converter is bound — did not, and read the length as the
+ * first tag. Every following read was then off by one, the walk stopped at a
+ * type it could not size, and it reported success having decoded nothing.
+ * Nothing logged, nothing failed, and the battery stayed 'unknown'.
+ * ============================================================================ */
+
+/** The first byte is a length, not a tag. */
+static void test_attribute_skips_the_length_byte(void)
+{
+    /* len=4, then tag 0x01 type uint16 = 3000 mV */
+    const uint8_t attr[] = { 0x04, 0x01, 0x21, 0xB8, 0x0B };
+    zb_lumi_attrs_t a;
+
+    TEST_ASSERT_EQUAL(ESP_OK, zb_lumi_parse_attribute(attr, sizeof(attr), &a));
+    TEST_ASSERT_TRUE(a.has_voltage);
+    TEST_ASSERT_EQUAL(3000, a.voltage_mv);
+    TEST_ASSERT_EQUAL(100, zb_lumi_voltage_to_percent(a.voltage_mv));
+}
+
+/**
+ * @brief Reading the length byte as a tag must not look like success
+ *
+ * This is the exact shape that failed: byte 0 is a length, and taken as a tag
+ * it pairs with 0x01 as its type — a type with no known width, so the walk
+ * stops immediately having read nothing.
+ */
+static void test_length_byte_read_as_a_tag_decodes_nothing(void)
+{
+    const uint8_t attr[] = { 0x04, 0x01, 0x21, 0xB8, 0x0B };
+    zb_lumi_attrs_t wrong;
+
+    /* What the broken converter did: parse from offset 0. */
+    TEST_ASSERT_EQUAL(ESP_ERR_NOT_FOUND,
+                      zb_lumi_parse_special(attr, sizeof(attr), &wrong));
+    TEST_ASSERT_FALSE(wrong.has_voltage);
+
+    /* What it must do instead. */
+    zb_lumi_attrs_t right;
+    TEST_ASSERT_EQUAL(ESP_OK, zb_lumi_parse_attribute(attr, sizeof(attr), &right));
+    TEST_ASSERT_EQUAL(3000, right.voltage_mv);
+}
+
+/** A realistic payload carrying three tags at once. */
+static void test_attribute_decodes_voltage_temperature_and_outages(void)
+{
+    const uint8_t attr[] = {
+        0x0B,                           /* 11 bytes follow */
+        0x01, 0x21, 0x8B, 0x0B,         /* voltage 2955 mV */
+        0x03, 0x28, 0x17,               /* temperature 23 °C */
+        0x05, 0x21, 0x04, 0x00,         /* power outages, raw 4 */
+    };
+    zb_lumi_attrs_t a;
+
+    TEST_ASSERT_EQUAL(ESP_OK, zb_lumi_parse_attribute(attr, sizeof(attr), &a));
+    TEST_ASSERT_EQUAL(2955, a.voltage_mv);
+    TEST_ASSERT_EQUAL(91,   zb_lumi_voltage_to_percent(a.voltage_mv));
+    TEST_ASSERT_EQUAL(23,   a.temperature_c);
+    TEST_ASSERT_EQUAL(3,    a.power_outages);
+}
+
+/** A length byte larger than the buffer is the device's claim, not a fact. */
+static void test_attribute_clamps_an_overlong_length_byte(void)
+{
+    const uint8_t attr[] = { 0xFF, 0x01, 0x21, 0xB8, 0x0B };
+    zb_lumi_attrs_t a;
+
+    TEST_ASSERT_EQUAL(ESP_OK, zb_lumi_parse_attribute(attr, sizeof(attr), &a));
+    TEST_ASSERT_EQUAL(3000, a.voltage_mv);
+}
+
+/** A length byte shorter than the buffer wins — the rest is not ours to read. */
+static void test_attribute_honours_a_short_length_byte(void)
+{
+    const uint8_t attr[] = {
+        0x04,                     /* only the first entry belongs to us */
+        0x01, 0x21, 0xB8, 0x0B,   /* voltage 3000 mV */
+        0x03, 0x28, 0x17,         /* temperature — outside the declared length */
+    };
+    zb_lumi_attrs_t a;
+
+    TEST_ASSERT_EQUAL(ESP_OK, zb_lumi_parse_attribute(attr, sizeof(attr), &a));
+    TEST_ASSERT_TRUE(a.has_voltage);
+    TEST_ASSERT_FALSE(a.has_temperature);
+    TEST_ASSERT_EQUAL(1, a.tags_seen);
+}
+
+/** NULL and undersized buffers are rejected rather than dereferenced. */
+static void test_attribute_rejects_bad_arguments(void)
+{
+    const uint8_t attr[] = { 0x04, 0x01, 0x21, 0xB8, 0x0B };
+    zb_lumi_attrs_t a;
+
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, zb_lumi_parse_attribute(NULL, 5, &a));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, zb_lumi_parse_attribute(attr, sizeof(attr), NULL));
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, zb_lumi_parse_attribute(attr, 1, &a));
+    TEST_ASSERT_FALSE(a.has_voltage);
+}
+
 /* ============================================================================
  * Suite
  * ============================================================================ */
@@ -285,6 +389,12 @@ static const test_case_t zb_lumi_tests[] = {
     {"power_outage_clamps_at_zero",  test_power_outage_count_clamps_at_zero},
     {"power_outage_declared_width",  test_power_outage_count_reads_each_declared_width},
     {"power_outage_beside_voltage",  test_power_outage_count_beside_voltage},
+    {"attr_skips_length_byte",       test_attribute_skips_the_length_byte},
+    {"length_byte_as_tag_fails",     test_length_byte_read_as_a_tag_decodes_nothing},
+    {"attr_decodes_three_tags",      test_attribute_decodes_voltage_temperature_and_outages},
+    {"attr_clamps_overlong_length",  test_attribute_clamps_an_overlong_length_byte},
+    {"attr_honours_short_length",    test_attribute_honours_a_short_length_byte},
+    {"attr_rejects_bad_arguments",   test_attribute_rejects_bad_arguments},
 };
 
 test_stats_t run_zb_lumi_tests(void)

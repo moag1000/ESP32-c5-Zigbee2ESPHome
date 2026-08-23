@@ -10,6 +10,7 @@
  */
 
 #include "zb_converter_std.h"
+#include "zigbee/zb_lumi.h"
 #include "zb_converter.h"
 #include "zigbee/zb_zcl_helpers.h"
 #include "zigbee/zb_device_handler_types.h"
@@ -410,95 +411,44 @@ esp_err_t fz_vibration_angle(const void *raw, size_t len, cJSON *json, const cha
  * @brief Get data size for a ZCL attribute data type
  * @return Size in bytes, or 0 for variable/unknown types
  */
-static size_t zcl_type_size(uint8_t type)
-{
-    switch (type) {
-        case 0x10: return 1;  /* bool */
-        case 0x20: return 1;  /* uint8 */
-        case 0x21: return 2;  /* uint16 */
-        case 0x22: return 3;  /* uint24 */
-        case 0x23: return 4;  /* uint32 */
-        case 0x24: return 5;  /* uint40 */
-        case 0x25: return 6;  /* uint48 */
-        case 0x28: return 1;  /* int8 */
-        case 0x29: return 2;  /* int16 */
-        case 0x2a: return 3;  /* int24 */
-        case 0x2b: return 4;  /* int32 */
-        case 0x39: return 4;  /* float */
-        case 0x42: return 0;  /* string — length-prefixed, variable */
-        default:   return 0;
-    }
-}
-
 esp_err_t fz_xiaomi_ff01(const void *raw, size_t len, cJSON *json, const char *key)
 {
-    if (raw == NULL || json == NULL || len < 4) {
+    if (raw == NULL || json == NULL || key == NULL || len < 2) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    const uint8_t *data = (const uint8_t *)raw;
-    size_t pos = 0;
+    /* This function used to carry its own copy of the 0xFF01 walk, and that
+     * copy read the ZCL string's length byte as the first tag. Everything after
+     * it was then read at the wrong offset, the walk hit a type it could not
+     * size, and it returned ESP_OK having decoded nothing — so
+     * zb_callback_report_attr() counted the report as handled and returned
+     * before the generic Basic-cluster path could try. An Aqara sensor's
+     * battery stayed 'unknown' for hours with no error logged anywhere.
+     *
+     * zb_lumi.c had the same format implemented properly, with tests, but was
+     * only reachable while no converter was bound — binding one took it out of
+     * the path. Delegating removes the second implementation rather than
+     * fixing the same format twice. */
+    zb_lumi_attrs_t attrs;
+    if (zb_lumi_parse_attribute(raw, len, &attrs) != ESP_OK) {
+        /* Let the generic handler have its turn rather than claiming a report
+         * nothing was read out of. */
+        return ESP_ERR_NOT_FOUND;
+    }
 
-    while (pos + 2 < len) {
-        uint8_t tag = data[pos++];
-        uint8_t type = data[pos++];
+    if (attrs.has_voltage) {
+        /* The expose declares mV, so publish mV — the old code divided by 1000
+         * and labelled the volts as millivolts. */
+        cJSON_AddNumberToObject(json, "voltage", attrs.voltage_mv);
+        cJSON_AddNumberToObject(json, key, zb_lumi_voltage_to_percent(attrs.voltage_mv));
+    }
 
-        size_t val_size;
-        if (type == 0x42) {
-            /* Length-prefixed string */
-            if (pos >= len) break;
-            val_size = data[pos++];
-        } else {
-            val_size = zcl_type_size(type);
-            if (val_size == 0) {
-                ESP_LOGD(TAG, "Xiaomi 0xFF01: unknown type 0x%02X at tag 0x%02X", type, tag);
-                break;
-            }
-        }
+    if (attrs.has_temperature) {
+        cJSON_AddNumberToObject(json, "device_temperature", attrs.temperature_c);
+    }
 
-        if (pos + val_size > len) break;
-
-        switch (tag) {
-            case 0x01: {
-                /* Battery voltage in mV (uint16) */
-                if (val_size >= 2) {
-                    uint16_t voltage_mv;
-                    memcpy(&voltage_mv, &data[pos], sizeof(voltage_mv));
-                    double voltage = (double)voltage_mv / 1000.0;
-                    cJSON_AddNumberToObject(json, "voltage", voltage);
-
-                    /* Convert voltage to percentage (CR2032: 2.7V=0%, 3.2V=100%) */
-                    double pct = (voltage - 2.7) / (3.2 - 2.7) * 100.0;
-                    if (pct < 0.0) pct = 0.0;
-                    if (pct > 100.0) pct = 100.0;
-                    cJSON_AddNumberToObject(json, key, (int)pct);
-                }
-                break;
-            }
-            case 0x03: {
-                /* Device temperature (int8) */
-                if (val_size >= 1) {
-                    int8_t temp = (int8_t)data[pos];
-                    cJSON_AddNumberToObject(json, "device_temperature", temp);
-                }
-                break;
-            }
-            case 0x05: {
-                /* Power outage count (uint8 or uint16) */
-                if (val_size >= 2) {
-                    uint16_t count;
-                    memcpy(&count, &data[pos], sizeof(count));
-                    cJSON_AddNumberToObject(json, "power_outage_count", count);
-                } else if (val_size >= 1) {
-                    cJSON_AddNumberToObject(json, "power_outage_count", data[pos]);
-                }
-                break;
-            }
-            default:
-                break;
-        }
-
-        pos += val_size;
+    if (attrs.has_power_outages) {
+        cJSON_AddNumberToObject(json, "power_outage_count", attrs.power_outages);
     }
 
     return ESP_OK;

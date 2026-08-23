@@ -1489,14 +1489,10 @@ static void handle_lumi_special_attribute(uint16_t short_addr,
     }
 
     const uint8_t *raw = (const uint8_t *)data->value;
-    size_t payload_len = raw[0];
-    const size_t available = (size_t)data->size - 1;
-    if (payload_len > available) {
-        payload_len = available;   /* the length byte is the device's claim, not a fact */
-    }
+    const size_t payload_len = (size_t)data->size - 1;
 
     zb_lumi_attrs_t attrs;
-    if (zb_lumi_parse_special(raw + 1, payload_len, &attrs) != ESP_OK) {
+    if (zb_lumi_parse_attribute(data->value, data->size, &attrs) != ESP_OK) {
         ESP_LOGW(TAG, "0xFF01 from 0x%04X carried nothing this parser could read "
                  "(%u bytes, first tag 0x%02X type 0x%02X)",
                  short_addr, (unsigned)payload_len,

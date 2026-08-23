@@ -137,6 +137,26 @@ esp_err_t zb_lumi_parse_special(const uint8_t *data, size_t len, zb_lumi_attrs_t
     return (out->tags_seen > 0) ? ESP_OK : ESP_ERR_NOT_FOUND;
 }
 
+
+esp_err_t zb_lumi_parse_attribute(const void *raw, size_t len, zb_lumi_attrs_t *out)
+{
+    if (raw == NULL || out == NULL || len < 2) {
+        if (out != NULL) {
+            memset(out, 0, sizeof(*out));
+        }
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    const uint8_t *data = (const uint8_t *)raw;
+
+    size_t payload_len = data[0];
+    if (payload_len > len - 1) {
+        payload_len = len - 1;   /* the length byte is a claim, not a fact */
+    }
+
+    return zb_lumi_parse_special(data + 1, payload_len, out);
+}
+
 uint8_t zb_lumi_voltage_to_percent(uint16_t voltage_mv)
 {
     if (voltage_mv >= ZB_LUMI_BATTERY_FULL_MV) {

@@ -95,6 +95,29 @@ esp_err_t zb_lumi_parse_special(const uint8_t *data, size_t len, zb_lumi_attrs_t
  */
 uint8_t zb_lumi_voltage_to_percent(uint16_t voltage_mv);
 
+/**
+ * @brief Parse a 0xFF01 attribute value, length byte and all
+ *
+ * The attribute arrives as a ZCL string: byte 0 is the length, and the
+ * tag/type/value run starts after it. Every caller was stripping that byte
+ * itself, and one of them — the converter's fz_xiaomi_ff01() — did not: it read
+ * the length as the first tag, which put every following read at the wrong
+ * offset. It then returned success having decoded nothing, so the report
+ * counted as handled and an Aqara sensor's battery stayed 'unknown' with
+ * nothing logged anywhere.
+ *
+ * The length byte is the device's claim about its own payload, so it is clamped
+ * to what actually arrived rather than trusted.
+ *
+ * @param[in]  raw Attribute value as received, including the length byte
+ * @param[in]  len Size of that buffer
+ * @param[out] out Result, zeroed by this function before use
+ * @return ESP_OK if at least one entry was decoded
+ * @return ESP_ERR_INVALID_ARG on NULL arguments or a buffer below two bytes
+ * @return ESP_ERR_NOT_FOUND if nothing could be decoded
+ */
+esp_err_t zb_lumi_parse_attribute(const void *raw, size_t len, zb_lumi_attrs_t *out);
+
 #ifdef __cplusplus
 }
 #endif
