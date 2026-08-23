@@ -858,8 +858,63 @@ nichts: die Eintraege haben keine eigene Laenge, eine falsche Typbreite
 verschiebt also jeden folgenden Lesevorgang und liefert trotzdem plausible
 Zahlen. Ein unbekannter Typ beendet den Lauf, statt seine Breite zu raten.
 
-**Nicht am Geraet bestaetigt:** der Sensor meldet nur beim Aufwachen und hat es
-in der Beobachtungszeit nicht getan.
+### Zwei Fehler lagen dahinter, und beide sahen aus wie Schweigen (2026-08-23)
+
+Der Parser stimmte, aber der Wert kam trotzdem nicht an. Battery, Voltage und
+Device Temperature standen drei Stunden auf `unknown`, waehrend das Geraet
+tadellos meldete -- LQI 255, RSSI -30 dBm, Vibration und Tilt puenktlich.
+
+**Erstens: der Report erreichte diesen Parser gar nicht.**
+`zb_callback_report_attr()` bietet jeden Report zuerst dem gebundenen Converter
+an und kehrt zurueck, sobald der `ESP_OK` sagt. Auf dem Draht:
+
+    ZB_CB:    Attribute report from 0x6078: Cluster=0x0000 Attr=0xFF01 len=47
+    CONV_REG: Handle report 0x6078: cluster=0x0000 attr=0xFF01 (conv=Vibration sensor)
+
+und danach nichts. Der Converter hatte in `fz_xiaomi_ff01()` eine **zweite
+Kopie** desselben Parsers, und die begann bei `data[0]`. Die Nutzlast ist aber
+ein ZCL-String: Byte 0 ist die Laenge. Als Tag gelesen paart es sich mit dem
+echten ersten Tag als Typ, der hat keine bekannte Breite, der Lauf bricht beim
+ersten Eintrag ab -- **und meldet trotzdem Erfolg**. Report gilt als erledigt.
+
+Zwei Parser fuer ein Format, und der ungetestete war der, der lief. Das war
+ausserdem selbstverschuldet und frisch: solange das Geraet `conv=none` hatte,
+lief der generische Pfad und alles war richtig. Erst die erfolgreiche
+Converter-Bindung (siehe Abschnitt weiter oben) hat `zb_lumi.c` aus dem Weg
+genommen.
+
+Das Laengenbyte gehoert jetzt zum Parser (`zb_lumi_parse_attribute()`), und alle
+**drei** Stellen, die es von Hand abgeschnitten haben, rufen ihn.
+`fz_xiaomi_ff01()` gibt `ESP_ERR_NOT_FOUND` zurueck, wenn es nichts dekodiert --
+sonst kostet ein falscher Erfolg dem generischen Handler seinen Versuch.
+
+**Zweitens: die Prozentzahl ging unter dem falschen Schluessel raus.** Nach dem
+ersten Fix kamen drei von vier Werten an:
+
+    Voltage             2985 mV   (vorher unknown)
+    Device Temperature  30 °C     (vorher unknown)
+    Power Outage Count  559       (vorher unknown)
+    Battery             unknown   (weiterhin)
+
+`fz_xiaomi_ff01()` schrieb den Prozentwert unter `key`, und `key` ist der Name
+des DB-Eintrags: `{"c":0,"a":65281,"k":"xiaomi_ff01",...}`. Ein 0xFF01-Payload
+traegt mehrere Messwerte, der Eintrag ist also nach dem **Attribut** benannt,
+nicht nach einer Eigenschaft -- alle anderen Werte der Funktion schreiben laengst
+ihren eigenen Literalnamen. Die Batterie landete auf `xiaomi_ff01`, das kein
+Expose liest.
+
+**Am Geraet bestaetigt:** `Battery 97 %` bei 2985 mV, genau der erwartete Wert.
+
+**Uebertragbare Lehre:** beide Fehler sahen identisch aus wie "das Geraet sendet
+nichts". Ein `ESP_OK` von einer Funktion, die nichts dekodiert hat, und ein Wert
+auf einem Schluessel, den niemand liest, erzeugen dieselbe Stille wie ein
+schlafendes Geraet. Deshalb warnen beide Verwerfungspfade in
+`handle_lumi_special_attribute()` jetzt statt zu fluestern, und ein erfolgreicher
+Parse loggt, was er gefunden hat.
+
+**Messen ohne den seriellen Port:** die HA-History (`/api/history/period/...`)
+zeigt, wann eine Entity zuletzt einen Wert bekam, ohne das Geraet anzufassen.
+Der serielle Port dagegen startet es beim Schliessen neu.
 
 ## Uebertragbar auf andere ESP32-C5-Projekte
 
@@ -1174,7 +1229,7 @@ eigenverursacht erkennbar war.
 Wer nur den Quelltext pruefen will, braucht das Geraet nicht -- `idf.py build`
 reicht.
 
-Stand 2026-08-23: **163 Tests, 0 Fehler.** Neu dazugekommen sind die Suiten fuer
+Stand 2026-08-23: **169 Tests, 0 Fehler.** Neu dazugekommen sind die Suiten fuer
 den Tuya-Datenpunkt-Parser, den ExecuteService-Dekoder und den Aqara-0xFF01-
 Parser -- alle drei lesen eine Laenge vom Draht und indizieren damit, also genau
 die Form, an der dieses Projekt schon einmal einen Pufferueberlauf hatte.
