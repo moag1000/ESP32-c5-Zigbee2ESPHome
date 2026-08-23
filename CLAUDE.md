@@ -676,6 +676,52 @@ Ports durch die Testwerkzeuge; die Konsole stirbt zuerst. Dass esptool ebenfalls
 scheitert, geht ueber diese Erklaerung hinaus. Konsequenz bis zur Klaerung:
 Zustand ueber MQTT (`zigbee2mqtt/bridge/state`) lesen, nicht seriell.
 
+## MQTT-Discovery baute ein Geraet, das HA nie fuellen konnte (behoben 2026-08-23)
+
+In Home Assistant stand neben dem Gateway ein zweites Geraet, "Zigbee2MQTT
+Bridge", mit 37 Entities -- **alle dauerhaft `unavailable`**.
+
+Unter `CONFIG_ESPHOME_PRIMARY_INTEGRATION` ist jeder MQTT-State- und
+Availability-Publisher abgeschaltet. `ha_bridge_discovery_publish_all()` war es
+**nicht**. Das Gateway kuendigte seine Bridge-Entities also per MQTT-Discovery
+an und schickte danach nie einen Wert dafuer.
+
+Es war ausserdem teuer. Die Broker-Verbindung bricht regelmaessig weg, und der
+Reconnect-Pfad schickte jedes Mal den kompletten Discovery-Satz erneut -- vier
+volle Runden in elf Minuten Beobachtung:
+
+    MQTT_BRIDGE: Republishing discovery after reconnect...
+    HA_BRIDGE:   All bridge discovery messages published successfully
+    MQTT:        Disconnected from MQTT broker        (~8 s spaeter)
+
+**Der Guard gehoert an die Quelle, nicht an die Senke.** Der naheliegende Ort
+waere `publish_ha_discovery()` in `mqtt_event_handler.c` gewesen -- ein Punkt
+statt zwanzig Produzenten. Aber `ha_bridge_discovery_remove()` schickt seine
+leeren Retained-Payloads durch **dasselbe** `EVT_HA_DISCOVERY_PUBLISH`-Event.
+Ein Guard an der Senke haette also still den einzigen Weg zerstoert, das
+Geisterger aet wieder loszuwerden.
+
+**Nicht-Publizieren allein reicht nicht.** Discovery-Configs sind retained: was
+eine aeltere Firmware geschickt hat, liegt weiter auf dem Broker, und HA baut
+das Geraet bei jedem Neustart daraus neu auf. `ha_bridge_discovery_remove()`
+hatte **gar keinen Aufrufer** -- die Funktion war fertig und tot. Sie laeuft
+jetzt einmal pro Boot im ESPHome-Primary-Modus und raeumt nur die Entities weg,
+die dieses Gateway selbst angelegt hat.
+
+Am Geraet gemessen:
+
+    HA_BRIDGE: Removing bridge discovery messages
+    HA_BRIDGE: Bridge discovery messages removed
+    Bridge-Discovery-Publishes:  0
+    "Zigbee2MQTT Bridge" in HA:  37 Entities -> 0
+    Gateway und Aqara:           weiter live, 33 bzw. 20 Entities
+
+**Ausdruecklich nicht behauptet: eine Wirkung auf den Paketverlust.** 61 % nach
+der Aenderung. Das zweite Gateway in diesem Netz -- andere Hardware, normale
+ESPHome-Firmware -- verliert 80 % gegen einen Router mit 0 %. Das ist die
+bekannte Koexistenz-Abwaegung, und ICMP widerspricht hier ohnehin der Nutzlast:
+HA hat das Gateway die ganze Zeit ueber problemlos gelesen.
+
 ## Der Timer-Task hatte 2 KB Stack fuer einen LittleFS-Lesevorgang (behoben 2026-08-23)
 
 Ein frisch gepairter Aqara-Vibrationssensor kam mit acht Entities in Home
