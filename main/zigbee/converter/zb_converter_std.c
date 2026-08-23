@@ -440,7 +440,15 @@ esp_err_t fz_xiaomi_ff01(const void *raw, size_t len, cJSON *json, const char *k
         /* The expose declares mV, so publish mV — the old code divided by 1000
          * and labelled the volts as millivolts. */
         cJSON_AddNumberToObject(json, "voltage", attrs.voltage_mv);
-        cJSON_AddNumberToObject(json, key, zb_lumi_voltage_to_percent(attrs.voltage_mv));
+
+        /* Not `key`. One 0xFF01 payload carries several readings, so the entry
+         * in the converter DB is keyed "xiaomi_ff01" — the name of the
+         * attribute, not of any one property. Publishing the percentage under
+         * that name put it somewhere no expose reads: voltage, device
+         * temperature and the outage count all appeared in Home Assistant while
+         * battery alone stayed 'unknown'. */
+        cJSON_AddNumberToObject(json, "battery",
+                                zb_lumi_voltage_to_percent(attrs.voltage_mv));
     }
 
     if (attrs.has_temperature) {
