@@ -1479,8 +1479,12 @@ static void handle_lumi_special_attribute(uint16_t short_addr,
     }
     if (data->type != ESP_ZB_ZCL_ATTR_TYPE_CHAR_STRING &&
         data->type != ESP_ZB_ZCL_ATTR_TYPE_OCTET_STRING) {
-        ESP_LOGD(TAG, "0xFF01 from 0x%04X has unexpected type 0x%02X",
-                 short_addr, data->type);
+        /* Warn rather than whisper: this is the only route by which an Aqara
+         * device reports its battery, so dropping it silently looks exactly
+         * like a device that never sent anything. */
+        ESP_LOGW(TAG, "0xFF01 from 0x%04X dropped — type 0x%02X is neither "
+                 "CHAR_STRING nor OCTET_STRING (size %u)",
+                 short_addr, data->type, (unsigned)data->size);
         return;
     }
 
@@ -1493,9 +1497,18 @@ static void handle_lumi_special_attribute(uint16_t short_addr,
 
     zb_lumi_attrs_t attrs;
     if (zb_lumi_parse_special(raw + 1, payload_len, &attrs) != ESP_OK) {
-        ESP_LOGD(TAG, "0xFF01 from 0x%04X carried nothing readable", short_addr);
+        ESP_LOGW(TAG, "0xFF01 from 0x%04X carried nothing this parser could read "
+                 "(%u bytes, first tag 0x%02X type 0x%02X)",
+                 short_addr, (unsigned)payload_len,
+                 payload_len >= 1 ? raw[1] : 0,
+                 payload_len >= 2 ? raw[2] : 0);
         return;
     }
+
+    ESP_LOGI(TAG, "0xFF01 from 0x%04X: %u tags%s%s%s", short_addr, attrs.tags_seen,
+             attrs.has_voltage      ? ", voltage"       : "",
+             attrs.has_temperature  ? ", temperature"   : "",
+             attrs.has_power_outages ? ", power outages" : "");
 
     cJSON *json = cJSON_CreateObject();
     if (json == NULL) {
