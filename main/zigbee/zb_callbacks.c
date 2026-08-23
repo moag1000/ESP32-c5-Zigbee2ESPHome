@@ -1528,6 +1528,11 @@ static void handle_lumi_special_attribute(uint16_t short_addr,
         anything = true;
     }
 
+    if (attrs.has_power_outages) {
+        cJSON_AddNumberToObject(json, "power_outage_count", attrs.power_outages);
+        anything = true;
+    }
+
     if (!anything) {
         cJSON_Delete(json);
         return;

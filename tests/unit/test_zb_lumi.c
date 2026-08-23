@@ -199,6 +199,71 @@ static void test_result_is_zeroed_before_use(void)
     TEST_ASSERT_TRUE(a.has_temperature);
 }
 
+
+/**
+ * @brief The power outage counter is off by one on the wire
+ *
+ * zigbee-herdsman-converters subtracts 1 unconditionally (lumi.ts, case "5"),
+ * so a device that has never lost power reports 1 and must read as 0.
+ */
+static void test_power_outage_count_is_off_by_one(void)
+{
+    const uint8_t payload[] = { 0x05, 0x21, 0x04, 0x00 };   /* uint16, raw 4 */
+    zb_lumi_attrs_t a;
+
+    TEST_ASSERT_EQUAL(ESP_OK, zb_lumi_parse_special(payload, sizeof(payload), &a));
+    TEST_ASSERT_TRUE(a.has_power_outages);
+    TEST_ASSERT_EQUAL(3, a.power_outages);
+}
+
+/** A raw 0 must not wrap to 4294967295. */
+static void test_power_outage_count_clamps_at_zero(void)
+{
+    const uint8_t payload[] = { 0x05, 0x20, 0x00 };   /* uint8, raw 0 */
+    zb_lumi_attrs_t a;
+
+    TEST_ASSERT_EQUAL(ESP_OK, zb_lumi_parse_special(payload, sizeof(payload), &a));
+    TEST_ASSERT_TRUE(a.has_power_outages);
+    TEST_ASSERT_EQUAL(0, a.power_outages);
+}
+
+/**
+ * @brief The width comes from the declared type, not from a guess
+ *
+ * Devices send this counter as one, two or four bytes. Reading a uint32 as if
+ * it were a uint16 would both truncate the value and put every following entry
+ * at the wrong offset.
+ */
+static void test_power_outage_count_reads_each_declared_width(void)
+{
+    zb_lumi_attrs_t a;
+
+    const uint8_t as_u8[]  = { 0x05, 0x20, 0x08 };
+    TEST_ASSERT_EQUAL(ESP_OK, zb_lumi_parse_special(as_u8, sizeof(as_u8), &a));
+    TEST_ASSERT_EQUAL(7, a.power_outages);
+
+    const uint8_t as_u32[] = { 0x05, 0x23, 0x01, 0x01, 0x00, 0x00 };  /* raw 257 */
+    TEST_ASSERT_EQUAL(ESP_OK, zb_lumi_parse_special(as_u32, sizeof(as_u32), &a));
+    TEST_ASSERT_EQUAL(256, a.power_outages);
+}
+
+/** The counter sits between other entries and must not shift them. */
+static void test_power_outage_count_beside_voltage(void)
+{
+    const uint8_t payload[] = {
+        0x01, 0x21, 0xB8, 0x0B,   /* voltage 3000 mV */
+        0x05, 0x23, 0x03, 0x00, 0x00, 0x00,
+        0x03, 0x28, 0x17,         /* temperature 23 °C */
+    };
+    zb_lumi_attrs_t a;
+
+    TEST_ASSERT_EQUAL(ESP_OK, zb_lumi_parse_special(payload, sizeof(payload), &a));
+    TEST_ASSERT_EQUAL(3, a.tags_seen);
+    TEST_ASSERT_EQUAL(3000, a.voltage_mv);
+    TEST_ASSERT_EQUAL(2, a.power_outages);
+    TEST_ASSERT_EQUAL(23, a.temperature_c);
+}
+
 /* ============================================================================
  * Suite
  * ============================================================================ */
@@ -216,6 +281,10 @@ static const test_case_t zb_lumi_tests[] = {
     {"empty_payload",                test_empty_payload},
     {"null_arguments",               test_null_arguments},
     {"result_zeroed_before_use",     test_result_is_zeroed_before_use},
+    {"power_outage_off_by_one",      test_power_outage_count_is_off_by_one},
+    {"power_outage_clamps_at_zero",  test_power_outage_count_clamps_at_zero},
+    {"power_outage_declared_width",  test_power_outage_count_reads_each_declared_width},
+    {"power_outage_beside_voltage",  test_power_outage_count_beside_voltage},
 };
 
 test_stats_t run_zb_lumi_tests(void)

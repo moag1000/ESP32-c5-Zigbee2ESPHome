@@ -17,6 +17,7 @@
  *
  *     0x01  battery voltage in mV      (uint16)
  *     0x03  device temperature in °C   (int8)
+ *     0x05  power outage count, off by one (uint8/16/32)
  *     0x0A  parent short address       (uint16)
  *     0x64+ per-device payloads whose meaning depends on the model
  *
@@ -56,6 +57,8 @@ typedef struct {
     uint16_t voltage_mv;        /**< Battery voltage in mV */
     bool     has_temperature;   /**< Tag 0x03 was present */
     int8_t   temperature_c;     /**< Device temperature in °C */
+    bool     has_power_outages; /**< Tag 0x05 was present */
+    uint32_t power_outages;     /**< Times the device lost power */
     bool     has_parent;        /**< Tag 0x0A was present */
     uint16_t parent_addr;       /**< Short address of the parent router */
     uint8_t  tags_seen;         /**< How many entries were decoded */

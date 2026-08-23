@@ -29,6 +29,7 @@
 
 #define ZB_LUMI_TAG_VOLTAGE     0x01
 #define ZB_LUMI_TAG_TEMPERATURE 0x03
+#define ZB_LUMI_TAG_POWER_OUTAGES 0x05
 #define ZB_LUMI_TAG_PARENT      0x0A
 
 /**
@@ -99,6 +100,22 @@ esp_err_t zb_lumi_parse_special(const uint8_t *data, size_t len, zb_lumi_attrs_t
                 if (width == 1) {
                     out->temperature_c = (int8_t)value[0];
                     out->has_temperature = true;
+                }
+                break;
+
+            case ZB_LUMI_TAG_POWER_OUTAGES:
+                /* The width varies by device, so read whatever the declared
+                 * type says rather than assuming one. The counter is off by
+                 * one on the wire — zigbee-herdsman-converters subtracts 1
+                 * unconditionally (lumi.ts, case "5"); clamping at 0 keeps a
+                 * device that reports 0 from wrapping to 4294967295. */
+                if (width >= 1 && width <= 4) {
+                    uint32_t raw = 0;
+                    for (size_t b = 0; b < width; b++) {
+                        raw |= (uint32_t)value[b] << (8 * b);
+                    }
+                    out->power_outages = (raw > 0) ? (raw - 1) : 0;
+                    out->has_power_outages = true;
                 }
                 break;
 
