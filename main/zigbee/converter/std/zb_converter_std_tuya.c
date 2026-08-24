@@ -471,8 +471,9 @@ send_dp:
      * Devices needing 0x04 keep it — tuya_fingerbot.c calls
      * zb_tuya_send_dp_with_cmd() itself, so only converter-database writes
      * change here. */
-    esp_err_t ret = zb_tuya_send_dp_with_cmd(short_addr, endpoint, &dp,
-                                             ZB_TUYA_CMD_DATA_REQUEST);
+    uint8_t tuya_cmd = (ctx->conv->quirk_flags & ZB_QUIRK_TUYA_CMD_SENDDATA)
+                       ? ZB_TUYA_CMD_SEND_DATA : ZB_TUYA_CMD_DATA_REQUEST;
+    esp_err_t ret = zb_tuya_send_dp_with_cmd(short_addr, endpoint, &dp, tuya_cmd);
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "tz_tuya_dp: send failed for dp_%d: %s",
                  dp_id, esp_err_to_name(ret));

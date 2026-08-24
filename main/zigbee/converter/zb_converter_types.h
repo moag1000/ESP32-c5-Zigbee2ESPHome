@@ -71,6 +71,15 @@ typedef enum {
 #define ZB_QUIRK_CUSTOM_BIND        (1 << 7)
 #define ZB_QUIRK_CUSTOM_REPORTING   (1 << 8)
 #define ZB_QUIRK_MULTI_ENDPOINT     (1 << 9)
+/** @brief Device takes Tuya datapoint writes as sendData (0x04), not dataRequest (0x00)
+ *
+ * zigbee-herdsman-converters sends dataRequest and overrides only where a
+ * device demands otherwise, and that is the default here too. The _TZ3210
+ * Fingerbot Plus was measured to answer only to 0x04 and to ignore 0x00; that
+ * finding was once applied to every Tuya device in the tree, which left a NEO
+ * siren acknowledging every command and doing nothing. Now it is a property of
+ * the devices it was actually measured on. */
+#define ZB_QUIRK_TUYA_CMD_SENDDATA  (1 << 10)
 
 /** @brief Expose access flags (from z2m) */
 #define EA_STATE        1       /**< Read-only state */

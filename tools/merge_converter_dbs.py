@@ -57,6 +57,37 @@ def sanitise_device(dev):
     return dev
 
 
+
+# Devices that take Tuya datapoint writes as sendData (0x04) rather than
+# dataRequest (0x00).
+#
+# This is a local finding, not something upstream records: the _TZ3210 Fingerbot
+# Plus was measured to answer only to 0x04 and to ignore 0x00. That was once the
+# default for every Tuya device in the tree, which left a NEO siren
+# acknowledging every command and doing nothing at all. The default now matches
+# zigbee-herdsman-converters, and the exception is carried per device.
+#
+# Two of these have a compiled-in converter in
+# main/zigbee/converter/converters/conv_tuya_fingerbot.c and never reach the
+# database path; the rest do, and would silently stop working without this.
+ZB_QUIRK_TUYA_CMD_SENDDATA = 1 << 10
+
+TUYA_SENDDATA_MANUFACTURERS = {
+    "_TZ3210_7vgttna6",
+    "_TZ3210_a04acm9s",
+    "_TZ3210_cm9mbpr1",
+    "_TZ3210_dse8ogfy",
+    "_TZ3210_j4pdtz9v",
+}
+
+
+def apply_local_quirks(dev):
+    """Flags this project measured that upstream does not record."""
+    if dev.get("mf") in TUYA_SENDDATA_MANUFACTURERS:
+        dev["q"] = (dev.get("q") or 0) | ZB_QUIRK_TUYA_CMD_SENDDATA
+    return dev
+
+
 def normalize_manufacturer(mf):
     """Normalize manufacturer name to lowercase for matching."""
     return mf.strip().lower()
@@ -314,7 +345,7 @@ def write_output(merged_devices, output_dir, z2m_meta, zhq_meta):
     small_devs = []    # (mf_name, cleaned devices) to bundle
 
     for mf_name, devices in sorted(merged_devices.items()):
-        cleaned = [sanitise_device(clean_device(d)) for d in devices]
+        cleaned = [apply_local_quirks(sanitise_device(clean_device(d))) for d in devices]
         est_size = len(json.dumps({"devices": cleaned}, separators=(',', ':')))
 
         if est_size >= BUNDLE_THRESHOLD:
