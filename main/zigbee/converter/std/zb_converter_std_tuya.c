@@ -24,6 +24,7 @@
 #include "esp_zigbee_core.h"
 #include "core/gateway_timeouts.h"
 #include <string.h>
+#include <stdlib.h>
 #include <inttypes.h>
 
 static const char *TAG = "CONV_TUYA";
@@ -391,6 +392,35 @@ esp_err_t tz_tuya_dp(uint16_t short_addr, uint8_t endpoint, const cJSON *value)
             if (enum_found) goto send_dp;
         }
 
+        /* A select entity sends its option as text, but the datapoint may not
+         * be a string one. The melody of a siren is declared int in the
+         * datapoint map and went out as TUYA_DP_TYPE_STRING "5" — the device
+         * answered OK and did nothing with it, which is the worst shape of
+         * wrong: a transport that works and a payload the device discards.
+         * The map's type wins over the JSON's when the text is numeric. */
+        if ((dp_type_hint == TUYA_DP_TYPE_VALUE || dp_type_hint == TUYA_DP_TYPE_ENUM) &&
+            str[0] != '\0') {
+            char *end = NULL;
+            long parsed = strtol(str, &end, 10);
+            if (end != NULL && *end == '\0') {
+                if (dp_type_hint == TUYA_DP_TYPE_ENUM) {
+                    dp.type = TUYA_DP_TYPE_ENUM;
+                    dp.length = 1;
+                    dp.value.enum_value = (uint8_t)parsed;
+                } else {
+                    if (tz_scale != 0.0f) {
+                        parsed = (long)((double)parsed / (double)tz_scale);
+                    }
+                    dp.type = TUYA_DP_TYPE_VALUE;
+                    dp.length = 4;
+                    dp.value.int_value = (int32_t)parsed;
+                }
+                ESP_LOGD(TAG, "tz_tuya_dp: dp_%d = \"%s\" -> %s %ld", dp_id, str,
+                         dp.type == TUYA_DP_TYPE_ENUM ? "enum" : "value", parsed);
+                goto send_dp;
+            }
+        }
+
         /* Check for boolean string values */
         if (strcasecmp(str, "true") == 0 || strcasecmp(str, "ON") == 0) {
             dp.type = TUYA_DP_TYPE_BOOL;
@@ -426,7 +456,23 @@ esp_err_t tz_tuya_dp(uint16_t short_addr, uint8_t endpoint, const cJSON *value)
 send_dp:
 
     /* Send via the Tuya module's send function (handles lock + framing) */
-    esp_err_t ret = zb_tuya_send_dp(short_addr, endpoint, &dp);
+    /* dataRequest (0x00), which is what zigbee-herdsman-converters sends
+     * unless a device's converter overrides it — sendDataPoints() defaults to
+     * cmd "dataRequest" and the NEO alarm, like most others, takes the default.
+     *
+     * This path used to send sendData (0x04) for every device. That code is
+     * right for the _TZ3210 Fingerbot Plus, which was measured to answer only
+     * to 0x04, and it was generalised from that one device to all of them. The
+     * siren showed what that costs: it returns ZCL Default Response OK to the
+     * frame and then does nothing with it, because the command id is not the
+     * one it expects. An acknowledged command that has no effect is harder to
+     * chase than a rejected one.
+     *
+     * Devices needing 0x04 keep it — tuya_fingerbot.c calls
+     * zb_tuya_send_dp_with_cmd() itself, so only converter-database writes
+     * change here. */
+    esp_err_t ret = zb_tuya_send_dp_with_cmd(short_addr, endpoint, &dp,
+                                             ZB_TUYA_CMD_DATA_REQUEST);
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "tz_tuya_dp: send failed for dp_%d: %s",
                  dp_id, esp_err_to_name(ret));

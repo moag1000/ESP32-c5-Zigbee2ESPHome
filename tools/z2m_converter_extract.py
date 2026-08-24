@@ -1790,46 +1790,85 @@ def _legacy_datapoint_table(legacy_src):
     return table
 
 
-def _legacy_converter_block(legacy_src, name):
-    """The body of a `<name>: {` entry in legacy.ts, or None."""
+def _legacy_converter_blocks(legacy_src, name):
+    """Every `<name>: {` entry in legacy.ts.
+
+    The read and write converters share a name — legacy.fz.neo_alarm and
+    legacy.tz.neo_alarm are both spelled `neo_alarm:` in their own section of
+    the file. Taking only the first found the read side and never the write
+    side, which is where a datapoint's wire type is actually decided.
+    """
+    blocks = []
     for m in re.finditer(r'^\s{4}' + re.escape(name) + r'\s*:\s*\{', legacy_src, re.M):
         brace = legacy_src.index("{", m.start())
         end = find_matching_brace(legacy_src, brace)
         if end > 0:
-            return legacy_src[brace:end + 1]
-    return None
+            blocks.append(legacy_src[brace:end + 1])
+    return blocks
+
+
+def _legacy_converter_block(legacy_src, name):
+    """The first `<name>: {` entry, or None."""
+    blocks = _legacy_converter_blocks(legacy_src, name)
+    return blocks[0] if blocks else None
 
 
 def _legacy_datapoints(legacy_src, table, names):
     """Datapoint map for a set of legacy converter names, in database shape."""
     dps = {}
+
     for name in names:
-        block = _legacy_converter_block(legacy_src, name)
-        if not block:
-            continue
-        for m in re.finditer(
-                r'case\s+dataPoints\.(\w+)\s*:(.*?)(?=case\s+dataPoints\.|default\s*:|\Z)',
-                block, re.S):
-            dp_name, body = m.group(1), m.group(2)
-            if dp_name not in table:
-                continue
-            ret = re.search(r'return\s*\{\s*([A-Za-z_]\w*)\s*:\s*(.*?)\}\s*;', body, re.S)
-            if not ret:
-                continue
-            prop, expr = ret.group(1), ret.group(2)
+        for block in _legacy_converter_blocks(legacy_src, name):
+            for m in re.finditer(
+                    r'case\s+dataPoints\.(\w+)\s*:(.*?)(?=case\s+dataPoints\.|default\s*:|\Z)',
+                    block, re.S):
+                dp_name, body = m.group(1), m.group(2)
+                if dp_name not in table:
+                    continue
+                ret = re.search(r'return\s*\{\s*([A-Za-z_]\w*)\s*:\s*(.*?)\}\s*;', body, re.S)
+                if not ret:
+                    continue
+                prop, expr = ret.group(1), ret.group(2)
 
-            entry = {"k": prop, "t": "int"}
-            enum_m = re.search(r'\{\s*((?:\d+\s*:\s*["\'][^"\']+["\']\s*,?\s*)+)\}', expr)
-            if enum_m:
-                values = {}
-                for v, label in re.findall(r'(\d+)\s*:\s*["\']([^"\']+)["\']', enum_m.group(1)):
-                    values[label] = int(v)
-                if values:
-                    entry = {"k": prop, "t": "enum", "v": values}
-            elif re.search(r'\b(TRUE|FALSE|true|false)\b', body) or prop in ("alarm", "state"):
-                entry = {"k": prop, "t": "bool"}
+                entry = {"k": prop, "t": "int"}
+                enum_m = re.search(r'\{\s*((?:\d+\s*:\s*["\'][^"\']+["\']\s*,?\s*)+)\}', expr)
+                if enum_m:
+                    values = {}
+                    for v, label in re.findall(r'(\d+)\s*:\s*["\']([^"\']+)["\']', enum_m.group(1)):
+                        values[label] = int(v)
+                    if values:
+                        entry = {"k": prop, "t": "enum", "v": values}
+                elif re.search(r'\b(TRUE|FALSE|true|false)\b', body) or prop in ("alarm", "state"):
+                    entry = {"k": prop, "t": "bool"}
 
-            dps[str(table[dp_name])] = entry
+                dps[str(table[dp_name])] = entry
+
+    # The write side is the authority on a datapoint's wire type.
+    #
+    # The read side of the NEO alarm is `return {melody: value}`, which looks
+    # like a plain number, while its convertSet calls sendDataPointEnum. Taken
+    # from the read side alone, melody went out as a string: the device
+    # acknowledged the frame and did nothing with it. Where the two disagree,
+    # the type used for writing wins.
+    for name in names:
+        for block in _legacy_converter_blocks(legacy_src, name):
+            for m in re.finditer(
+                    r'sendDataPoint(Bool|Value|Enum|Raw|StringBuffer)\s*\('
+                    r'\s*[^,]+,\s*dataPoints\.(\w+)',
+                    block, re.S):
+                kind, dp_name = m.group(1), m.group(2)
+                if dp_name not in table:
+                    continue
+                key = str(table[dp_name])
+                if key not in dps:
+                    continue
+                wire = {"Bool": "bool", "Value": "int", "Enum": "enum",
+                        "Raw": "raw", "StringBuffer": "str"}[kind]
+                if wire == "enum":
+                    dps[key]["t"] = "enum"   # option names from the read side are kept
+                elif dps[key].get("t") != "enum" and wire in ("bool", "int", "str"):
+                    dps[key]["t"] = wire
+
     return dps
 
 
