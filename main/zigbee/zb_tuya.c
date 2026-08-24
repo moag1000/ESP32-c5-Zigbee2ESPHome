@@ -479,8 +479,34 @@ esp_err_t zb_tuya_handle_command(uint16_t short_addr, uint8_t endpoint,
         case 0x00:  /* DP Report (gateway -> device response) */
         case 0x01:  /* DP Set (device -> gateway, report after set) */
         case 0x02:  /* DP Query Response */
-            /* 7-byte header format: [status:1][seq:2][dp_id:1][type:1][len:2][data...] */
+            /* Two header layouts exist and devices disagree about which they
+             * use here:
+             *
+             *   7 bytes: [status:1][seq:2][dp_id:1][type:1][len:2][data...]
+             *   6 bytes:           [seq:2][dp_id:1][type:1][len:2][data...]
+             *
+             * A siren answering every write with a 7-byte frame — one
+             * datapoint with a single-byte value, so exactly the short layout —
+             * was parsed against the long one, which leaves no room for the
+             * value at all. The parse failed and returned in silence, so the
+             * device looked like it never reported anything while it was
+             * reporting after every command.
+             *
+             * Try the declared layout, fall back to the other, and if neither
+             * fits, say so with the bytes attached rather than dropping them. */
             ret = zb_tuya_parse_dp(data, len, &dp);
+            if (ret != ESP_OK) {
+                ret = zb_tuya_parse_dp_short(data, len, &dp);
+                if (ret == ESP_OK) {
+                    ESP_LOGD(TAG, "Tuya cmd 0x%02X from 0x%04X used the short header",
+                             cmd_id, short_addr);
+                }
+            }
+            if (ret != ESP_OK) {
+                ESP_LOGW(TAG, "Tuya cmd 0x%02X from 0x%04X: %zu bytes fit neither header",
+                         cmd_id, short_addr, len);
+                ESP_LOG_BUFFER_HEX_LEVEL(TAG, data, len, ESP_LOG_WARN);
+            }
             break;
 
         case 0x05:  /* DP Status Sync (unsolicited reports) */
