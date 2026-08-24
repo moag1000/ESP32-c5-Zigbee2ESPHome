@@ -134,6 +134,77 @@ def apply_melody_names(dev):
     return dev
 
 
+
+def strip_build_only_fields(dev):
+    """Drop fields the firmware never reads.
+
+    "src" records which upstream project an entry came from and "pri" orders
+    entries while merging; neither is looked at by zb_converter_loader.c. On a
+    database of 8321 devices they are about 137 KB of a 7036 KB partition —
+    space that matters now that datapoint maps are extracted, and that buys
+    nothing on the device. Both stay in the intermediate extracts, where the
+    merge does use them.
+    """
+    dev.pop("src", None)
+    dev.pop("pri", None)
+    return dev
+
+
+
+# ---------------------------------------------------------------------------
+# Shared behaviour profiles
+# ---------------------------------------------------------------------------
+#
+# 8321 devices share 1962 distinct behaviours: the same converters, exposes and
+# datapoint maps repeated for every manufacturer id that sells the same
+# hardware. Written out per device that is 5844 KB; written once and referenced
+# it is 1732 KB, and the database had reached 96.4 % of its partition.
+#
+# A device keeps everything that identifies it — model, manufacturer, vendor,
+# description — and points at a profile for what it does:
+#
+#     {"m":"TS0601","mf":"_TZE204_t1blo2bj","v":"NEO","d":"Alarm","p":417}
+#
+# Profiles live in profiles_N.json, N = id / PROFILES_PER_FILE, so the loader
+# can find the file from the id without an extra index. They are split because
+# a single file would be 1732 KB and the loader reads at most 512 KB at once.
+PROFILE_KEYS = ("fz", "tz", "e", "tuya_dp", "quirks", "q")
+PROFILES_PER_FILE = 256
+
+
+def build_profiles(devices):
+    """Split behaviour out of the devices. Returns (profiles, devices)."""
+    profiles = []
+    by_signature = {}
+
+    for dev in devices:
+        body = {k: dev[k] for k in PROFILE_KEYS if k in dev}
+        signature = json.dumps(body, sort_keys=True, separators=(",", ":"))
+        pid = by_signature.get(signature)
+        if pid is None:
+            pid = len(profiles)
+            by_signature[signature] = pid
+            profiles.append(body)
+        for k in PROFILE_KEYS:
+            dev.pop(k, None)
+        dev["p"] = pid
+
+    return profiles, devices
+
+
+def write_profiles(out_dir, profiles):
+    """One file per PROFILES_PER_FILE profiles, named by the range they cover."""
+    written = 0
+    for start in range(0, len(profiles), PROFILES_PER_FILE):
+        chunk = profiles[start:start + PROFILES_PER_FILE]
+        name = f"profiles_{start // PROFILES_PER_FILE}.json"
+        with open(os.path.join(out_dir, name), "w", encoding="utf-8") as fh:
+            json.dump({"first": start, "profiles": chunk}, fh,
+                      separators=(",", ":"), ensure_ascii=False)
+        written += 1
+    return written
+
+
 def normalize_manufacturer(mf):
     """Normalize manufacturer name to lowercase for matching."""
     return mf.strip().lower()
@@ -390,9 +461,24 @@ def write_output(merged_devices, output_dir, z2m_meta, zhq_meta):
     large_files = {}   # mf_name -> cleaned devices (write as own file)
     small_devs = []    # (mf_name, cleaned devices) to bundle
 
+    # Clean everything first, then lift the shared behaviour out across all
+    # manufacturers at once — the same profile is used by devices filed under
+    # completely different names, so this cannot be done per file.
+    cleaned_by_manuf = {}
+    all_cleaned = []
     for mf_name, devices in sorted(merged_devices.items()):
-        cleaned = [apply_melody_names(apply_local_quirks(sanitise_device(clean_device(d))))
+        cleaned = [strip_build_only_fields(
+                       apply_melody_names(apply_local_quirks(sanitise_device(clean_device(d)))))
                    for d in devices]
+        cleaned_by_manuf[mf_name] = cleaned
+        all_cleaned.extend(cleaned)
+
+    profiles, _ = build_profiles(all_cleaned)
+    profile_files = write_profiles(str(out_path), profiles)
+    print(f"  {len(profiles)} shared profiles in {profile_files} files "
+          f"(from {len(all_cleaned)} devices)")
+
+    for mf_name, cleaned in cleaned_by_manuf.items():
         est_size = len(json.dumps({"devices": cleaned}, separators=(',', ':')))
 
         if est_size >= BUNDLE_THRESHOLD:

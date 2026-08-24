@@ -965,6 +965,91 @@ static bool manufacturer_matches(const char *entry_mf, const char *manufacturer,
     return elen >= 4 && entry_mf[0] == '_' && strncmp(entry_mf, manufacturer, elen) == 0;
 }
 
+
+/** @brief Profiles per profiles_N.json, mirroring tools/merge_converter_dbs.py */
+#define PROFILES_PER_FILE 256
+
+/**
+ * @brief Attach a device's shared behaviour profile to its JSON entry
+ *
+ * 8321 devices in the database share 1962 behaviours — the same converters,
+ * exposes and datapoint maps repeated for every manufacturer id selling the
+ * same hardware. Written out per device that was 5844 KB and the database sat
+ * at 96.4 % of its partition; stored once and referenced it is 1732 KB.
+ *
+ * A device entry therefore carries what identifies it and a profile id:
+ *
+ *     {"m":"TS0601","mf":"_TZE204_t1blo2bj","v":"NEO","d":"Alarm","p":417}
+ *
+ * The file follows from the id, so no second index is needed. The members are
+ * copied into the device object before parsing, which keeps
+ * zb_converter_loader_parse_device() unaware that any of this happens.
+ *
+ * A device with its behaviour inline still works: without "p" this does
+ * nothing.
+ *
+ * @return true if a profile was attached or none was needed
+ */
+static bool attach_profile(cJSON *dev_json)
+{
+    cJSON *pid_j = cJSON_GetObjectItem(dev_json, "p");
+    if (pid_j == NULL || !cJSON_IsNumber(pid_j)) {
+        return true;   /* behaviour is inline */
+    }
+
+    int pid = (int)cJSON_GetNumberValue(pid_j);
+    if (pid < 0) {
+        return false;
+    }
+
+    char path[80];
+    snprintf(path, sizeof(path), "%s/profiles_%d.json",
+             CONVERTER_DB_PATH, pid / PROFILES_PER_FILE);
+
+    size_t len = 0;
+    char *json_str = read_file_to_psram(path, &len);
+    if (json_str == NULL) {
+        ESP_LOGW(TAG, "Profile %d: %s is missing", pid, path);
+        return false;
+    }
+
+    cJSON *root = cJSON_Parse(json_str);
+    mem_ng_free(json_str);
+    if (root == NULL) {
+        ESP_LOGW(TAG, "Profile %d: %s does not parse", pid, path);
+        return false;
+    }
+
+    cJSON *first_j = cJSON_GetObjectItem(root, "first");
+    cJSON *list = cJSON_GetObjectItem(root, "profiles");
+    int first = (first_j && cJSON_IsNumber(first_j)) ? (int)cJSON_GetNumberValue(first_j) : 0;
+
+    cJSON *profile = (list && cJSON_IsArray(list))
+                     ? cJSON_GetArrayItem(list, pid - first) : NULL;
+    if (profile == NULL) {
+        ESP_LOGW(TAG, "Profile %d not in %s", pid, path);
+        cJSON_Delete(root);
+        return false;
+    }
+
+    bool ok = true;
+    cJSON *member = NULL;
+    cJSON_ArrayForEach(member, profile) {
+        if (member->string == NULL || cJSON_GetObjectItem(dev_json, member->string)) {
+            continue;   /* an inline value on the device wins */
+        }
+        cJSON *copy = cJSON_Duplicate(member, true);
+        if (copy == NULL) {
+            ok = false;
+            break;
+        }
+        cJSON_AddItemToObject(dev_json, member->string, copy);
+    }
+
+    cJSON_Delete(root);
+    return ok;
+}
+
 static zb_converter_def_t *load_model_from_file(const char *path,
                                                 const char *manufacturer,
                                                 const char *model)
@@ -1021,6 +1106,9 @@ static zb_converter_def_t *load_model_from_file(const char *path,
                 }
             }
 
+            if (!attach_profile(dev_json)) {
+                ESP_LOGW(TAG, "Could not attach the profile for %s/%s", manufacturer ? manufacturer : "?", model);
+            }
             found = zb_converter_loader_parse_device(dev_json);
             if (found != NULL) {
                 if (pass == 2 && manufacturer != NULL && manufacturer[0] != '\0') {

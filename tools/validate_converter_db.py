@@ -256,7 +256,7 @@ def validate_quirks(quirks, file, dev_idx, errors, warnings):
                                                f"Unknown quirk action type"))
 
 
-def validate_device(device, file, dev_idx, errors, warnings):
+def validate_device(device, file, dev_idx, errors, warnings, referenced=None):
     """Validate a single device definition."""
     # m (model) — required
     model = device.get("m")
@@ -340,6 +340,43 @@ def validate_file(filepath, errors, warnings, stats):
             stats["index_manufacturers"] = len(mfrs)
         return
 
+    # Shared behaviour profiles.
+    #
+    # 8321 devices share 1962 behaviours, so those live once in profiles_N.json
+    # and a device points at one by id. These files hold no device identity —
+    # validating them as device files reported eight "Missing or invalid model"
+    # errors for a database that was correct.
+    if filename.startswith("profiles_"):
+        if not isinstance(data, dict):
+            errors.append(ValidationError(filename, None, "root", "Must be an object"))
+            return
+        profiles = data.get("profiles")
+        if not isinstance(profiles, list):
+            errors.append(ValidationError(filename, None, "profiles", "Missing profiles array"))
+            return
+        first = data.get("first")
+        if not isinstance(first, int):
+            errors.append(ValidationError(filename, None, "first",
+                                          "Missing first id — the loader derives the file from it"))
+        for idx, profile in enumerate(profiles):
+            if not isinstance(profile, dict):
+                errors.append(ValidationError(filename, idx, "profile", "Must be an object"))
+                continue
+            for fz_idx, entry in enumerate(profile.get("fz") or []):
+                validate_fz_entry(entry, filename, idx, fz_idx, errors, warnings)
+            for tz_idx, entry in enumerate(profile.get("tz") or []):
+                validate_tz_entry(entry, filename, idx, tz_idx, errors, warnings)
+            for exp_idx, expose in enumerate(profile.get("e") or []):
+                validate_expose(expose, filename, idx, exp_idx, errors, warnings)
+            if profile.get("tuya_dp"):
+                validate_tuya_dp(profile["tuya_dp"], filename, idx, errors, warnings)
+                stats["tuya_dp_devices"] = stats.get("tuya_dp_devices", 0) + 1
+        stats["profiles"] = stats.get("profiles", 0) + len(profiles)
+        stats["profile_ids"] = stats.get("profile_ids", set())
+        if isinstance(first, int):
+            stats["profile_ids"].update(range(first, first + len(profiles)))
+        return
+
     # Regular device file
     if not isinstance(data, dict):
         errors.append(ValidationError(filename, None, "root", "Must be an object"))
@@ -407,6 +444,34 @@ def main():
     else:
         print(f"Path not found: {path}")
         sys.exit(1)
+
+    # Every profile reference must resolve.
+    #
+    # A device now carries a profile id instead of its behaviour, so a dangling
+    # id is a device that pairs and then has no converters, no exposes and no
+    # datapoints — with nothing in the log to say why. Cheap to check here and
+    # invisible on the device.
+    if path.is_dir():
+        known = stats.get("profile_ids") or set()
+        dangling = {}
+        for f in sorted(path.glob("*.json")):
+            if f.name == "index.json" or f.name.startswith("profiles_"):
+                continue
+            try:
+                payload = json.loads(f.read_text())
+            except (OSError, ValueError):
+                continue
+            for dev in payload.get("devices", []):
+                pid = dev.get("p")
+                if isinstance(pid, int) and pid not in known:
+                    dangling.setdefault(pid, []).append(f"{dev.get('mf')}/{dev.get('m')}")
+        for pid, users in sorted(dangling.items())[:10]:
+            errors.append(ValidationError(
+                "profiles", None, "p",
+                f"Profile {pid} does not exist, referenced by {len(users)} device(s): "
+                f"{', '.join(users[:3])}"))
+        if dangling:
+            stats["dangling_profiles"] = len(dangling)
 
     # Collect unknown function names for summary
     unknown_fz = set()

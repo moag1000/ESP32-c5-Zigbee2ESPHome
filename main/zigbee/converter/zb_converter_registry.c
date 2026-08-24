@@ -12,6 +12,7 @@
 
 #include "zb_converter.h"
 #include "zb_converter_std.h"
+#include "zigbee/zb_tuya.h"
 #include "zigbee/zb_device_handler_types.h"
 #include "core/device/unified_device.h"
 #include "core/device/device_registry.h"
@@ -648,9 +649,54 @@ esp_err_t zb_converter_handle_command(uint16_t short_addr, uint8_t endpoint,
         }
     }
 
+    /* Nothing matched by name — try the datapoint map.
+     *
+     * A Tuya device's writable properties are exactly the keys of its datapoint
+     * map, so the map is the authority and a to_zigbee entry per property is a
+     * copy of it. Carrying both put the shipped database over the 7036 KB
+     * partition: 1649 devices with maps, roughly ten datapoints each, every one
+     * of them repeated as a to_zigbee entry that says nothing the map does not.
+     *
+     * Looking the command's keys up here instead keeps one source of truth and
+     * costs a walk of a table that is a dozen entries long. */
+    if (!handled && !found && def->tuya_dp_map != NULL && def->tuya_dp_count > 0) {
+        xSemaphoreTake(s_dispatch_mutex, portMAX_DELAY);
+        for (uint8_t i = 0; i < def->tuya_dp_count && !handled; i++) {
+            const char *key = def->tuya_dp_map[i].key;
+            if (key == NULL || cJSON_GetObjectItem(json, key) == NULL) {
+                continue;
+            }
+            found = true;
+            tz_ctx.cluster_id = ZB_TUYA_CLUSTER_ID;
+            tz_ctx.json_key = key;
+            zb_converter_set_dispatch_ctx(&tz_ctx);
+
+            esp_err_t conv_ret = tz_tuya_dp(short_addr, endpoint, json);
+            if (conv_ret == ESP_OK) {
+                handled = true;
+                if (device_id_valid) {
+                    cJSON *state_update = cJSON_CreateObject();
+                    if (state_update != NULL) {
+                        cJSON *value_copy = cJSON_Duplicate(cJSON_GetObjectItem(json, key), true);
+                        if (value_copy != NULL) {
+                            cJSON_AddItemToObject(state_update, key, value_copy);
+                            device_registry_merge_state(device_id, state_update);
+                        }
+                        cJSON_Delete(state_update);
+                    }
+                }
+            } else {
+                last_err = conv_ret;
+                ESP_LOGW(TAG, "Datapoint write failed for '%s' on 0x%04X: %s",
+                         key, short_addr, esp_err_to_name(conv_ret));
+            }
+        }
+        zb_converter_set_dispatch_ctx(NULL);
+        xSemaphoreGive(s_dispatch_mutex);
+    }
+
     /* Clear dispatch context */
     zb_converter_set_dispatch_ctx(NULL);
-    xSemaphoreGive(s_dispatch_mutex);
 
     if (handled) return ESP_OK;
     if (found) return last_err;  /* Converter found but failed (not ESP_ERR_NOT_FOUND) */

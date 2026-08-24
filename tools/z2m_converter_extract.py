@@ -1477,6 +1477,28 @@ def _parse_exposes_array(exposes_str):
         if prop_m:
             entry["p"] = prop_m.group(1)
 
+        # Endpoint-suffixed exposes.
+        #
+        # A three-gang switch declares tuya.exposes.switch() four times — once
+        # for all of them and once per gang, told apart only by .withEndpoint():
+        #
+        #     tuya.exposes.switch().withDescription("All switches"),
+        #     tuya.exposes.switch().withEndpoint("l1"),
+        #
+        # Ignoring the suffix left four exposes all called "state", which
+        # collapse into one: the device arrived in Home Assistant with a single
+        # switch for three gangs. Upstream turns the suffix into part of the
+        # property, and its datapoint table agrees — state, state_l1, state_l2,
+        # state_l3. 1082 exposes upstream carry one.
+        ep_m = re.search(r'\.withEndpoint\(\s*["\']([^"\']+)["\']\s*\)', call)
+        if ep_m and entry.get("p"):
+            entry["p"] = f"{entry['p']}_{ep_m.group(1)}"
+
+        # An explicit display name, where upstream gives one.
+        label_m = re.search(r'\.withLabel\(\s*["\']([^"\']+)["\']\s*\)', call)
+        if label_m:
+            entry["n"] = label_m.group(1)
+
         cat_m = re.search(r'\.withCategory\(\s*["\']([a-z]+)["\']\s*\)', call)
         if cat_m and cat_m.group(1) in ("config", "diagnostic"):
             entry["cat"] = cat_m.group(1)
@@ -1666,6 +1688,34 @@ def _parse_definition_block(block, file_manuf):
     # Datapoint map from hand-written legacy converters. Without this the
     # exposes filter below drops everything such a device declares, because
     # nothing appears to feed it — see _legacy_datapoints().
+    # Declarative datapoint table, if the definition has one.
+    declared_dps = _tuya_datapoints(block)
+    if declared_dps:
+        existing = device.get("tuya_dp") or {}
+        for key, entry in declared_dps.items():
+            existing.setdefault(key, entry)
+        device["tuya_dp"] = existing
+        served_declared = {e["k"] for e in declared_dps.values()}
+        if not any(x.get("k") == "tuya_dp" for x in device["fz"]):
+            device["fz"].append({"c": 61184, "a": 65535, "k": "tuya_dp", "fn": "fz_tuya_dp"})
+        if not any(x.get("k") == "tuya_dp" for x in device["tz"]):
+            device["tz"].append({"k": "tuya_dp", "c": 61184, "fn": "tz_tuya_dp"})
+        # Only a to_zigbee entry per property. The wildcard from_zigbee entry
+        # above already matches every datapoint report — fz_tuya_dp() resolves
+        # which property it is from the datapoint map — so a per-property copy
+        # buys nothing at runtime and costs real space: with 1582 devices
+        # carrying maps, the duplicates pushed the database past the 7036 KB
+        # partition. The to_zigbee entries are not optional: the command
+        # dispatcher matches their key against the command object.
+        # No per-property entries at all. The wildcard from_zigbee entry above
+        # matches every datapoint report, and the command dispatcher falls back
+        # to the datapoint map when no to_zigbee key matches — so the map is the
+        # single source of truth for which properties a device accepts. Copying
+        # it into fz and tz entries cost 2.3 MB and said nothing new.
+        pass
+        if device["_coverage"] == "NO_MATCH":
+            device["_coverage"] = "PARTIAL"
+
     legacy_names = set(re.findall(r'legacy\.(?:fz|tz)\.(\w+)', block))
     if legacy_names and _ZHC_SOURCE[0]:
         legacy_src = _legacy_source(_ZHC_SOURCE[0])
@@ -1689,16 +1739,18 @@ def _parse_definition_block(block, file_manuf):
                 # matched nothing when the only Tuya tz entry was called
                 # "tuya_dp". The command was dropped with ESP_ERR_NOT_FOUND and
                 # the siren stayed silent.
-                for k in served_keys:
-                    device["fz"].append({"c": 61184, "a": 65535, "k": k, "fn": "fz_tuya_dp"})
-                    device["tz"].append({"k": k, "c": 61184, "fn": "tz_tuya_dp"})
+                pass  # see above: the datapoint map is the source of truth
                 if device["_coverage"] == "NO_MATCH":
                     device["_coverage"] = "PARTIAL"
 
     exposes_str = extract_bracket_content(block, "exposes")
     parsed_exposes = _parse_exposes_array(exposes_str)
     if parsed_exposes:
+        # Datapoint keys count as served: the device reports them through the
+        # wildcard Tuya entry and accepts them through the map, without either
+        # being spelled out as its own fz/tz entry.
         served = {x.get("k") for x in device["fz"]} | {x.get("k") for x in device["tz"]}
+        served |= {e.get("k") for e in (device.get("tuya_dp") or {}).values()}
         seen_props = {e.get("p") for e in device["e"]}
         added = 0
         for e in parsed_exposes:
@@ -1726,10 +1778,23 @@ def _parse_definition_block(block, file_manuf):
     # own model/vendor stay as a further entry, because some devices really do
     # report those and the index reaches others through them.
     identities = _fingerprint_identities(block)
+    wl_by_manuf, wl_by_model = _whitelabels(block)
+
     for model_id, manuf in identities:
         variant = dict(device)
         variant["m"] = model_id
         variant["mf"] = manuf
+
+        # Show the brand the device was sold under, where upstream records one.
+        # The reported model stays as it is — it is what matching keys on; only
+        # the display name changes.
+        rebadge = wl_by_manuf.get(manuf) or wl_by_model.get(model_id)
+        if rebadge:
+            wl_vendor, _wl_model, wl_desc = rebadge
+            variant["v"] = wl_vendor
+            if wl_desc:
+                variant["d"] = wl_desc
+
         devices.append(variant)
 
     if not identities or (device["m"], device["mf"]) not in identities:
@@ -1877,6 +1942,105 @@ def _legacy_datapoints(legacy_src, table, names):
                     dps[key]["t"] = wire
 
     return dps
+
+
+
+
+def _tuya_datapoints(block):
+    """Datapoints from a definition's declarative meta.tuyaDatapoints table.
+
+    453 definitions upstream carry one and none of them was read — the only
+    datapoint maps in the database came from hand-written legacy converters.
+    The table is a list of triples:
+
+        [1,  "temperature", tuya.valueConverter.divideBy10],
+        [13, "state",       tuya.valueConverter.onOff],
+        [21, "melody",      tuya.valueConverterBasic.lookup({melody_1: tuya.enum(0), ...})],
+
+    The third element says how to read the value, and enough of them are
+    recognisable to be worth reading: a lookup carries the enum's names, which
+    is the difference between a dropdown of words and one of raw numbers.
+    Anything unrecognised is treated as a plain integer rather than guessed at.
+    """
+    table = extract_bracket_content(block, "tuyaDatapoints")
+    if not table:
+        return {}
+
+    dps = {}
+    for m in re.finditer(
+            r'\[\s*(\d+)\s*,\s*["\']([^"\']+)["\']\s*,\s*(.*?)\]\s*(?:,|\Z)',
+            table, re.S):
+        dp_id, prop, conv = m.group(1), m.group(2), m.group(3)
+
+        entry = {"k": prop, "t": "int"}
+
+        lookup = re.search(r'lookup\(\s*\{(.*?)\}\s*\)', conv, re.S)
+        if lookup:
+            values = {}
+            for name, val in re.findall(
+                    r'["\']?([A-Za-z_][\w ]*)["\']?\s*:\s*tuya\.enum\(\s*(\d+)\s*\)',
+                    lookup.group(1)):
+                values[name.strip()] = int(val)
+            if values:
+                entry = {"k": prop, "t": "enum", "v": values}
+            else:
+                entry["t"] = "enum"
+        elif re.search(r'\b(onOff|trueFalse\d*|raw ?Boolean)\b', conv):
+            entry["t"] = "bool"
+        elif re.search(r'Enum\b', conv):
+            entry["t"] = "enum"
+        else:
+            div = re.search(r'divideBy(\d+)', conv)
+            if div:
+                entry["scale"] = float(div.group(1))
+
+        dps[dp_id] = entry
+
+    return dps
+
+
+def _whitelabels(block):
+    """Rebadges declared by a definition, keyed by what the device reports.
+
+    The same hardware is sold under many brands, and upstream records that so a
+    user sees the name on their box rather than the name of whoever built it.
+    Two forms appear:
+
+        tuya.whitelabel("Moes", "ZSS-S01-GWM-C-MS", "Door/window alarm sensor",
+                        ["_TZ3000_8yhypbo7"])
+        whiteLabel: [{vendor: "Zemismart", model: "SPM01-1Z2",
+                      fingerprint: [{modelID: "SPM01-1Z2"}]}]
+
+    529 of the first, 470 of the second. Neither was read, so every rebadged
+    device carried the original manufacturer's name.
+
+    @return (by manufacturer id, by reported model), each mapping to
+            (vendor, model, description)
+    """
+    by_manufacturer = {}
+    by_model = {}
+
+    for m in re.finditer(
+            r'tuya\.whitelabel\(\s*["\']([^"\']+)["\']\s*,\s*["\']([^"\']+)["\']\s*,'
+            r'\s*["\']([^"\']*)["\']\s*,\s*\[(.*?)\]', block, re.S):
+        vendor, model, desc = m.group(1), m.group(2), m.group(3)
+        for mf in re.findall(r'["\']([^"\']+)["\']', m.group(4)):
+            by_manufacturer[mf] = (vendor, model, desc)
+
+    wl = extract_bracket_content(block, "whiteLabel")
+    if wl:
+        for entry in re.finditer(
+                r'vendor\s*:\s*["\']([^"\']+)["\']\s*,\s*model\s*:\s*["\']([^"\']+)["\']'
+                r'(.*?)(?=\}\s*,\s*\{|\}\s*\]|$)', wl, re.S):
+            vendor, model, rest = entry.group(1), entry.group(2), entry.group(3)
+            desc_m = re.search(r'description\s*:\s*["\']([^"\']*)["\']', rest)
+            desc = desc_m.group(1) if desc_m else ""
+            for mf in re.findall(r'manufacturerName\s*:\s*["\']([^"\']+)["\']', rest):
+                by_manufacturer[mf] = (vendor, model, desc)
+            for mid in re.findall(r'modelID\s*:\s*["\']([^"\']+)["\']', rest):
+                by_model[mid] = (vendor, model, desc)
+
+    return by_manufacturer, by_model
 
 
 def _fingerprint_identities(block):
