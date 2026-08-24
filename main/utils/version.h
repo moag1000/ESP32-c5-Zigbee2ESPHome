@@ -20,8 +20,16 @@ extern "C" {
 
 /**
  * @brief Firmware version string (semantic versioning)
+ *
+ * Set from `git describe --tags` by main/CMakeLists.txt, so the version a
+ * running gateway reports is the release it was actually built from. The
+ * literal below is only what a build outside a git checkout falls back to;
+ * it used to be the only value, which is how a v0.3.0 release came to
+ * announce itself to Home Assistant as 1.0.0.
  */
-#define FIRMWARE_VERSION "1.0.0"
+#ifndef FIRMWARE_VERSION
+#define FIRMWARE_VERSION "0.0.0-unknown"
+#endif
 
 /**
  * @brief Build date (set by compiler)

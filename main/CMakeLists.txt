@@ -278,3 +278,31 @@ if(CONFIG_BT_ENABLED)
     idf_component_get_property(bt_lib bt COMPONENT_LIB)
     target_link_libraries(${COMPONENT_LIB} PUBLIC ${bt_lib})
 endif()
+
+# Version and commit come from git, not from a literal somebody has to remember
+# to bump. Without this the firmware reported whatever was last hard-coded in
+# version.h, which had drifted three releases out of date.
+execute_process(
+    COMMAND git describe --tags --always --dirty
+    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+    OUTPUT_VARIABLE GW_GIT_DESCRIBE
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+execute_process(
+    COMMAND git rev-parse --short HEAD
+    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+    OUTPUT_VARIABLE GW_GIT_HASH
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+if(GW_GIT_DESCRIBE)
+    string(REGEX REPLACE "^v" "" GW_VERSION "${GW_GIT_DESCRIBE}")
+    target_compile_definitions(${COMPONENT_LIB} PUBLIC
+        FIRMWARE_VERSION="${GW_VERSION}")
+    message(STATUS "Firmware version from git: ${GW_VERSION}")
+endif()
+if(GW_GIT_HASH)
+    target_compile_definitions(${COMPONENT_LIB} PUBLIC
+        GIT_COMMIT="${GW_GIT_HASH}")
+endif()

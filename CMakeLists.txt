@@ -21,7 +21,20 @@ endif()
 
 # Project information
 set(PROJECT_NAME "esp32_c5_zigbee2mqtt")
-set(PROJECT_VER "0.1.0")
+# The app descriptor's version, which is what OTA tooling compares. Derived
+# from git so it cannot disagree with the release tag.
+execute_process(
+    COMMAND git describe --tags --always --dirty
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    OUTPUT_VARIABLE GW_GIT_DESCRIBE
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+if(GW_GIT_DESCRIBE)
+    string(REGEX REPLACE "^v" "" PROJECT_VER "${GW_GIT_DESCRIBE}")
+else()
+    set(PROJECT_VER "0.0.0-unknown")
+endif()
 
 # Include sdkconfig.local if it exists (for machine-specific settings)
 # This is applied AFTER sdkconfig.defaults, so local values override defaults
