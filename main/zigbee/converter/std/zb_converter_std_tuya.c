@@ -308,6 +308,35 @@ esp_err_t tz_tuya_dp(uint16_t short_addr, uint8_t endpoint, const cJSON *value)
     memset(&dp, 0, sizeof(dp));
     dp.dp_id = dp_id;
 
+    /* Unwrap the command object.
+     *
+     * zb_converter_handle_command() hands Tuya converters the whole command
+     * rather than the matched value:
+     *
+     *     const cJSON *convert_arg =
+     *         (def->quirk_flags & ZB_QUIRK_TUYA_DEVICE) ? json : item;
+     *
+     * so what arrives here is {"alarm": true}, not true. The type chain below
+     * tests for bool, number and string, and an object is none of them, so
+     * every datapoint write on such a device ended at
+     *
+     *     W CONV_TUYA: tz_tuya_dp: unsupported JSON type for dp_13
+     *     W CONV_REG:  Converter failed for key 'alarm': ESP_ERR_NOT_SUPPORTED
+     *
+     * having resolved the datapoint correctly and then thrown the value away.
+     * Both shapes are accepted: the member when handed an object, the value
+     * itself otherwise. */
+    if (cJSON_IsObject(value)) {
+        const cJSON *member = (json_key != NULL)
+            ? cJSON_GetObjectItem(value, json_key) : NULL;
+        if (member == NULL) {
+            ESP_LOGW(TAG, "tz_tuya_dp: command object carries no '%s' for dp_%d",
+                     json_key ? json_key : "(no key)", dp_id);
+            return ESP_ERR_INVALID_ARG;
+        }
+        value = member;
+    }
+
     if (cJSON_IsBool(value)) {
         dp.type = TUYA_DP_TYPE_BOOL;
         dp.length = 1;
@@ -386,7 +415,11 @@ esp_err_t tz_tuya_dp(uint16_t short_addr, uint8_t endpoint, const cJSON *value)
         ESP_LOGD(TAG, "tz_tuya_dp: dp_%d = \"%s\" (type=%d)",
                  dp_id, str, dp.type);
     } else {
-        ESP_LOGW(TAG, "tz_tuya_dp: unsupported JSON type for dp_%d", dp_id);
+        /* Name the type. "unsupported JSON type" cost an evening: the value
+         * was an object, and the message said nothing that would have pointed
+         * there. */
+        ESP_LOGW(TAG, "tz_tuya_dp: dp_%d got JSON type %d, which is neither "
+                 "bool, number nor string", dp_id, value ? value->type : -1);
         return ESP_ERR_NOT_SUPPORTED;
     }
 
