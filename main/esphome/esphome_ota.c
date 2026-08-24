@@ -24,6 +24,7 @@
 #include "freertos_helpers.h"
 
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
 #include "esp_app_format.h"
@@ -69,6 +70,13 @@ static const char *TAG = "ESPHOME_OTA";
 
 /** @brief Receive buffer size */
 #define OTA_RX_BUFFER_SIZE          1024
+
+/** Per-recv() timeout. Short, because a pause is not a failure and the loop
+ *  below decides when to give up. */
+#define OTA_RECV_TIMEOUT_MS         10000
+
+/** How long a transfer may make no progress at all before it counts as dead. */
+#define OTA_STALL_LIMIT_US          (60 * 1000000LL)
 
 /** @brief OTA task stack size */
 #define OTA_TASK_STACK_SIZE         4096
@@ -153,15 +161,58 @@ static esp_err_t set_socket_timeout(int sock, uint32_t timeout_ms)
  * @param[in] len Number of bytes to receive
  * @return ESP_OK on success, ESP_FAIL on error or timeout
  */
+/**
+ * @brief Receive some bytes, sitting through pauses
+ *
+ * recv() on a socket with SO_RCVTIMEO returns -1 with EAGAIN when nothing
+ * arrived in time, and every receive path here treated that as the end of the
+ * transfer. On a single-SoC design where Wi-Fi shares its radio with Zigbee a
+ * pause is the normal condition, not a fault — the same mistake cost the
+ * converter database download, where the transfer was working and was
+ * abandoned at the first gap.
+ *
+ * A pause is waited through; the bound is time without progress, because the
+ * number of pauses says nothing about whether the peer is still there.
+ *
+ * @param[in]     sock     Connected socket
+ * @param[out]    buf      Destination
+ * @param[in]     len      Maximum bytes to take
+ * @param[in,out] last_progress_us Timestamp of the last byte received anywhere
+ *                in this transfer; updated on success
+ * @return >0 bytes received, 0 if the peer closed cleanly, -1 on error or if
+ *         nothing arrived for OTA_STALL_LIMIT_US
+ */
+static int ota_recv_some(int sock, uint8_t *buf, size_t len, int64_t *last_progress_us)
+{
+    for (;;) {
+        int r = recv(sock, buf, len, 0);
+        if (r > 0) {
+            *last_progress_us = esp_timer_get_time();
+            return r;
+        }
+        if (r == 0) {
+            return 0;   /* orderly shutdown by the peer */
+        }
+        if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
+            if (esp_timer_get_time() - *last_progress_us < OTA_STALL_LIMIT_US) {
+                continue;
+            }
+            ESP_LOGE(TAG, "No data for %d s, giving up",
+                     (int)(OTA_STALL_LIMIT_US / 1000000));
+            return -1;
+        }
+        ESP_LOGE(TAG, "recv failed: errno=%d", errno);
+        return -1;
+    }
+}
+
 static esp_err_t recv_exact(int sock, uint8_t *buffer, size_t len)
 {
     size_t received = 0;
+    int64_t last_progress = esp_timer_get_time();
     while (received < len) {
-        int ret = recv(sock, buffer + received, len - received, 0);
+        int ret = ota_recv_some(sock, buffer + received, len - received, &last_progress);
         if (ret <= 0) {
-            if (ret < 0) {
-                ESP_LOGE(TAG, "Receive error: %d (errno: %d)", ret, errno);
-            }
             return ESP_FAIL;
         }
         received += ret;
@@ -246,7 +297,10 @@ static void handle_ota_connection(int client_sock)
     report_status(0, "OTA connection established");
 
     /* Set socket timeout */
-    set_socket_timeout(client_sock, s_ota_state.config.timeout_ms);
+    /* Short per-call timeout, long patience. The receive loops decide when a
+     * transfer is dead, from time without progress; a 60 s blocking recv() can
+     * only ever fail once. */
+    set_socket_timeout(client_sock, OTA_RECV_TIMEOUT_MS);
 
     /* Step 1: Receive magic byte */
     uint8_t magic;
@@ -401,16 +455,17 @@ static void handle_ota_connection(int client_sock)
     mbedtls_md5_starts(&firmware_md5);
 #endif
 
+    int64_t last_progress = esp_timer_get_time();
     while (bytes_received < firmware_size) {
         size_t chunk_size = firmware_size - bytes_received;
         if (chunk_size > OTA_RX_BUFFER_SIZE) {
             chunk_size = OTA_RX_BUFFER_SIZE;
         }
 
-        int received = recv(client_sock, buffer, chunk_size, 0);
+        int received = ota_recv_some(client_sock, buffer, chunk_size, &last_progress);
         if (received <= 0) {
-            ESP_LOGE(TAG, "Failed to receive firmware data at offset %lu",
-                     (unsigned long)bytes_received);
+            ESP_LOGE(TAG, "Failed to receive firmware data at offset %lu of %lu",
+                     (unsigned long)bytes_received, (unsigned long)firmware_size);
 #if USE_PSA_CRYPTO
             psa_hash_abort(&firmware_md5_op);
 #else
@@ -473,15 +528,31 @@ static void handle_ota_connection(int client_sock)
     setsockopt(client_sock, SOL_SOCKET, SO_RCVTIMEO, &md5_timeout, sizeof(md5_timeout));
 
     int md5_total = 0;
+    int64_t md5_progress = esp_timer_get_time();
+    bool md5_truncated = false;
     while (md5_total < ESPHOME_MD5_SIZE) {
-        int md5_got = recv(client_sock, client_md5 + md5_total,
-                          ESPHOME_MD5_SIZE - md5_total, 0);
+        int md5_got = ota_recv_some(client_sock, client_md5 + md5_total,
+                                    ESPHOME_MD5_SIZE - md5_total, &md5_progress);
         if (md5_got <= 0) {
-            ESP_LOGW(TAG, "MD5 recv returned %d (errno=%d), skipping verification",
-                     md5_got, errno);
+            /* A pause is already waited through by ota_recv_some(), so reaching
+             * here means the peer went away or erred.
+             *
+             * Sending nothing at all is an old client that does not offer a
+             * checksum, and verification is skipped as before. Sending part of
+             * one is not: this used to treat any interruption — including an
+             * ordinary receive timeout — as permission to install an unverified
+             * firmware image. */
+            md5_truncated = (md5_total > 0);
+            ESP_LOGW(TAG, "MD5 recv ended after %d of %d bytes (errno=%d)",
+                     md5_total, ESPHOME_MD5_SIZE, errno);
             break;
         }
         md5_total += md5_got;
+    }
+    if (md5_truncated) {
+        ESP_LOGE(TAG, "Refusing an image whose checksum arrived incomplete");
+        send_response(client_sock, OTA_RESPONSE_ERROR_VALIDATE);
+        goto cleanup;
     }
 
     if (md5_total == ESPHOME_MD5_SIZE) {

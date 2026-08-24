@@ -317,6 +317,26 @@ Measured on hardware (ESP32-C5, ESP-IDF v6.0.2):
   other three simultaneous clients. Users produce both without trying.
 - The C5's Wi-Fi scan returns nothing useful, so anything scan-based (the
   captive portal's network list) is unreliable.
+- **Half the codebase cannot run.** Of the functions defined in files that are
+  compiled unconditionally, 1007 of 2077 are discarded by the linker as
+  unreachable — measured, not estimated, by comparing definitions against the
+  symbols in the linked image. Nine files are compiled and dropped in their
+  entirety, among them every per-device BLE decoder
+  (`ble_ruuvi.c`, `ble_switchbot.c`, `ble_qingping.c`, `ble_inkbird.c`,
+  `ble_beacon.c`), `ble_battery_service.c`, `ble_esphome_bridge.c` and
+  `ble_gatt_discovery.c`. Generic BLE scanning works and reports devices; none
+  of the decoding does.
+
+  This is not merely untidy. Log forwarding to Home Assistant was exactly this
+  — a complete implementation nothing called — and it was invisible until
+  somebody went looking. Anything in that half may be equally broken and equally
+  silent.
+
+  The modules behind `CONFIG_ZB_SCENES_ENABLE`, `CONFIG_ZB_TOUCHLINK_ENABLE`,
+  `CONFIG_ZB_OTA_ENABLE` and `CONFIG_ZIGBEE_MULTI_PAN_ENABLED` are *not* in this
+  count: they are conditionally compiled and genuinely off, which is a different
+  thing from unreachable.
+
 - A good deal of the codebase has never been read.
 
 ## How it compares
