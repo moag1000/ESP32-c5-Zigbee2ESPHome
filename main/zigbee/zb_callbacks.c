@@ -674,6 +674,31 @@ void zb_callback_report_attr(esp_zb_zcl_report_attr_message_t *message)
         device_zigbee_add_cluster(device, cluster_id);
     }
 
+    /* Adopt the endpoint the device actually transmits on.
+     *
+     * Endpoint 0 is ZDO, so it is never a device's application endpoint — it is
+     * the "not discovered yet" value. It stays that way for any device whose
+     * ZDO interview is skipped, which is every Aqara sensor here: they report
+     * their model within milliseconds of joining and the interview is cancelled
+     * in favour of the converter, before Active_EP_req is ever answered.
+     *
+     * The cost of that was hidden rather than absent. Some callers paper over
+     * it (zb_command_handler and zb_availability both substitute 1), while the
+     * five entry points in zb_zcl_helpers.c refuse endpoint 0 outright. So
+     * zb_reporting_provision(), which runs right after the join with
+     * bind + configure reporting + read, aimed all three at endpoint 0. This
+     * device has no cluster in s_defaults so nothing was attempted; a battery
+     * device with genPowerCfg would have had its whole provisioning fail
+     * quietly.
+     *
+     * The report in hand carries the answer, so there is nothing to guess. */
+    if (device != NULL && device->proto.zigbee.endpoint == 0 &&
+        message->src_endpoint != 0) {
+        device->proto.zigbee.endpoint = message->src_endpoint;
+        ESP_LOGI(TAG, "Device 0x%04X endpoint learned from its report: EP%d",
+                 short_addr, message->src_endpoint);
+    }
+
     /* Try converter-based handling first */
     {
         uint16_t attr_id = message->attribute.id;
