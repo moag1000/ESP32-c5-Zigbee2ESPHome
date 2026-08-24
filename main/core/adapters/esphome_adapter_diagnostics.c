@@ -222,6 +222,12 @@ esp_err_t esphome_adapter_diagnostics_register(const device_t *dev)
     }
 
     uint32_t device_id = (uint32_t)(dev->id & 0xFFFFFFFF);
+    /* Only for the log line below. Entity names carry no device prefix: Home
+     * Assistant prepends the device name itself, so a prefix rendered it twice
+     * — the four buttons above were fixed for that and these four sensors were
+     * not. Worse, the prefix was dev->friendly_name, which embeds the short
+     * address, so after a rejoin the device read "TS0601 0x3C92" while its own
+     * entities still read "TS0601 0xA0A3 LQI". */
     const char *name = dev->friendly_name[0] ? dev->friendly_name : "Device";
 
     ESP_LOGD(TAG, "Registering diagnostics for %s (0x%04X)",
@@ -304,7 +310,7 @@ esp_err_t esphome_adapter_diagnostics_register(const device_t *dev)
         esphome_sensor_config_t cfg = {0};
         cfg.key = make_diag_key(dev->id, DIAG_TYPE_LQI);
         cfg.device_id = device_id;
-        snprintf(cfg.name, sizeof(cfg.name), "%s LQI", name);
+        strlcpy(cfg.name, "LQI", sizeof(cfg.name));
         snprintf(cfg.unique_id, sizeof(cfg.unique_id),
                  "0x%016llX_lqi", (unsigned long long)dev->id);
         strncpy(cfg.icon, "mdi:signal", sizeof(cfg.icon) - 1);
@@ -321,7 +327,7 @@ esp_err_t esphome_adapter_diagnostics_register(const device_t *dev)
         esphome_sensor_config_t cfg = {0};
         cfg.key = make_diag_key(dev->id, DIAG_TYPE_RSSI);
         cfg.device_id = device_id;
-        snprintf(cfg.name, sizeof(cfg.name), "%s RSSI", name);
+        strlcpy(cfg.name, "RSSI", sizeof(cfg.name));
         snprintf(cfg.unique_id, sizeof(cfg.unique_id),
                  "0x%016llX_rssi", (unsigned long long)dev->id);
         strncpy(cfg.icon, "mdi:signal-variant", sizeof(cfg.icon) - 1);
@@ -339,7 +345,7 @@ esp_err_t esphome_adapter_diagnostics_register(const device_t *dev)
         esphome_text_sensor_config_t cfg = {0};
         cfg.key = make_diag_key(dev->id, DIAG_TYPE_LAST_SEEN);
         cfg.device_id = device_id;
-        snprintf(cfg.name, sizeof(cfg.name), "%s Last Seen", name);
+        strlcpy(cfg.name, "Last Seen", sizeof(cfg.name));
         snprintf(cfg.unique_id, sizeof(cfg.unique_id),
                  "0x%016llX_last_seen", (unsigned long long)dev->id);
         strncpy(cfg.icon, "mdi:clock-outline", sizeof(cfg.icon) - 1);
@@ -353,7 +359,7 @@ esp_err_t esphome_adapter_diagnostics_register(const device_t *dev)
         esphome_text_sensor_config_t cfg = {0};
         cfg.key = make_diag_key(dev->id, DIAG_TYPE_ZIGBEE_INFO);
         cfg.device_id = device_id;
-        snprintf(cfg.name, sizeof(cfg.name), "%s Zigbee Info", name);
+        strlcpy(cfg.name, "Zigbee Info", sizeof(cfg.name));
         snprintf(cfg.unique_id, sizeof(cfg.unique_id),
                  "0x%016llX_zigbee_info", (unsigned long long)dev->id);
         strncpy(cfg.icon, "mdi:information-outline", sizeof(cfg.icon) - 1);

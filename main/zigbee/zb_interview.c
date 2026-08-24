@@ -1761,10 +1761,11 @@ static void interview_complete(zb_interview_context_t *ctx, zb_interview_status_
             if (strcmp(ng_dev->friendly_name, ieee_default) == 0) {
                 if (ng_dev->model[0] != '\0') {
                     snprintf(ng_dev->friendly_name, sizeof(ng_dev->friendly_name),
-                             "%.23s 0x%04X", ng_dev->model, ctx->short_addr);
+                             "%.23s %04X", ng_dev->model,
+                             (unsigned)(ng_dev->id & 0xFFFF));
                 } else {
                     snprintf(ng_dev->friendly_name, sizeof(ng_dev->friendly_name),
-                             "Device 0x%04X", ctx->short_addr);
+                             "Device %04X", (unsigned)(ng_dev->id & 0xFFFF));
                 }
                 ESP_LOGI(TAG, "Device 0x%04X friendly_name: '%s'",
                          ctx->short_addr, ng_dev->friendly_name);

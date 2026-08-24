@@ -1705,10 +1705,11 @@ static void handle_basic_cluster_report(uint16_t short_addr, esp_zb_zcl_report_a
                             if (strcmp(device->friendly_name, ieee_default) == 0) {
                                 if (device->model[0] != '\0') {
                                     snprintf(device->friendly_name, sizeof(device->friendly_name),
-                                             "%.23s 0x%04X", device->model, short_addr);
+                                             "%.23s %04X", device->model,
+                                             (unsigned)(device->id & 0xFFFF));
                                 } else {
                                     snprintf(device->friendly_name, sizeof(device->friendly_name),
-                                             "Device 0x%04X", short_addr);
+                                             "Device %04X", (unsigned)(device->id & 0xFFFF));
                                 }
                                 ESP_LOGI(TAG, "Device 0x%04X friendly_name: '%s'",
                                          short_addr, device->friendly_name);

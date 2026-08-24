@@ -821,7 +821,8 @@ void app_main(void)
                 device_id_to_str(dev->id, ieee_default, sizeof(ieee_default));
                 if (strcmp(dev->friendly_name, ieee_default) == 0) {
                     snprintf(dev->friendly_name, sizeof(dev->friendly_name),
-                             "%.23s 0x%04X", dev->model, dev->proto.zigbee.short_addr);
+                             "%.23s %04X", dev->model,
+                             (unsigned)(dev->id & 0xFFFF));
                 }
 
                 bound++;

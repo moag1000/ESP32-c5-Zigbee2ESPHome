@@ -660,53 +660,45 @@ static bool encode_sub_device_cb(device_t *dev, void *ctx)
     uint32_t device_id = (uint32_t)(dev->id & 0xFFFFFFFF);
     esphome_encode_uint32(&sub_buf, 1, device_id);
 
-    /* Field 2: name (string) — human-readable display name for HA.
-     * Prefer converter vendor+description (e.g. "Adaprox Fingerbot Plus"),
-     * fall back to model+short_addr, then IEEE hex. */
+    /* Field 2: name (string) — and the only field of this message Home
+     * Assistant uses.
+     *
+     * The fields for manufacturer, model and hw_version that used to follow
+     * were written and thrown away. Both sub-devices on this gateway showed
+     * manufacturer 'esp32c5' and model 'zigbee-gateway' in Home Assistant —
+     * the parent's values, inherited because SubDeviceInfo carries only
+     * device_id, name and area_id. The encoding was not the problem: field 2
+     * goes through the same encoder in the same submessage and arrives.
+     *
+     * So the name has to carry the identity. Preferred is the converter's
+     * vendor and description ("Aqara Vibration sensor"). Failing that — a thin
+     * or missing converter entry — the Zigbee manufacturer id goes in, because
+     * it is the one string that says which device this actually is, and there
+     * is nowhere else left to put it. The suffix is the low 16 bits of the IEEE
+     * address, not the short address: short addresses change on every rejoin,
+     * which renamed the device in Home Assistant and left its entities carrying
+     * the old one. */
     char display_name[64];
     const zb_converter_def_t *cdef = (const zb_converter_def_t *)dev->proto.zigbee.converter;
-    if (cdef && cdef->description && cdef->description[0]) {
-        if (cdef->vendor && cdef->vendor[0]) {
-            snprintf(display_name, sizeof(display_name), "%s %s", cdef->vendor, cdef->description);
-        } else {
-            snprintf(display_name, sizeof(display_name), "%s", cdef->description);
-        }
+    const char *desc = (cdef && cdef->description && cdef->description[0]) ? cdef->description : NULL;
+    const char *vend = (cdef && cdef->vendor && cdef->vendor[0]) ? cdef->vendor : NULL;
+    unsigned tail = (unsigned)(dev->id & 0xFFFF);
+
+    if (desc != NULL && vend != NULL) {
+        snprintf(display_name, sizeof(display_name), "%s %s", vend, desc);
+    } else if (desc != NULL) {
+        snprintf(display_name, sizeof(display_name), "%s", desc);
+    } else if (dev->manufacturer[0] && dev->model[0]) {
+        /* Widths are bounded so the address suffix cannot be truncated away —
+         * it is what tells two identical devices apart. */
+        snprintf(display_name, sizeof(display_name), "%.32s %.20s %04X",
+                 dev->manufacturer, dev->model, tail);
     } else if (dev->model[0]) {
-        snprintf(display_name, sizeof(display_name), "%s 0x%04X",
-                 dev->model, dev->proto.zigbee.short_addr);
+        snprintf(display_name, sizeof(display_name), "%.52s %04X", dev->model, tail);
     } else {
         snprintf(display_name, sizeof(display_name), "0x%016llx", (unsigned long long)dev->id);
     }
     esphome_encode_string(&sub_buf, 2, display_name);
-
-    /* Field 4: manufacturer (string) — shown as "von <manufacturer>" in HA.
-     * Prefer converter vendor (human-readable), fall back to Zigbee manufacturer string. */
-    const char *mfr = NULL;
-    if (cdef && cdef->vendor && cdef->vendor[0]) {
-        mfr = cdef->vendor;
-    } else if (dev->manufacturer[0]) {
-        mfr = dev->manufacturer;
-    }
-    if (mfr) {
-        esphome_encode_string(&sub_buf, 4, mfr);
-    }
-
-    /* Field 5: model (string) — shown as model info in HA.
-     * Prefer converter description, fall back to Zigbee model identifier. */
-    const char *mdl = NULL;
-    if (cdef && cdef->description && cdef->description[0]) {
-        mdl = cdef->description;
-    } else if (dev->model[0]) {
-        mdl = dev->model;
-    }
-    if (mdl) {
-        esphome_encode_string(&sub_buf, 5, mdl);
-    }
-
-    /* Field 6: hw_version — Zigbee model identifier (e.g. "TS0001") */
-    if (dev->model[0]) {
-        esphome_encode_string(&sub_buf, 6, dev->model);
-    }
 
     if (!esphome_buffer_overflow(&sub_buf)) {
         esphome_encode_bytes(di_ctx->buf, 20, sub_msg, sub_buf.position);

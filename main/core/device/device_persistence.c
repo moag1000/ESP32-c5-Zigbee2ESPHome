@@ -916,7 +916,7 @@ static void persisted_to_device(const persisted_device_t *persisted, device_t *d
              * and discovery name falls back to model. */
             if (dev->friendly_name[0] == '\0' && dev->proto.zigbee.short_addr != 0) {
                 snprintf(dev->friendly_name, sizeof(dev->friendly_name),
-                         "Device_0x%04X", dev->proto.zigbee.short_addr);
+                         "Device_%04X", (unsigned)(dev->id & 0xFFFF));
             }
             break;
         case DEV_PROTOCOL_BLE:
