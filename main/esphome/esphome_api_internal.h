@@ -96,6 +96,13 @@ typedef struct {
     bool ping_pending;                              /**< Waiting for pong response */
     char client_info[ESPHOME_STRING_BUFFER_MEDIUM]; /**< Client identification string */
     psram_task_handle_t psram_task;                 /**< PSRAM-backed client handler task */
+    /** Serialises writes to this client's socket.
+     *
+     * Two tasks write here: the client's own handler, and any task at all when
+     * it logs, because log forwarding sends from the caller's context. Frames
+     * are length-prefixed and, under Noise, sequence-numbered, so two writes
+     * interleaving does not merely reorder output — it destroys the session. */
+    SemaphoreHandle_t tx_mutex;
     uint8_t rx_buffer[ESPHOME_RX_BUFFER_SIZE];      /**< Receive buffer */
     size_t rx_buffer_len;                           /**< Bytes in receive buffer */
 #ifdef CONFIG_ESPHOME_NOISE_ENCRYPTION
@@ -232,6 +239,10 @@ esp_err_t esphome_api_send_raw_bytes(esphome_client_t *client, const uint8_t *da
  * @return ESP_OK on success
  */
 esp_err_t esphome_api_send_message(esphome_client_t *client, const uint8_t *data, size_t len);
+
+/** @brief As esphome_api_send_message(), but returns ESP_ERR_TIMEOUT instead of
+ *         waiting when the client is busy. For log forwarding. */
+esp_err_t esphome_api_send_message_trylock(esphome_client_t *client, const uint8_t *data, size_t len);
 
 /**
  * @brief Send a ping request to client

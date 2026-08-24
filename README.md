@@ -248,11 +248,22 @@ Measured on hardware (ESP32-C5, ESP-IDF v6.0.2):
 - **Three devices, one network, one developer.** A Fingerbot Plus, an Aqara
   vibration sensor and a Tuya siren. Everything else in the converter database
   is untested here.
-- **The converter database cannot yet be updated over HTTP.** The
-  `update_converter_db` service starts, the board fetches `index.json` and then
-  stops without finishing the transfer — measured twice against an instrumented
-  server. Worse, the reason is invisible: `converter_db_ota_status()` exists but
-  is wired to no entity, so a failure leaves nothing behind in Home Assistant.
+- **The converter database update works for small files and fails for large
+  ones.** `update_converter_db` now reports what it is doing through the
+  "Converter DB Update" sensor, and against an instrumented server the failure
+  is precise: a 16 KB index is fetched, parsed and installed correctly, while
+  the real 134 KB index gets 1200 bytes — one segment — and then
+
+      tcp_read error, errno=Software caused connection abort
+      esp_transport_read returned:-2 and errno:113
+
+  ECONNABORTED comes from the board's own lwIP, not from the network: the
+  server had already written the whole file. Two contributing causes are known.
+  `CONFIG_LWIP_MAX_SOCKETS` was 8, which an API server with several clients,
+  MQTT and mDNS very nearly exhausts on its own — raised to 16, and that alone
+  turned the 16 KB case from failing into working. What remains is lwIP running
+  out of buffers on a sustained receive, and it is not fixed.
+
   Flashing `converters-<version>.bin` to `0x921000` works and is the way to
   update the database today.
 - **Tuya devices were write-only until recently, and nothing said so.** Their
@@ -273,9 +284,13 @@ Measured on hardware (ESP32-C5, ESP-IDF v6.0.2):
   the reboot that follows brought it back on its own — boot counter 32 to 33,
   reset reason `software`, roughly eleven minutes off the network with nobody
   touching it. One observation, not a guarantee.
-- **App OTA has no automatic rollback.**
-  `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` is not set, so a bad image is not
-  backed out of by the bootloader.
+- **App OTA rollback is new and has been exercised once.** The bootloader now
+  reverts an image that does not confirm itself, and the firmware confirms once
+  Wi-Fi is up and the ESPHome API is listening. Enabling it needed that
+  confirmation first: the only one on a boot path sat behind HTTP OTA being
+  configured, so turning rollback on without it would have made every image
+  pushed over the ESPHome OTA port revert at the next restart — an update that
+  looked like it worked and quietly undid itself.
 - **GATT initializes but has not been tested** against a peripheral.
 - **Most testing runs in minutes.** Both of the worst faults found so far needed
   conditions a short test does not produce: one took nine hours of uptime, the

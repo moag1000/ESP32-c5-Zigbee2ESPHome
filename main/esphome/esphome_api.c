@@ -424,6 +424,16 @@ esp_err_t esphome_api_init(const esphome_api_config_t *config)
     }
     for (int i = 0; i < ESPHOME_MAX_CLIENTS; i++) {
         s_api.clients[i].socket = -1;
+        s_api.clients[i].tx_mutex = xSemaphoreCreateMutex();
+        if (s_api.clients[i].tx_mutex == NULL) {
+            for (int j = 0; j < i; j++) {
+                vSemaphoreDelete(s_api.clients[j].tx_mutex);
+            }
+            mem_ng_free(s_api.clients);
+            s_api.clients = NULL;
+            ESP_LOGE(TAG, "Failed to create client TX mutex");
+            return ESP_ERR_NO_MEM;
+        }
     }
 
     /* Create mutex */
@@ -1385,13 +1395,20 @@ esp_err_t esphome_api_encode_and_send_log(esphome_client_t *client, esphome_log_
         return ret;
     }
 
-    /* Send to client - use raw send to avoid mutex issues */
-    ssize_t sent = send(client->socket, output, output_len, 0);
-    if (sent < 0) {
-        return ESP_FAIL;
-    }
 
-    return ESP_OK;
+    /* Through the normal send path, not send() directly.
+     *
+     * This wrote the plaintext frame straight to the socket. On an encrypted
+     * session that injects an unencrypted frame into a Noise stream, which the
+     * peer cannot parse: aioesphomeapi reports "the device is using plaintext
+     * protocol" and drops the connection. Enabling log forwarding therefore
+     * took Home Assistant's session down with it — every entity went
+     * unavailable — and that is why this was never switched on.
+     *
+     * The trylock variant never waits: this runs in whichever task called
+     * ESP_LOG, and that may be the task already sending. A log line is worth
+     * dropping where a wait would be a deadlock. */
+    return esphome_api_send_message_trylock(client, output, output_len);
 }
 
 /**

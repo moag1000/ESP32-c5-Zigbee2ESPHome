@@ -45,6 +45,10 @@ esp_err_t esphome_api_send_raw_bytes(esphome_client_t *client, const uint8_t *da
     size_t total_sent = 0;
     int retry_count = 0;
     const int max_retries = 5;
+    esp_err_t result = ESP_OK;
+
+    /* No locking here: callers hold client->tx_mutex. Taking it again would
+     * deadlock against itself — the mutex is not recursive. */
 
     while (total_sent < len && retry_count < max_retries) {
         ssize_t sent = send(client->socket, data + total_sent, len - total_sent, 0);
@@ -58,13 +62,15 @@ esp_err_t esphome_api_send_raw_bytes(esphome_client_t *client, const uint8_t *da
             }
             ESP_LOGE(TAG, "Send failed: errno=%d", errno);
             client->state = ESPHOME_CLIENT_DISCONNECTED;
-            return ESP_FAIL;
+            result = ESP_FAIL;
+            goto out;
         }
 
         if (sent == 0) {
             ESP_LOGW(TAG, "Connection closed during send");
             client->state = ESPHOME_CLIENT_DISCONNECTED;
-            return ESP_FAIL;
+            result = ESP_FAIL;
+            goto out;
         }
 
         total_sent += sent;
@@ -73,10 +79,11 @@ esp_err_t esphome_api_send_raw_bytes(esphome_client_t *client, const uint8_t *da
 
     if (total_sent != len) {
         ESP_LOGE(TAG, "Failed to send: %zu/%zu bytes", total_sent, len);
-        return ESP_FAIL;
+        result = ESP_FAIL;
     }
 
-    return ESP_OK;
+out:
+    return result;
 }
 
 /**
@@ -89,7 +96,7 @@ esp_err_t esphome_api_send_raw_bytes(esphome_client_t *client, const uint8_t *da
  * message before sending. The input data should be a complete ESPHome frame
  * (0x00 + length varint + type varint + payload).
  */
-esp_err_t esphome_api_send_message(esphome_client_t *client, const uint8_t *data, size_t len)
+static esp_err_t esphome_api_send_message_locked(esphome_client_t *client, const uint8_t *data, size_t len)
 {
     if (!client || client->socket < 0 || !data || len == 0) {
         return ESP_ERR_INVALID_ARG;
@@ -158,6 +165,43 @@ esp_err_t esphome_api_send_message(esphome_client_t *client, const uint8_t *data
         }
     }
 
+    return ret;
+}
+
+/* The Noise context carries a nonce that must advance once per frame, and the
+ * socket carries length-prefixed frames. Both break if two tasks are in here at
+ * the same time, which log forwarding makes possible: it sends from whichever
+ * task happened to call ESP_LOG. So the lock covers encryption and the write
+ * together, not just the write. */
+esp_err_t esphome_api_send_message(esphome_client_t *client, const uint8_t *data, size_t len)
+{
+    if (!client) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (client->tx_mutex != NULL &&
+        xSemaphoreTake(client->tx_mutex, pdMS_TO_TICKS(2000)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+    esp_err_t ret = esphome_api_send_message_locked(client, data, len);
+    if (client->tx_mutex != NULL) {
+        xSemaphoreGive(client->tx_mutex);
+    }
+    return ret;
+}
+
+/* Same, but never waits. For log forwarding: the task it runs in may be the one
+ * already sending, and a log line is worth dropping where a wait would be a
+ * deadlock. */
+esp_err_t esphome_api_send_message_trylock(esphome_client_t *client, const uint8_t *data, size_t len)
+{
+    if (!client || client->tx_mutex == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (xSemaphoreTake(client->tx_mutex, 0) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+    esp_err_t ret = esphome_api_send_message_locked(client, data, len);
+    xSemaphoreGive(client->tx_mutex);
     return ret;
 }
 
