@@ -248,8 +248,28 @@ Measured on hardware (ESP32-C5, ESP-IDF v6.0.2):
 - **Three devices, one network, one developer.** A Fingerbot Plus, an Aqara
   vibration sensor and a Tuya siren. Everything else in the converter database
   is untested here.
-- **The converter database update works for small files and fails for large
-  ones.** `update_converter_db` now reports what it is doing through the
+- **The converter database update does not finish.** Where it stood before:
+  the board read 1200 bytes of the 134381-byte index and gave up. That was a
+  bug in this code — `esp_http_client_read()` returns 0 for "nothing ready
+  yet", not `-ESP_ERR_HTTP_EAGAIN`, and the read loop treated 0 as the end of
+  the body. Fixed, and it took the transfer from 1200 bytes to 133120.
+
+  What remains is below this firmware. With the BLE scanner paused for the
+  duration, the server now delivers all 134381 bytes and the board's TCP stack
+  acknowledges them — but the application reads only 4320 of them and then
+  `select()` reports the socket unreadable for 30 s while lwIP still holds the
+  data. Runs vary between 0 and 133120 bytes, the hard failures are
+  `ECONNABORTED` from the board's own lwIP, and during one transfer the gateway
+  dropped out of Home Assistant altogether. It is contention on a single RF
+  path, not a size limit, and it is the same weakness documented above for
+  Wi-Fi generally.
+
+  ESP-IDF v6.1-rc1 does not change it; that was measured, not assumed.
+
+  Flashing `converters-<version>.bin` to `0x921000` works and is the way to
+  update the database today.
+
+- **(historical, now fixed) The update worked for small files only.** `update_converter_db` now reports what it is doing through the
   "Converter DB Update" sensor, and against an instrumented server the failure
   is precise: a 16 KB index is fetched, parsed and installed correctly, while
   the real 134 KB index gets 1200 bytes — one segment — and then

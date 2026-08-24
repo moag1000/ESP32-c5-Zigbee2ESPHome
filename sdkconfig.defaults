@@ -183,7 +183,7 @@ CONFIG_LWIP_SO_RCVBUF=y
 # 16KB absorbs burst publishes + TCP retransmission during WiFi/Zigbee coexistence
 CONFIG_LWIP_TCP_SND_BUF_DEFAULT=16384
 CONFIG_LWIP_TCP_WND_DEFAULT=16384
-CONFIG_LWIP_TCP_RECVMBOX_SIZE=16
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=32
 CONFIG_LWIP_UDP_RECVMBOX_SIZE=16
 
 # TCP Selective ACK (SACK) - improves recovery from packet loss
@@ -363,3 +363,4 @@ CONFIG_ESP_TASK_WDT_TIMEOUT_S=30
 # A bad OTA image is taken back by the bootloader unless the firmware
 # confirms it, which main.c does once Wi-Fi and the ESPHome API are up.
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+CONFIG_LWIP_TCP_OOSEQ_MAX_PBUFS=8

@@ -10,6 +10,10 @@
 #include "zigbee/converter/zb_converter_loader.h"
 #include "core/memory/memory_manager_ng.h"
 #include "esp_http_client.h"
+#include "esp_timer.h"
+#if CONFIG_BT_SCANNER_ENABLED
+#include "bluetooth/ble_scanner.h"
+#endif
 #include "esp_log.h"
 #include "cJSON.h"
 #include "freertos/FreeRTOS.h"
@@ -26,7 +30,10 @@ static const char *TAG = "DB_OTA";
 #define DB_OTA_MAX_FILE_BYTES   (512 * 1024)
 #define DB_OTA_HTTP_TIMEOUT_MS  10000
 /** How many consecutive quiet reads to sit through before calling it dead. */
-#define DB_OTA_MAX_STALLS       6
+/** How long a transfer may make no progress at all before it counts as dead. */
+#define DB_OTA_STALL_LIMIT_US   (30 * 1000000LL)
+/** HTTP receive buffer. The IDF default of 512 is small against a 1440 MSS. */
+#define DB_OTA_RX_BUFFER        4096
 #define DB_OTA_TASK_STACK       8192
 #define DB_OTA_TASK_PRIO        4
 #define DB_OTA_URL_MAX          192
@@ -85,6 +92,10 @@ static esp_err_t fetch_file(const char *name, char **out_body, size_t *out_len)
         .url = url,
         .timeout_ms = DB_OTA_HTTP_TIMEOUT_MS,
         .keep_alive_enable = true,
+        /* The default receive buffer is 512 bytes against a 1440-byte MSS, so
+         * every segment takes three reads to drain and the socket spends most
+         * of its time holding data the application has not collected yet. */
+        .buffer_size = DB_OTA_RX_BUFFER,
     };
     esp_http_client_handle_t client = esp_http_client_init(&cfg);
     if (client == NULL) {
@@ -133,18 +144,37 @@ static esp_err_t fetch_file(const char *name, char **out_body, size_t *out_len)
      * Loop here instead and treat a stall as "keep waiting", bounded so that a
      * connection which really has died still ends the run. */
     int got = 0;
-    int stalls = 0;
+    int64_t last_progress = esp_timer_get_time();
     while (got < (int)len) {
         int r = esp_http_client_read(client, body + got, (int)len - got);
         if (r > 0) {
             got += r;
-            stalls = 0;
+            last_progress = esp_timer_get_time();
             continue;
         }
-        if (r == -ESP_ERR_HTTP_EAGAIN && ++stalls <= DB_OTA_MAX_STALLS) {
-            ESP_LOGD(TAG, "%s: quiet at %d of %lld, waiting (%d/%d)",
-                     name, got, (long long)len, stalls, DB_OTA_MAX_STALLS);
-            continue;
+        /* Zero, not a negative sentinel.
+         *
+         * esp_transport_read() returns 0 when the socket had nothing ready
+         * inside its timeout, and esp_http_client_read() passes that straight
+         * out as the count it has collected so far — which is 0 when the pause
+         * came first. It does not return -ESP_ERR_HTTP_EAGAIN on this path, so
+         * a loop that only waits through EAGAIN gives up on the first quiet
+         * moment, which is what happened here: the transfer was working, 4096
+         * then 2048 bytes at a time, and was abandoned at the first gap.
+         *
+         * A negative value is a real error and ends the run. Zero is a pause,
+         * and pauses are the normal condition on a radio that time-shares with
+         * Zigbee. The bound is on time without progress rather than on a count
+         * of pauses, because the number of pauses says nothing about whether
+         * the connection is still alive. */
+        if (r == 0 || r == -ESP_ERR_HTTP_EAGAIN) {
+            if (esp_timer_get_time() - last_progress < DB_OTA_STALL_LIMIT_US) {
+                continue;
+            }
+            ESP_LOGW(TAG, "%s: no progress for %d s at %d of %lld bytes",
+                     name, (int)(DB_OTA_STALL_LIMIT_US / 1000000),
+                     got, (long long)len);
+            break;
         }
         ESP_LOGW(TAG, "%s: read returned %d at %d of %lld bytes",
                  name, r, got, (long long)len);
@@ -268,6 +298,32 @@ static void db_ota_task(void *arg)
     size_t index_len = 0;
     bool ok = false;
 
+    /* The HTTP client and the transport describe every read they attempt, at
+     * debug level, and that is the only view into why a transfer stops. Turned
+     * on for the duration of an update rather than globally, because it is
+     * several lines per 4 KB otherwise. */
+    /* Pause BLE for the duration.
+     *
+     * Wi-Fi, Zigbee and BLE share one RF path on this SoC, and a database
+     * update is the most sustained receive this firmware ever does. Measured
+     * with the scanner running: the board read 2640 bytes of a 134381-byte file
+     * and then received nothing for 30 s, while its own ESPHome session dropped
+     * out of Home Assistant. The app OTA path already stops the scanner for the
+     * same reason; this one did not.
+     *
+     * Restarted at the end, whatever the outcome. */
+#if CONFIG_BT_SCANNER_ENABLED
+    bool ble_was_running = ble_scanner_is_running();
+    if (ble_was_running) {
+        ble_scanner_stop();
+        ESP_LOGI(TAG, "BLE scanner paused for the database update");
+    }
+#endif
+
+    esp_log_level_set("HTTP_CLIENT", ESP_LOG_DEBUG);
+    esp_log_level_set("TRANSPORT", ESP_LOG_DEBUG);
+    esp_log_level_set("TRANSPORT_BASE", ESP_LOG_DEBUG);
+
     set_status("fetching index");
 
     remove_tree(CONVERTER_DB_STAGING);
@@ -277,7 +333,12 @@ static void db_ota_task(void *arg)
     }
 
     if (fetch_file("index.json", &index_body, &index_len) != ESP_OK) {
-        set_status("index.json could not be fetched");
+        /* fetch_file() has already described what went wrong — how many bytes
+         * arrived, or which HTTP status came back. Replacing that with a
+         * generic line throws away the only detail worth having. */
+        if (strncmp(s_status, "fetching", 8) == 0) {
+            set_status("index.json could not be fetched");
+        }
         goto done;
     }
     if (stage_file("index.json", index_body, index_len) != ESP_OK) {
@@ -356,6 +417,15 @@ static void db_ota_task(void *arg)
     ok = true;
 
 done:
+#if CONFIG_BT_SCANNER_ENABLED
+    if (ble_was_running && !ble_scanner_is_running()) {
+        ble_scanner_start();
+        ESP_LOGI(TAG, "BLE scanner resumed");
+    }
+#endif
+    esp_log_level_set("HTTP_CLIENT", ESP_LOG_INFO);
+    esp_log_level_set("TRANSPORT", ESP_LOG_INFO);
+    esp_log_level_set("TRANSPORT_BASE", ESP_LOG_INFO);
     if (!ok) {
         remove_tree(CONVERTER_DB_STAGING);
     }

@@ -1,0 +1,13 @@
+# Target labels
+ bootloader
+# Source files and their labels
+/Users/michaelbanda/Nextcloud/www/ESP32-C5/esp32-c5-zigbee-ha-native/build61/CMakeFiles/bootloader
+/Users/michaelbanda/Nextcloud/www/ESP32-C5/esp32-c5-zigbee-ha-native/build61/CMakeFiles/bootloader.rule
+/Users/michaelbanda/Nextcloud/www/ESP32-C5/esp32-c5-zigbee-ha-native/build61/CMakeFiles/bootloader-complete.rule
+/Users/michaelbanda/Nextcloud/www/ESP32-C5/esp32-c5-zigbee-ha-native/build61/bootloader-prefix/src/bootloader-stamp/bootloader-build.rule
+/Users/michaelbanda/Nextcloud/www/ESP32-C5/esp32-c5-zigbee-ha-native/build61/bootloader-prefix/src/bootloader-stamp/bootloader-configure.rule
+/Users/michaelbanda/Nextcloud/www/ESP32-C5/esp32-c5-zigbee-ha-native/build61/bootloader-prefix/src/bootloader-stamp/bootloader-download.rule
+/Users/michaelbanda/Nextcloud/www/ESP32-C5/esp32-c5-zigbee-ha-native/build61/bootloader-prefix/src/bootloader-stamp/bootloader-install.rule
+/Users/michaelbanda/Nextcloud/www/ESP32-C5/esp32-c5-zigbee-ha-native/build61/bootloader-prefix/src/bootloader-stamp/bootloader-mkdir.rule
+/Users/michaelbanda/Nextcloud/www/ESP32-C5/esp32-c5-zigbee-ha-native/build61/bootloader-prefix/src/bootloader-stamp/bootloader-patch.rule
+/Users/michaelbanda/Nextcloud/www/ESP32-C5/esp32-c5-zigbee-ha-native/build61/bootloader-prefix/src/bootloader-stamp/bootloader-update.rule

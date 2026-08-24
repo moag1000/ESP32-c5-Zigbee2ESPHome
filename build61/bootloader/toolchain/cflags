@@ -1,0 +1,3 @@
+"-specs=/Users/michaelbanda/Nextcloud/www/ESP32-C5/esp32-c5-zigbee-ha-native/build61/bootloader/specs/picolibc.specs"
+-march=rv32imac_zicsr_zifencei_zaamo_zalrsc
+-mtune=esp-base

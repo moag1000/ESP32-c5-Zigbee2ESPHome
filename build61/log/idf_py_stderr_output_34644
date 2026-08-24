@@ -1,0 +1,118 @@
+Command: ninja all
+NOTE: /Users/michaelbanda/esp/esp-idf-v6.1-rc1/components/bt/host/nimble/Kconfig.in:1428: BT_NIMBLE_MESH_PROVISIONER: 'default 0' is not a valid bool value (only 'y' and 'n' are allowed). Value is treated as 'n'.
+NOTE: /Users/michaelbanda/esp/esp-idf-v6.1-rc1/components/fatfs/Kconfig:240: FATFS_PRINT_LLI: 'default 0' is not a valid bool value (only 'y' and 'n' are allowed). Value is treated as 'n'.
+NOTE: /Users/michaelbanda/esp/esp-idf-v6.1-rc1/components/fatfs/Kconfig:245: FATFS_PRINT_FLOAT: 'default 0' is not a valid bool value (only 'y' and 'n' are allowed). Value is treated as 'n'.
+Loading defaults file /Users/michaelbanda/Nextcloud/www/ESP32-C5/esp32-c5-zigbee-ha-native/sdkconfig.defaults...
+NOTE: /var/folders/f0/42h6_35d27l04ynql5600v940000gn/T/kconfgen_tmpqvi6g2v8:307: CONFIG_ESP_TASK_WDT was replaced with CONFIG_ESP_TASK_WDT_INIT
+NOTE: unknown kconfig symbol 'MBEDTLS_POLY1305_C' assigned to 'y' in /Users/michaelbanda/Nextcloud/www/ESP32-C5/esp32-c5-zigbee-ha-native/sdkconfig.defaults
+Loading defaults file /Users/michaelbanda/Nextcloud/www/ESP32-C5/esp32-c5-zigbee-ha-native/sdkconfig.local...
+NOTE: /var/folders/f0/42h6_35d27l04ynql5600v940000gn/T/kconfgen_tmpfd4hwv7s:4 line was updated to # =============================================================================n
+NOTE: /var/folders/f0/42h6_35d27l04ynql5600v940000gn/T/kconfgen_tmpfd4hwv7s:6 line was updated to # =============================================================================n
+NOTE: /var/folders/f0/42h6_35d27l04ynql5600v940000gn/T/kconfgen_tmpfd4hwv7s:17 line was updated to # =============================================================================n
+NOTE: /var/folders/f0/42h6_35d27l04ynql5600v940000gn/T/kconfgen_tmpfd4hwv7s:19 line was updated to # =============================================================================n
+NOTE: /var/folders/f0/42h6_35d27l04ynql5600v940000gn/T/kconfgen_tmpfd4hwv7s:29 line was updated to # =============================================================================n
+NOTE: /var/folders/f0/42h6_35d27l04ynql5600v940000gn/T/kconfgen_tmpfd4hwv7s:31 line was updated to # =============================================================================n
+NOTE: /var/folders/f0/42h6_35d27l04ynql5600v940000gn/T/kconfgen_tmpfd4hwv7s:45 line was updated to # =============================================================================n
+NOTE: /var/folders/f0/42h6_35d27l04ynql5600v940000gn/T/kconfgen_tmpfd4hwv7s:47 line was updated to # =============================================================================n
+NOTE: /var/folders/f0/42h6_35d27l04ynql5600v940000gn/T/kconfgen_tmpfd4hwv7s:59 line was updated to # =============================================================================n
+NOTE: /var/folders/f0/42h6_35d27l04ynql5600v940000gn/T/kconfgen_tmpfd4hwv7s:61 line was updated to # =============================================================================n
+NOTE: /var/folders/f0/42h6_35d27l04ynql5600v940000gn/T/kconfgen_tmpfd4hwv7s:88 line was updated to # =============================================================================n
+NOTE: /var/folders/f0/42h6_35d27l04ynql5600v940000gn/T/kconfgen_tmpfd4hwv7s:90 line was updated to # =============================================================================n
+NOTE: /var/folders/f0/42h6_35d27l04ynql5600v940000gn/T/kconfgen_tmpfd4hwv7s:100 line was updated to # =============================================================================n
+NOTE: /var/folders/f0/42h6_35d27l04ynql5600v940000gn/T/kconfgen_tmpfd4hwv7s:102 line was updated to # =============================================================================n
+NOTE: /var/folders/f0/42h6_35d27l04ynql5600v940000gn/T/kconfgen_tmpfd4hwv7s:108 line was updated to # =============================================================================n
+NOTE: /var/folders/f0/42h6_35d27l04ynql5600v940000gn/T/kconfgen_tmpfd4hwv7s:110 line was updated to # =============================================================================n
+NOTE: /var/folders/f0/42h6_35d27l04ynql5600v940000gn/T/kconfgen_tmpfd4hwv7s:117 line was updated to # =============================================================================n
+NOTE: /var/folders/f0/42h6_35d27l04ynql5600v940000gn/T/kconfgen_tmpfd4hwv7s:119 line was updated to # =============================================================================n
+NOTE: unknown kconfig symbol 'MBEDTLS_POLY1305_C' assigned to 'y' in /Users/michaelbanda/Nextcloud/www/ESP32-C5/esp32-c5-zigbee-ha-native/sdkconfig.local
+Default value for LWIP_TCP_OOSEQ_MAX_PBUFS in sdkconfig is 8 but it is 0 according to Kconfig.
+Using default value from sdkconfig (8).
+NOTE: Kconfig parser version: 1
+NOTE: Kconfig defaults policy: use sdkconfig
+NOTE: Status: Finished with notifications
+NOTE: /Users/michaelbanda/esp/esp-idf-v6.1-rc1/components/lwip/Kconfig:763: LWIP_TCP_OOSEQ_MAX_PBUFS: Kconfig default value: 0, sdkconfig default value: 8
+HINT: This area reports issues with default values of the config options.
+For more information, please visit https://docs.espressif.com/projects/esp-idf-kconfig/en/latest/kconfiglib/configuration-report.html#default-value-mismatch
+NOTE: /Users/michaelbanda/esp/esp-idf-v6.1-rc1/components/esp_wifi/Kconfig:300: ESP_WIFI_ENABLE_WPA3_SAE assigned multiple times: n (user-set), y (user-set) -> using y
+NOTE: /Users/michaelbanda/esp/esp-idf-v6.1-rc1/components/esp_system/Kconfig:333: ESP_TASK_WDT_TIMEOUT_S assigned multiple times: 10 (user-set), 30 (user-set) -> using 30
+HINT: Under normal circumstances, there should be only one (or none) assignment per config option. Multiple assignments mean somebody manually altered the sdkconfig file. If you edited the sdkconfig file intentionally, this area can be ignored.
+NOTE: /Users/michaelbanda/Nextcloud/www/ESP32-C5/esp32-c5-zigbee-ha-native/main/Kconfig.projbuild:118: WIFI_FORCE_2GHZ has user-set value n from /var/folders/f0/42h6_35d27l04ynql5600v940000gn/T/kconfgen_tmpfd4hwv7s but is not visible (disabled dependency)
+NOTE: /Users/michaelbanda/esp/esp-idf-v6.1-rc1/components/esp_wifi/Kconfig:736: ESP_WIFI_SCAN_CACHE has user-set value n from /var/folders/f0/42h6_35d27l04ynql5600v940000gn/T/kconfgen_tmpqvi6g2v8 but is not visible (disabled dependency)
+NOTE: /Users/michaelbanda/Nextcloud/www/ESP32-C5/esp32-c5-zigbee-ha-native/managed_components/espressif__mqtt/Kconfig:28: MQTT_TRANSPORT_WEBSOCKET_SECURE has user-set value n from /var/folders/f0/42h6_35d27l04ynql5600v940000gn/T/kconfgen_tmpqvi6g2v8 but is not visible (disabled dependency)
+HINT: Disabled symbols/choices are not written into sdkconfig file. Setting their user value has no effect.
+44f0c59f7c8-466f356-1.6.4-2026-08-24 21:22:28 UTC
+CMake Warning at /Users/michaelbanda/esp/esp-idf-v6.1-rc1/tools/cmake/component_validation.cmake:106 (message):
+  Private include directory
+  '/Users/michaelbanda/esp/esp-idf-v6.1-rc1/components/esp_wifi/wifi_apps/roaming_app/include'
+  belongs to component esp_wifi but is being used by component
+  wpa_supplicant.  It is recommended to define the component dependency for
+  wpa_supplicant on the component esp_wifi, i.e.  'idf_component_register(...
+  PRIV_REQUIRES esp_wifi)' in the CMakeLists.txt of wpa_supplicant, and
+  specify the included directory as idf_component_register(...
+  PRIV_INCLUDE_DIRS <dir relative to component>) in the CMakeLists.txt of
+  component esp_wifi.
+Call Stack (most recent call first):
+  /Users/michaelbanda/esp/esp-idf-v6.1-rc1/tools/cmake/component_validation.cmake:130 (__component_validation_check_include_dirs)
+  /Users/michaelbanda/esp/esp-idf-v6.1-rc1/CMakeLists.txt:356 (__component_validation_run_checks)
+
+
+CMake Warning at /Users/michaelbanda/esp/esp-idf-v6.1-rc1/tools/cmake/component_validation.cmake:106 (message):
+  Private include directory
+  '/Users/michaelbanda/esp/esp-idf-v6.1-rc1/components/esp_wifi/wifi_apps/roaming_app/src'
+  belongs to component esp_wifi but is being used by component
+  wpa_supplicant.  It is recommended to define the component dependency for
+  wpa_supplicant on the component esp_wifi, i.e.  'idf_component_register(...
+  PRIV_REQUIRES esp_wifi)' in the CMakeLists.txt of wpa_supplicant, and
+  specify the included directory as idf_component_register(...
+  PRIV_INCLUDE_DIRS <dir relative to component>) in the CMakeLists.txt of
+  component esp_wifi.
+Call Stack (most recent call first):
+  /Users/michaelbanda/esp/esp-idf-v6.1-rc1/tools/cmake/component_validation.cmake:130 (__component_validation_check_include_dirs)
+  /Users/michaelbanda/esp/esp-idf-v6.1-rc1/CMakeLists.txt:356 (__component_validation_run_checks)
+
+
+CMake Warning at /Users/michaelbanda/esp/esp-idf-v6.1-rc1/tools/cmake/component_validation.cmake:106 (message):
+  Private include directory
+  '/Users/michaelbanda/esp/esp-idf-v6.1-rc1/components/esp_wifi/wifi_apps/include/apps_private'
+  belongs to component esp_wifi but is being used by component
+  wpa_supplicant.  It is recommended to define the component dependency for
+  wpa_supplicant on the component esp_wifi, i.e.  'idf_component_register(...
+  PRIV_REQUIRES esp_wifi)' in the CMakeLists.txt of wpa_supplicant, and
+  specify the included directory as idf_component_register(...
+  PRIV_INCLUDE_DIRS <dir relative to component>) in the CMakeLists.txt of
+  component esp_wifi.
+Call Stack (most recent call first):
+  /Users/michaelbanda/esp/esp-idf-v6.1-rc1/tools/cmake/component_validation.cmake:130 (__component_validation_check_include_dirs)
+  /Users/michaelbanda/esp/esp-idf-v6.1-rc1/CMakeLists.txt:356 (__component_validation_run_checks)
+
+
+CMake Warning at /Users/michaelbanda/esp/esp-idf-v6.1-rc1/tools/cmake/component_validation.cmake:106 (message):
+  Private include directory
+  '/Users/michaelbanda/esp/esp-idf-v6.1-rc1/components/wpa_supplicant/src'
+  belongs to component wpa_supplicant but is being used by component
+  esp_wifi.  It is recommended to define the component dependency for
+  esp_wifi on the component wpa_supplicant, i.e.  'idf_component_register(...
+  PRIV_REQUIRES wpa_supplicant)' in the CMakeLists.txt of esp_wifi, and
+  specify the included directory as idf_component_register(...
+  PRIV_INCLUDE_DIRS <dir relative to component>) in the CMakeLists.txt of
+  component wpa_supplicant.
+Call Stack (most recent call first):
+  /Users/michaelbanda/esp/esp-idf-v6.1-rc1/tools/cmake/component_validation.cmake:130 (__component_validation_check_include_dirs)
+  /Users/michaelbanda/esp/esp-idf-v6.1-rc1/CMakeLists.txt:356 (__component_validation_run_checks)
+
+
+CMake Warning at /Users/michaelbanda/esp/esp-idf-v6.1-rc1/tools/cmake/component_validation.cmake:106 (message):
+  Private include directory
+  '/Users/michaelbanda/esp/esp-idf-v6.1-rc1/components/wpa_supplicant/esp_supplicant/src'
+  belongs to component wpa_supplicant but is being used by component
+  esp_wifi.  It is recommended to define the component dependency for
+  esp_wifi on the component wpa_supplicant, i.e.  'idf_component_register(...
+  PRIV_REQUIRES wpa_supplicant)' in the CMakeLists.txt of esp_wifi, and
+  specify the included directory as idf_component_register(...
+  PRIV_INCLUDE_DIRS <dir relative to component>) in the CMakeLists.txt of
+  component wpa_supplicant.
+Call Stack (most recent call first):
+  /Users/michaelbanda/esp/esp-idf-v6.1-rc1/tools/cmake/component_validation.cmake:130 (__component_validation_check_include_dirs)
+  /Users/michaelbanda/esp/esp-idf-v6.1-rc1/CMakeLists.txt:356 (__component_validation_run_checks)
+
+

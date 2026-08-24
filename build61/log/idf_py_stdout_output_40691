@@ -1,0 +1,55 @@
+Command: ninja all
+[1/5] cd /Users/michaelbanda/Nextcloud/www/ESP32-C5/esp32-c5-zigbee-ha-native/build61 && /Users/michaelbanda/.espressif/python_env/idf6.1_py3.14_env/bin/python /Users/michaelbanda/esp/esp-idf-v6.1-rc1/components/partition_table/check_sizes.py --offset 0x8000 partition --type app /Users/michaelbanda/Nextcloud/www/ESP32-C5/esp32-c5-zigbee-ha-native/build61/partition_table/partition-table.bin /Users/michaelbanda/Nextcloud/www/ESP32-C5/esp32-c5-zigbee-ha-native/build61/esp32_c5_zigbee2mqtt.bin
+esp32_c5_zigbee2mqtt.bin binary size 0x28c810 bytes. Smallest app partition is 0x400000 bytes. 0x1737f0 bytes (36%) free.
+[2/5] Performing build step for 'bootloader'
+[1/1] cd /Users/michaelbanda/Nextcloud/www/ESP32-C5/esp32-c5-zigbee-ha-native/build61/bootloader && /Users/michaelbanda/.espressif/python_env/idf6.1_py3.14_env/bin/python /Users/michaelbanda/esp/esp-idf-v6.1-rc1/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x2000 /Users/michaelbanda/Nextcloud/www/ESP32-C5/esp32-c5-zigbee-ha-native/build61/bootloader/bootloader.bin
+Bootloader binary size 0x56f0 bytes. 0x910 bytes (9%) free.
+[3/5] No install step for 'bootloader'
+[4/5] Completed 'bootloader'
+[5/5] cd /Users/michaelbanda/Nextcloud/www/ESP32-C5/esp32-c5-zigbee-ha-native/build61 && /Users/michaelbanda/Nextcloud/www/ESP32-C5/esp32-c5-zigbee-ha-native/build61/littlefs_py_venv/bin/littlefs-python create /Users/michaelbanda/Nextcloud/www/ESP32-C5/esp32-c5-zigbee-ha-native/build61/lfs_root /Users/michaelbanda/Nextcloud/www/ESP32-C5/esp32-c5-zigbee-ha-native/build61/spiffs.bin -v --fs-size=0x6df000 --name-max=64 --block-size=4096
+LittleFS Configuration:
+  Block Size:       4096  /  0x1000
+  Image Size:    7204864  /  0x6DF000
+  Block Count:      1759
+  Name Max:           64
+  Image:       /Users/michaelbanda/Nextcloud/www/ESP32-C5/esp32-c5-zigbee-ha-native/build61/spiffs.bin
+Adding Directory: converters
+Adding File:      converters/ikea_of_sweden.json
+Adding File:      converters/_other_5.json
+Adding File:      converters/nue_3a.json
+Adding File:      converters/profiles_5.json
+Adding File:      converters/smabit_bitron_video.json
+Adding File:      converters/profiles_4.json
+Adding File:      converters/_other_4.json
+Adding File:      converters/lumi.json
+Adding File:      converters/_other_8.json
+Adding File:      converters/_other_3.json
+Adding File:      converters/heiman.json
+Adding File:      converters/profiles_3.json
+Adding File:      converters/namron.json
+Adding File:      converters/efekta.json
+Adding File:      converters/profiles_2.json
+Adding File:      converters/philips_2.json
+Adding File:      converters/_other_2.json
+Adding File:      converters/profiles_1.json
+Adding File:      converters/adeo.json
+Adding File:      converters/philips_1.json
+Adding File:      converters/_other_1.json
+Adding File:      converters/osram.json
+Adding File:      converters/ledvance.json
+Adding File:      converters/sunricher.json
+Adding File:      converters/gledopto.json
+Adding File:      converters/profiles_0.json
+Adding File:      converters/schneider_electric.json
+Adding File:      converters/profiles_7.json
+Adding File:      converters/ikea.json
+Adding File:      converters/sonoff.json
+Adding File:      converters/tuya.json
+Adding File:      converters/_other_7.json
+Adding File:      converters/index.json
+Adding File:      converters/_other_6.json
+Adding File:      converters/tze200.json
+Adding File:      converters/profiles_6.json
+Adding File:      converters/slacky_diy.json
+Adding File:      converters/paulmann_licht_gmbh.json
+Adding File:      converters/innr.json
