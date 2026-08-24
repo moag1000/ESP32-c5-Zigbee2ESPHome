@@ -19,6 +19,7 @@
 
 #include "esphome_gateway_services.h"
 #include "esphome_services.h"
+#include "ota/converter_db_ota.h"
 #include "core/device/device_registry.h"
 #include "core/device/unified_device.h"
 #include "zigbee/zb_coordinator.h"
@@ -159,6 +160,31 @@ static esp_err_t svc_reconfigure_device(const esphome_service_arg_value_t *args,
     return zb_interview_start(ieee, short_addr);
 }
 
+
+/**
+ * @brief Replace the converter database from an HTTP directory
+ *
+ * The application OTA on port 3232 updates the firmware and leaves the device
+ * database exactly as it was — it lives in its own partition. This is the other
+ * half, and it takes a directory URL rather than a file: index.json is fetched
+ * first and names the rest, the same layout the gateway reads locally.
+ *
+ * The work happens on its own task; this returns as soon as it has started, and
+ * the Converter DB Status text sensor carries the outcome.
+ */
+static esp_err_t svc_update_converter_db(const esphome_service_arg_value_t *args,
+                                         size_t arg_count, void *user_data)
+{
+    (void)user_data;
+    if (arg_count < 1 || args[0].string_value[0] == '\0') {
+        ESP_LOGW(TAG, "update_converter_db called without a URL");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    ESP_LOGI(TAG, "update_converter_db('%s') from Home Assistant", args[0].string_value);
+    return converter_db_ota_start(args[0].string_value);
+}
+
 /* ============================================================================
  * Registration
  * ============================================================================ */
@@ -205,6 +231,7 @@ esp_err_t esphome_gateway_services_register(void)
         {"permit_join",        svc_permit_join,        "duration", ESPHOME_SERVICE_ARG_INT},
         {"remove_device",      svc_remove_device,      "device",   ESPHOME_SERVICE_ARG_STRING},
         {"reconfigure_device", svc_reconfigure_device, "device",   ESPHOME_SERVICE_ARG_STRING},
+        {"update_converter_db", svc_update_converter_db, "url",    ESPHOME_SERVICE_ARG_STRING},
     };
 
     for (size_t i = 0; i < sizeof(services) / sizeof(services[0]); i++) {
@@ -219,4 +246,5 @@ esp_err_t esphome_gateway_services_register(void)
              esphome_service_get_count());
 
     return first_error;
+
 }

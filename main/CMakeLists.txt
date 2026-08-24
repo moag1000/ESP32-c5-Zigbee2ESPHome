@@ -101,6 +101,7 @@ set(COMPONENT_SRCS
     "utils/version.c"
     "ota/ota_handler.c"
     "ota/http_ota.c"
+    "ota/converter_db_ota.c"
     "ota/mqtt_ota.c"
     "esphome/esphome_api.c"
     "esphome/esphome_api_server.c"
