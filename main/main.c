@@ -15,6 +15,7 @@
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
 #include "esp_system.h"
+#include "esp_ota_ops.h"
 #include "esp_log.h"
 #include "esp_chip_info.h"
 #include "esp_flash.h"
@@ -1373,6 +1374,33 @@ skip_mqtt:
                 ESP_LOGI(TAG_MAIN, "ESPHome API started (port=%d, mdns=%s)",
                          CONFIG_ESPHOME_API_PORT,
                          CONFIG_ESPHOME_MDNS_ENABLE ? "yes" : "no");
+
+                /* This image works well enough to be replaced, so tell the
+                 * bootloader to keep it.
+                 *
+                 * With rollback enabled an OTA image boots as
+                 * ESP_OTA_IMG_PENDING_VERIFY and is reverted at the next restart
+                 * unless something confirms it. The only confirmation in this
+                 * firmware sat behind `config->ota_enabled && ota_url` — behind
+                 * HTTP OTA being configured — so an image pushed over the ESPHome
+                 * OTA port would have been taken back silently, and the update
+                 * would have looked like it had worked.
+                 *
+                 * Confirming at this point rather than at startup makes the
+                 * criterion "Wi-Fi is up and the API is listening", which is
+                 * precisely what installing a further update requires. An image
+                 * that cannot manage that is one the bootloader should undo. */
+                {
+                    const esp_partition_t *running = esp_ota_get_running_partition();
+                    esp_ota_img_states_t ota_state;
+                    if (running != NULL &&
+                        esp_ota_get_state_partition(running, &ota_state) == ESP_OK &&
+                        ota_state == ESP_OTA_IMG_PENDING_VERIFY) {
+                        esp_err_t mv = esp_ota_mark_app_valid_cancel_rollback();
+                        ESP_LOGW(TAG_OTA, "New image confirmed, rollback cancelled: %s",
+                                 esp_err_to_name(mv));
+                    }
+                }
 
 #if CONFIG_BT_SCANNER_ENABLED
                 /* Initialize BLE Proxy only if BLE stack is available */

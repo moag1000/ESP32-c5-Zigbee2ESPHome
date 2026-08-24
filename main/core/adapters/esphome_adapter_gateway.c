@@ -21,6 +21,7 @@
 #include "wifi/wifi_manager.h"
 #include "core/monitoring/crash_reporter.h"
 #include "esphome/esphome_entities.h"
+#include "ota/converter_db_ota.h"
 #include "esphome/esphome_entities_types.h"
 #include "esphome/esphome_ota.h"
 #include "zigbee/zb_coordinator.h"
@@ -99,6 +100,7 @@ static const char *TAG = "gw_entities";
 #define GW_KEY_BLE_STATUS          0x4000001F
 #define GW_KEY_BLE_DEVICES         0x40000020
 #define GW_KEY_CURRENT_TIME        0x40000021
+#define GW_KEY_DB_OTA_STATUS       0x40000022
 #endif
 
 /* ============================================================================
@@ -548,6 +550,25 @@ esp_err_t esphome_adapter_gateway_register(void)
         strncpy(cfg.name, "Coordinator State", sizeof(cfg.name) - 1);
         snprintf(cfg.unique_id, sizeof(cfg.unique_id), "zbgw_coordinator_state");
         strncpy(cfg.icon, "mdi:access-point-network", sizeof(cfg.icon) - 1);
+        cfg.disabled_by_default = false;
+        esphome_entity_register_text_sensor(&cfg);
+    }
+
+    /* --- Converter DB Update TextSensor (diagnostic) ---
+     *
+     * update_converter_db() runs on its own task and reports what happened
+     * through converter_db_ota_status(). Nothing read that string, so a failed
+     * database update looked exactly like a successful one from Home Assistant:
+     * the service call returned, and the only account of what went wrong went
+     * to a serial console nobody was attached to. */
+    {
+        esphome_text_sensor_config_t cfg = {0};
+        cfg.key = GW_KEY_DB_OTA_STATUS;
+        cfg.device_id = 0;
+        strncpy(cfg.name, "Converter DB Update", sizeof(cfg.name) - 1);
+        snprintf(cfg.unique_id, sizeof(cfg.unique_id), "zbgw_db_ota_status");
+        strncpy(cfg.icon, "mdi:database-sync", sizeof(cfg.icon) - 1);
+        cfg.entity_category = 2;  /* DIAGNOSTIC */
         cfg.disabled_by_default = false;
         esphome_entity_register_text_sensor(&cfg);
     }
@@ -1051,6 +1072,9 @@ void esphome_adapter_gateway_update_state(void)
     } else {
         esphome_entity_update_text_sensor(GW_KEY_COORDINATOR_STATE, "unknown");
     }
+
+    /* Converter database update status */
+    esphome_entity_update_text_sensor(GW_KEY_DB_OTA_STATUS, converter_db_ota_status());
 
     /* Permit join state */
     esphome_entity_update_switch(GW_KEY_PERMIT_JOIN, zb_coordinator_is_permit_join_enabled());

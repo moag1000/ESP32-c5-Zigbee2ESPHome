@@ -359,3 +359,7 @@ CONFIG_ESPHOME_API_MAX_CLIENTS=4
 # someone walks over with a USB cable".
 CONFIG_ESP_TASK_WDT_PANIC=y
 CONFIG_ESP_TASK_WDT_TIMEOUT_S=30
+
+# A bad OTA image is taken back by the bootloader unless the firmware
+# confirms it, which main.c does once Wi-Fi and the ESPHome API are up.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y

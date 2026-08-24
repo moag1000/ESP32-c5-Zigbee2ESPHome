@@ -24,7 +24,9 @@ static const char *TAG = "DB_OTA";
 
 /** Longest single file the database produces is index.json at about 133 KB. */
 #define DB_OTA_MAX_FILE_BYTES   (512 * 1024)
-#define DB_OTA_HTTP_TIMEOUT_MS  20000
+#define DB_OTA_HTTP_TIMEOUT_MS  10000
+/** How many consecutive quiet reads to sit through before calling it dead. */
+#define DB_OTA_MAX_STALLS       6
 #define DB_OTA_TASK_STACK       8192
 #define DB_OTA_TASK_PRIO        4
 #define DB_OTA_URL_MAX          192
@@ -99,12 +101,14 @@ static esp_err_t fetch_file(const char *name, char **out_body, size_t *out_len)
     int status = esp_http_client_get_status_code(client);
     if (status != 200) {
         ESP_LOGW(TAG, "%s: HTTP %d", name, status);
+        set_status("%.24s: HTTP %d", name, status);
         esp_http_client_close(client);
         esp_http_client_cleanup(client);
         return ESP_ERR_NOT_FOUND;
     }
     if (len <= 0 || len > DB_OTA_MAX_FILE_BYTES) {
         ESP_LOGW(TAG, "%s: length %lld is outside what can be read", name, (long long)len);
+        set_status("%.24s: length %lld rejected", name, (long long)len);
         esp_http_client_close(client);
         esp_http_client_cleanup(client);
         return ESP_ERR_INVALID_SIZE;
@@ -117,22 +121,41 @@ static esp_err_t fetch_file(const char *name, char **out_body, size_t *out_len)
         return ESP_ERR_NO_MEM;
     }
 
-    /* read_response(), not read().
+    /* Neither read() nor read_response() on their own.
      *
-     * esp_http_client_read() returns 0 whenever nothing has arrived yet, which
-     * on a link losing most of its packets is nearly always — treating that as
-     * the end of the body stopped the first attempt after 1245 of 134381 bytes
-     * and reported the file as unfetchable. read_response() keeps going until
-     * the buffer is full or the response really is finished. */
-    int got = esp_http_client_read_response(client, body, (int)len);
-    if (got < 0) {
-        got = 0;
+     * esp_http_client_read() returns -ESP_ERR_HTTP_EAGAIN when the socket had
+     * nothing ready inside timeout_ms, which on a radio shared with Zigbee is a
+     * normal pause rather than the end of the body. esp_http_client_read_response()
+     * loops over read() but returns the moment it sees anything <= 0, EAGAIN
+     * included — so one quiet moment truncated the whole file and the first
+     * attempt stopped after 1245 of 134381 bytes.
+     *
+     * Loop here instead and treat a stall as "keep waiting", bounded so that a
+     * connection which really has died still ends the run. */
+    int got = 0;
+    int stalls = 0;
+    while (got < (int)len) {
+        int r = esp_http_client_read(client, body + got, (int)len - got);
+        if (r > 0) {
+            got += r;
+            stalls = 0;
+            continue;
+        }
+        if (r == -ESP_ERR_HTTP_EAGAIN && ++stalls <= DB_OTA_MAX_STALLS) {
+            ESP_LOGD(TAG, "%s: quiet at %d of %lld, waiting (%d/%d)",
+                     name, got, (long long)len, stalls, DB_OTA_MAX_STALLS);
+            continue;
+        }
+        ESP_LOGW(TAG, "%s: read returned %d at %d of %lld bytes",
+                 name, r, got, (long long)len);
+        break;
     }
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
 
     if (got != (int)len) {
         ESP_LOGW(TAG, "%s: %d of %lld bytes", name, got, (long long)len);
+        set_status("%.24s: got %d of %lld bytes", name, got, (long long)len);
         mem_ng_free(body);
         return ESP_ERR_INVALID_SIZE;
     }

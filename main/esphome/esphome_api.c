@@ -608,6 +608,19 @@ esp_err_t esphome_api_start(void)
 
     s_api.running = true;
 
+    /* Forward ESP_LOG output to subscribed clients.
+     *
+     * This was written, declared and then never called, so SubscribeLogsRequest
+     * set a flag nothing ever read: Home Assistant's log view for this device
+     * stayed empty and a failure that only logs left no trace anywhere off the
+     * board. It is safe from the caller's stack — esphome_log_vprintf() uses
+     * 288 bytes of it — and cannot recurse, because the send path contains no
+     * ESP_LOG call of its own. */
+    esp_err_t log_err = esphome_api_register_log_handler();
+    if (log_err != ESP_OK) {
+        ESP_LOGW(TAG, "Log forwarding unavailable: %s", esp_err_to_name(log_err));
+    }
+
     /* Start server task with PSRAM stack (saves ~4KB internal RAM) */
     esp_err_t err = psram_task_create(
         esphome_api_server_task,
