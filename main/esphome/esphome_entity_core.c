@@ -91,6 +91,12 @@ esp_err_t esphome_entities_init(void)
     /* Storage goes to PSRAM: 53.9 KB that internal RAM does not have to spare.
      * mem_ng_calloc zeroes it, which the per-array memsets below then repeat
      * harmlessly and explicitly. */
+    ESP_LOGI(TAG, "Entity table: %u bytes in PSRAM (%d sensors, %d binary, %d switches, "
+             "%d text, %d numbers, %d buttons, %d selects)",
+             (unsigned)sizeof(esphome_entity_state_t),
+             ESPHOME_MAX_SENSORS, ESPHOME_MAX_BINARY_SENSORS, ESPHOME_MAX_SWITCHES,
+             ESPHOME_MAX_TEXT_SENSORS, ESPHOME_MAX_NUMBERS, ESPHOME_MAX_BUTTONS,
+             ESPHOME_MAX_SELECTS);
     s_entities = mem_ng_calloc(1, sizeof(esphome_entity_state_t), MEM_CAP_PSRAM);
     if (!s_entities) {
         ESP_LOGE(TAG, "Failed to allocate %zu bytes of entity storage",

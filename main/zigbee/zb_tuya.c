@@ -11,6 +11,7 @@
  */
 
 #include "zb_tuya.h"
+#include "converter/zb_converter.h"
 #include "tuya/tuya_driver_registry.h"
 #include "tuya/tuya_device_driver.h"
 #include "zb_device_handler_types.h"
@@ -475,6 +476,12 @@ esp_err_t zb_tuya_handle_command(uint16_t short_addr, uint8_t endpoint,
     tuya_dp_t dp;
     esp_err_t ret;
 
+    /* Where the [seq:2][dp_id][type][len:2][data] run starts. The long header
+     * puts a status byte in front of it; the short one does not. Converter
+     * functions are written against the short layout, so this is how far to
+     * advance before handing the frame on. */
+    size_t dp_offset = 1;
+
     switch (cmd_id) {
         case 0x00:  /* DP Report (gateway -> device response) */
         case 0x01:  /* DP Set (device -> gateway, report after set) */
@@ -498,6 +505,7 @@ esp_err_t zb_tuya_handle_command(uint16_t short_addr, uint8_t endpoint,
             if (ret != ESP_OK) {
                 ret = zb_tuya_parse_dp_short(data, len, &dp);
                 if (ret == ESP_OK) {
+                    dp_offset = 0;   /* no status byte in front */
                     ESP_LOGD(TAG, "Tuya cmd 0x%02X from 0x%04X used the short header",
                              cmd_id, short_addr);
                 }
@@ -567,9 +575,24 @@ esp_err_t zb_tuya_handle_command(uint16_t short_addr, uint8_t endpoint,
             /* Publish updated state via driver */
             device_state_publish_tuya(short_addr);
         }
-    } else {
-        ESP_LOGD(TAG, "No driver for Tuya device 0x%04X, DP %d ignored",
-                 short_addr, dp.dp_id);
+    } else if (len > dp_offset) {
+        /* No driver — which is every device served by the converter database,
+         * i.e. all but the Fingerbot. Their from_zigbee entries point at
+         * fz_tuya_dp and were never reached: this path stopped here with a
+         * debug line, so those devices were write-only. Commands worked,
+         * nothing they reported ever became state, and a change made at the
+         * device itself was invisible in Home Assistant.
+         *
+         * fz_tuya_dp() parses [seq:2][dp_id][type][len:2][data] itself, which
+         * is the frame from dp_offset on. Attribute 0xFFFF is the wildcard the
+         * database uses for these entries. */
+        esp_err_t conv_ret = zb_converter_handle_report(
+            short_addr, endpoint, ZB_TUYA_CLUSTER_ID, 0xFFFF,
+            data + dp_offset, len - dp_offset, 0);
+        if (conv_ret != ESP_OK) {
+            ESP_LOGD(TAG, "No converter took DP %d from 0x%04X",
+                     dp.dp_id, short_addr);
+        }
     }
 
     /* Update last seen */

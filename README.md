@@ -33,7 +33,7 @@ What follows from that:
   Wi-Fi and MQTT. With the network gone, paired devices stay reachable.
 - **Devices are real HA devices**, with entities sorted into Controls,
   Configuration and Diagnostic — not MQTT topics plus discovery payloads.
-- **6801 device definitions loaded at runtime** from LittleFS, replaceable
+- **8481 device definitions loaded at runtime** from LittleFS, replaceable
   without recompiling.
 
 ## Install
@@ -45,7 +45,7 @@ esptool --chip esp32c5 -p /dev/ttyUSB0 write-flash 0x0 \
     esp32c5-zigbee-esphome-<version>-merged.bin
 ```
 
-That contains bootloader, partition table, firmware and the 6801-device
+That contains bootloader, partition table, firmware and the 8481-device
 converter database. The board then brings up a **captive portal** — join the
 `ESP32-C5-Setup-XXXX` access point and enter your Wi-Fi credentials.
 
@@ -103,18 +103,30 @@ Measured on hardware (ESP32-C5, ESP-IDF v6.0.2):
 | | |
 |---|---|
 | Wi-Fi association | 25-27 s from boot, 0 failed attempts |
-| Devices in converter DB | 6801, from 1360 manufacturers |
+| Devices in converter DB | 8481, from 2559 manufacturers |
 | Internal heap, steady state | 82 KB free, BLE on |
 | Internal heap, low-water mark | 77 KB |
-| Test suite | 129 tests, on-device |
+| Test suite | 169 tests, on-device |
+| Entity capacity | about 15 Zigbee devices (190 KB table in PSRAM) |
 
 Known gaps, and they are real:
 
-- **Two devices, one network, one developer.** A Fingerbot Plus and an Aqara
-  vibration sensor. Everything else in the converter database is untested here.
-- **The Wi-Fi escalation has never been observed firing.** The watchdog that
-  restarts the driver, and reboots after three failures, is reviewed but not
-  demonstrated; that needs an access point to stay away for five minutes.
+- **Three devices, one network, one developer.** A Fingerbot Plus, an Aqara
+  vibration sensor and a Tuya siren. Everything else in the converter database
+  is untested here.
+- **Tuya devices were write-only until recently, and nothing said so.** Their
+  datapoint reports were parsed against the wrong header and then handed to a
+  driver table that only the Fingerbot is in, so every other Tuya device could
+  be commanded but never reported anything back. Commands went out as `sendData`
+  (0x04) for all of them, which is what one Fingerbot needs and what a siren
+  acknowledges and ignores. Both are fixed and both were invisible: the device
+  answers `OK` either way.
+- **The Wi-Fi escalation has now been seen through, once, end to end.** The
+  gateway lost its access point, the driver restart at five minutes changed
+  nothing, and the reboot that follows brought it back on its own — boot counter
+  32 to 33, reset reason `software`, roughly eleven minutes off the network with
+  nobody touching it. One observation, not a guarantee, and the underlying fault
+  is still below this firmware.
 - **GATT initializes but has not been tested** against a peripheral.
 - **Most testing runs in minutes.** Both of the worst faults found so far needed
   conditions a short test does not produce: one took nine hours of uptime, the
@@ -142,7 +154,7 @@ Known gaps, and they are real:
 | Broker required | no | yes (z2m) | no |
 | Runs on | ESP32-C5 alone | Pi/server + USB stick | ESP32-C6/H2/C5 |
 | Wi-Fi band vs Zigbee | **5 GHz uplink, 2.4 GHz Zigbee** | depends on host | shares 2.4 GHz |
-| Device definitions | 6801, runtime-loadable | thousands, mature | n/a |
+| Device definitions | 8481, runtime-loadable | thousands, mature | n/a |
 | Maturity | hobby project | production, years of it | official ESPHome |
 
 **Keywords**: ESP32-C5, Zigbee coordinator, ESPHome native API, Home Assistant,
@@ -155,6 +167,13 @@ dual-band Zigbee gateway, ESP-IDF, zigbee-herdsman-converters.
 direct binding, network topology and heal, availability tracking, backup and
 restore. Scenes, Touchlink and Zigbee OTA are complete but off by default
 (`CONFIG_ZB_SCENES_ENABLE`, `CONFIG_ZB_TOUCHLINK_ENABLE`, `CONFIG_ZB_OTA_ENABLE`).
+
+**Tuya** — the 0xEF00 datapoint protocol in both directions, with datapoint maps
+for 341 devices. Writes go out as `dataRequest`, matching
+zigbee-herdsman-converters, with `sendData` kept for the devices measured to
+need it. Link quality comes from the stack's neighbour table, so RSSI is a
+measurement rather than a number derived from LQI — an unheard device reads
+`unknown` instead of a confident -100 dBm.
 
 **Home Assistant** — ESPHome native API on port 6053 with Noise encryption,
 sub-devices, 15 entity types, entity categories, OTA on port 3232, and the

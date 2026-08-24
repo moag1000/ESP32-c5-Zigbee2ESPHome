@@ -291,40 +291,58 @@ extern "C" {
  * ============================================================================ */
 
 /** @brief Maximum number of sensor entities */
-#define ESPHOME_MAX_SENSORS             32
+/* Entity capacity.
+ *
+ * These were sized for a gateway with one or two Zigbee devices and were nearly
+ * full at exactly that: two devices used 30 of 32 sensors, 14 of 16 text
+ * sensors and 12 of 16 buttons, so a third would have been refused — a device
+ * that pairs, interviews and binds a converter, and then silently has no
+ * entities.
+ *
+ * The table is a single allocation in PSRAM, of which six megabytes sit idle,
+ * so the limit was never about memory. The numbers below hold roughly fifteen
+ * Zigbee devices.
+ *
+ * What they do cost is enumeration: Home Assistant reads every entity on each
+ * connect, and that transfer is the fragile part of this link — a timeout there
+ * leaves the device with no entities at all until it reconnects. More entities
+ * make that window longer. esphome_entity_init() logs the table's real size so
+ * the trade stays visible rather than assumed.
+ */
+#define ESPHOME_MAX_SENSORS             192
 
 /** @brief Maximum number of binary sensor entities */
-#define ESPHOME_MAX_BINARY_SENSORS      32
+#define ESPHOME_MAX_BINARY_SENSORS      64
 
 /** @brief Maximum number of switch entities */
-#define ESPHOME_MAX_SWITCHES            16
+#define ESPHOME_MAX_SWITCHES            48
 
 /** @brief Maximum number of text sensor entities */
-#define ESPHOME_MAX_TEXT_SENSORS        16
+#define ESPHOME_MAX_TEXT_SENSORS        64
 
 /** @brief Maximum number of number entities */
-#define ESPHOME_MAX_NUMBERS             16
+#define ESPHOME_MAX_NUMBERS             48
 
 /** @brief Maximum number of button entities */
-#define ESPHOME_MAX_BUTTONS             16
+#define ESPHOME_MAX_BUTTONS             96
 
 /** @brief Maximum number of select entities */
-#define ESPHOME_MAX_SELECTS             8
+#define ESPHOME_MAX_SELECTS             32
 
 /** @brief Maximum number of light entities */
-#define ESPHOME_MAX_LIGHTS              16
+#define ESPHOME_MAX_LIGHTS              32
 
 /** @brief Maximum number of cover entities */
-#define ESPHOME_MAX_COVERS              8
+#define ESPHOME_MAX_COVERS              16
 
 /** @brief Maximum number of fan entities */
-#define ESPHOME_MAX_FANS                8
+#define ESPHOME_MAX_FANS                16
 
 /** @brief Maximum number of climate entities */
-#define ESPHOME_MAX_CLIMATES            8
+#define ESPHOME_MAX_CLIMATES            16
 
 /** @brief Maximum number of lock entities */
-#define ESPHOME_MAX_LOCKS               8
+#define ESPHOME_MAX_LOCKS               16
 
 /** @brief Maximum number of media player entities */
 #define ESPHOME_MAX_MEDIA_PLAYERS       4
@@ -333,7 +351,7 @@ extern "C" {
 #define ESPHOME_MAX_ALARM_PANELS        4
 
 /** @brief Maximum number of text entities */
-#define ESPHOME_MAX_TEXTS               8
+#define ESPHOME_MAX_TEXTS               16
 
 /** @brief Maximum number of services */
 #define ESPHOME_MAX_SERVICES            16
