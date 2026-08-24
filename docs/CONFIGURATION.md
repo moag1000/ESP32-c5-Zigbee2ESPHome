@@ -64,7 +64,7 @@ cd ~/projects/esp32-c5-zigbee2mqtt
 idf.py menuconfig
 ```
 
-Navigate to: `ESP32-C5 Zigbee2MQTT Gateway Configuration`
+Navigate to: `ESP32-C5 Zigbee Gateway Configuration`
 
 ### WiFi Configuration
 

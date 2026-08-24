@@ -1409,7 +1409,7 @@ esp_err_t config_manager_init(void)
 ### Kconfig Menu Structure
 
 ```
-ESP32-C5 Zigbee2MQTT Gateway Configuration
+ESP32-C5 Zigbee Gateway Configuration
 ├── WiFi Configuration
 │   ├── WiFi SSID
 │   └── WiFi Password
