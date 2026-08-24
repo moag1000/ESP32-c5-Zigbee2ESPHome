@@ -1433,9 +1433,14 @@ def _parse_exposes_array(exposes_str):
         if not call:
             continue
 
-        m = re.match(r'(?:\w+\.)*e\.(\w+)\s*\(', call)
-        if not m:
-            m = re.match(r'e\.(\w+)\s*\(', call)
+        # Tolerant of how the source is actually written. Upstream formats long
+        # chains across lines, so a call can arrive as "e\n  .numeric(", and it
+        # uses two names for the same builders — `e.enum()` and
+        # `exposes.enum()`, plus `tuya.exposes.switch()`. A pattern demanding a
+        # literal "e." matched none of those: of 311 .withCategory()
+        # annotations inside exposes arrays, only 73 were ever seen, and the
+        # rest were skipped along with the whole expose they belonged to.
+        m = re.match(r'(?:\w+\s*\.\s*)*(?:e|exposes)\s*\.\s*(\w+)\s*\(', call)
         if not m:
             continue
         builder = m.group(1)
@@ -1444,7 +1449,8 @@ def _parse_exposes_array(exposes_str):
         if builder in EXPOSE_SEMANTIC:
             entry = dict(EXPOSE_SEMANTIC[builder])
         elif builder in EXPOSE_GENERIC:
-            name_m = re.match(r'(?:\w+\.)*e\.\w+\s*\(\s*["\']([^"\']+)["\']', call)
+            name_m = re.match(r'(?:\w+\s*\.\s*)*(?:e|exposes)\s*\.\s*\w+\s*\('
+                              r'\s*["\']([^"\']+)["\']', call)
             if not name_m:
                 continue
             acc = 1
@@ -1492,7 +1498,8 @@ def _parse_exposes_array(exposes_str):
         # with an empty option list is an entity nobody can use.
         if builder == "enum":
             opts = None
-            lit = re.search(r'e\.enum\(\s*["\'][^"\']+["\']\s*,\s*[^,]+,\s*\[(.*?)\]', call, re.S)
+            lit = re.search(r'(?:e|exposes)\s*\.\s*enum\(\s*["\'][^"\']+["\']'
+                            r'\s*,\s*[^,]+,\s*\[(.*?)\]', call, re.S)
             if lit:
                 opts = re.findall(r'["\']([^"\']+)["\']', lit.group(1))
             else:

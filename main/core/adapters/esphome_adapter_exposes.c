@@ -49,6 +49,8 @@ static uint8_t expose_entity_category(const zb_expose_t *expose)
     static const char *const diagnostic_props[] = {
         "battery", "voltage", "linkquality", "device_temperature",
         "power_outage_count", "battery_low", "tamper", "rssi", "lqi",
+        /* Same reading as "battery", under the name Tuya sirens use for it. */
+        "battpercentage",
     };
     for (size_t i = 0; i < sizeof(diagnostic_props) / sizeof(diagnostic_props[0]); i++) {
         if (expose->property && strcmp(expose->property, diagnostic_props[i]) == 0) {
@@ -61,6 +63,10 @@ static uint8_t expose_entity_category(const zb_expose_t *expose)
         "program_enable", "repeat_forever", "sustain_time",
         "down_movement", "up_movement", "power_on_behavior",
         "child_lock", "motion_sensitivity", "detection_interval",
+        /* A siren's settings. Which tune it plays, how loud and for how long
+         * are how it is set up, not what it is for — that is the alarm switch.
+         * Upstream annotates none of them, so there is nothing to inherit. */
+        "melody", "alarm_melody", "volume", "duration",
     };
     for (size_t i = 0; i < sizeof(config_props) / sizeof(config_props[0]); i++) {
         if (expose->property && strcmp(expose->property, config_props[i]) == 0) {

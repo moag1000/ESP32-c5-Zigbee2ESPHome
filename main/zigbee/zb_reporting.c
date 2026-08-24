@@ -635,6 +635,25 @@ esp_err_t zb_reporting_provision_device(uint16_t short_addr)
                  used ? list : "(none recorded)");
     }
 
+    /* Tuya devices keep their state in datapoints, not ZCL attributes, so none
+     * of the above reaches them — "0 attributes" is the correct outcome for
+     * such a device, not a failure. Ask for a datapoint dump instead.
+     *
+     * This runs here rather than in the EVT_DEVICE_INTERVIEWED handler because
+     * a device restored from NVS never runs an interview, so that event never
+     * fires for it. The query therefore only ever happened at pairing: after
+     * every reboot a Tuya device sat with whatever it had last reported and no
+     * way to be asked, which for the siren meant melody, volume and duration
+     * all reading 'unknown' until somebody set them again.
+     *
+     * Not enough for every device: the _TZ3210 Fingerbot Plus answers cmd 0x03
+     * with a Default Response and no datapoints, and dumps its values only
+     * after pairing or a mode change (see zb_tuya.h). */
+    if (device_zigbee_has_cluster(device, ZB_TUYA_CLUSTER_ID)) {
+        ESP_LOGI(TAG, "Querying Tuya datapoints from 0x%04X", short_addr);
+        zb_tuya_query_dp(short_addr, endpoint ? endpoint : 1);
+    }
+
     return configured > 0 ? ESP_OK : ESP_ERR_NOT_FOUND;
 }
 

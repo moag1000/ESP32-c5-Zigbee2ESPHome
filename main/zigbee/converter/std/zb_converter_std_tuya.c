@@ -172,8 +172,18 @@ esp_err_t fz_tuya_dp(const void *raw, size_t len, cJSON *json, const char *key)
                          dp_id, out_key, payload[0]);
             }
         } else {
-            cJSON_AddNumberToObject(json, out_key, payload[0]);
-            ESP_LOGD(TAG, "fz_tuya_dp: dp_%d -> '%s' (enum) = %d", dp_id, out_key, payload[0]);
+            /* No names for this enum, so the value is its own label — as a
+             * string, because that is what the entity holding it expects. The
+             * siren's melody is a select whose options are "1" through "18",
+             * and a number matches none of them: duration and volume came
+             * through while melody stayed empty, the only one of the three
+             * without a name list. zigbee-herdsman-converters builds the same
+             * options the same way, with .toString(). */
+            char enum_num[8];
+            snprintf(enum_num, sizeof(enum_num), "%u", (unsigned)payload[0]);
+            cJSON_AddStringToObject(json, out_key, enum_num);
+            ESP_LOGD(TAG, "fz_tuya_dp: dp_%d -> '%s' (enum) = \"%s\"",
+                     dp_id, out_key, enum_num);
         }
         break;
 

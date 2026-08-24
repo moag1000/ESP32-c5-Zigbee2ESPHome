@@ -90,12 +90,68 @@ def richness(dev):
     content is strictly better — there is no risk of preferring a wrong device,
     only of preferring a less complete description of the right one.
     """
+    exposes = dev.get("e") or []
+    # Annotations count. Two entries can declare the same exposes and differ in
+    # what they say about them: an entity category decides whether a setting
+    # lands in Home Assistant's Configuration section or clutters the controls,
+    # and an option list or a numeric range decides whether it can be used at
+    # all. Scoring only the number of exposes let a run with 92 categories beat
+    # one with 211.
+    annotated = sum(
+        1 for e in exposes
+        if e.get("cat") or e.get("sel") or e.get("num") or e.get("dc") or e.get("u")
+    )
     return (
         1 if dev.get("tuya_dp") else 0,
-        len(dev.get("e") or []),
+        len(exposes),
+        annotated,
         len(dev.get("fz") or []) + len(dev.get("tz") or []),
         1 if (dev.get("d") or "").strip() else 0,
     )
+
+
+
+# Annotations that describe an expose rather than create it.
+ANNOTATION_KEYS = ("cat", "sel", "num", "dc", "u", "sc", "icon")
+
+
+def graft_annotations(winner, loser):
+    """Copy annotations the winning entry lacks from the losing one.
+
+    The two extracts are good at different things: the older run decodes more
+    exposes, the current one — since it learned to read chained builders across
+    line breaks — carries three times the entity categories. Choosing one entry
+    whole meant taking its gaps with it, and the category is what decides
+    whether a setting lands in Home Assistant's Configuration section or sits
+    among the controls.
+
+    Only fields absent from the winner are filled, and only onto an expose with
+    the same property, so nothing that was decoded is overwritten by something
+    less specific.
+    """
+    if not winner.get("e") or not loser.get("e"):
+        return winner
+
+    by_prop = {}
+    for expose in loser["e"]:
+        prop = expose.get("p")
+        if prop:
+            by_prop.setdefault(prop, expose)
+
+    for expose in winner["e"]:
+        other = by_prop.get(expose.get("p"))
+        if other is None:
+            continue
+        for key in ANNOTATION_KEYS:
+            if key not in expose and key in other:
+                expose[key] = other[key]
+
+    if not (winner.get("d") or "").strip() and (loser.get("d") or "").strip():
+        winner["d"] = loser["d"]
+    if not winner.get("tuya_dp") and loser.get("tuya_dp"):
+        winner["tuya_dp"] = loser["tuya_dp"]
+
+    return winner
 
 
 def manufacturer_to_filename(manufacturer):
@@ -121,8 +177,10 @@ def main():
                 combined[key] = dev
                 added += 1
             elif richness(dev) > richness(combined[key]):
-                combined[key] = dev
+                combined[key] = graft_annotations(dev, combined[key])
                 replaced += 1
+            else:
+                combined[key] = graft_annotations(combined[key], dev)
         print(f"{path}: {len(found)} identities, {added} new, {replaced} richer")
 
     # Group by output file, not by manufacturer: the filename lowercases and

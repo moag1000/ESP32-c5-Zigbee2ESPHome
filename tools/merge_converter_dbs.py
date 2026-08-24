@@ -88,6 +88,52 @@ def apply_local_quirks(dev):
     return dev
 
 
+
+# Melody names for the NEO NAS-AB02B2 siren and its rebadges (MOES sells the
+# same hardware as ZSS-LO-SLA-U-EN).
+#
+# zigbee-herdsman-converters builds this device's melody list as bare numbers —
+# Array.from(Array(18).keys()).map((x) => (x + 1).toString()) — so the converter
+# database gets "1" through "18" and Home Assistant shows a dropdown of digits.
+# The names below are from the zigbee2mqtt device page for NAS-AB02B2, which
+# documents what each number actually plays. They are transcribed from that
+# page, not inferred from the hardware.
+#
+# https://www.zigbee2mqtt.io/devices/NAS-AB02B2.html
+NEO_SIREN_MANUFACTURERS = {
+    "_TZE200_t1blo2bj",
+    "_TZE204_t1blo2bj",
+    "_TZE204_q76rtoa9",
+}
+
+NEO_SIREN_MELODIES = [
+    "Fuer Elise", "Big Ben", "Ring Ring", "Lone Ranger", "Turkish March",
+    "High Pitch Siren", "Red Alert", "Cricket", "Beep Beep", "Dogs",
+    "Police", "Chime", "Phone Ring", "Firetruck", "Clock Chime",
+    "Alarm Clock", "Psycho", "Doorbell",
+]
+
+
+def apply_melody_names(dev):
+    """Give the siren's melody datapoint its documented names."""
+    if dev.get("mf") not in NEO_SIREN_MANUFACTURERS:
+        return dev
+
+    names = {name: i + 1 for i, name in enumerate(NEO_SIREN_MELODIES)}
+
+    dps = dev.get("tuya_dp") or {}
+    entry = dps.get("21")
+    if entry and entry.get("k") == "melody":
+        entry["t"] = "enum"
+        entry["v"] = names
+
+    for expose in dev.get("e") or []:
+        if expose.get("p") == "melody":
+            expose["sel"] = {"v": list(NEO_SIREN_MELODIES)}
+
+    return dev
+
+
 def normalize_manufacturer(mf):
     """Normalize manufacturer name to lowercase for matching."""
     return mf.strip().lower()
@@ -345,7 +391,8 @@ def write_output(merged_devices, output_dir, z2m_meta, zhq_meta):
     small_devs = []    # (mf_name, cleaned devices) to bundle
 
     for mf_name, devices in sorted(merged_devices.items()):
-        cleaned = [apply_local_quirks(sanitise_device(clean_device(d))) for d in devices]
+        cleaned = [apply_melody_names(apply_local_quirks(sanitise_device(clean_device(d))))
+                   for d in devices]
         est_size = len(json.dumps({"devices": cleaned}, separators=(',', ':')))
 
         if est_size >= BUNDLE_THRESHOLD:

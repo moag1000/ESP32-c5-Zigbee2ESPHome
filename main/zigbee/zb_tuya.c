@@ -501,14 +501,16 @@ esp_err_t zb_tuya_handle_command(uint16_t short_addr, uint8_t endpoint,
              *
              * Try the declared layout, fall back to the other, and if neither
              * fits, say so with the bytes attached rather than dropping them. */
-            ret = zb_tuya_parse_dp(data, len, &dp);
-            if (ret != ESP_OK) {
-                ret = zb_tuya_parse_dp_short(data, len, &dp);
-                if (ret == ESP_OK) {
-                    dp_offset = 0;   /* no status byte in front */
-                    ESP_LOGD(TAG, "Tuya cmd 0x%02X from 0x%04X used the short header",
-                             cmd_id, short_addr);
-                }
+            /* Short layout first, because that is what devices send. Trying
+             * the long one first worked — the short parse caught it on the
+             * rebound — but it logged "DP payload truncated" on the way past,
+             * on every single successful report. A warning that fires whenever
+             * things go right is worse than no warning at all. */
+            ret = zb_tuya_parse_dp_short(data, len, &dp);
+            if (ret == ESP_OK) {
+                dp_offset = 0;   /* no status byte in front */
+            } else {
+                ret = zb_tuya_parse_dp(data, len, &dp);
             }
             if (ret != ESP_OK) {
                 ESP_LOGW(TAG, "Tuya cmd 0x%02X from 0x%04X: %zu bytes fit neither header",
