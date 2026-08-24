@@ -67,6 +67,121 @@ Updating firmware later without touching the database:
 esptool --chip esp32c5 -p <port> write-flash 0x20000 <version>-app.bin
 ```
 
+## First run
+
+Written for a first flash, with no toolchain involved — the image from the
+releases page is all you need.
+
+**1. Get esptool.**
+
+```bash
+pip install esptool        # or: pipx install esptool
+```
+
+**2. Find the port.** Plug the board into USB.
+
+| | |
+|---|---|
+| macOS | `ls /dev/cu.usbmodem*` |
+| Linux | `ls /dev/ttyUSB* /dev/ttyACM*` |
+| Windows | Device Manager → Ports (COM & LPT) → `COMx` |
+
+Nothing showing up is more often the cable than the board — many USB cables
+carry power and no data.
+
+**3. Check what you downloaded.** Every release ships `SHA256SUMS`:
+
+```bash
+shasum -a 256 -c SHA256SUMS      # Linux: sha256sum -c SHA256SUMS
+```
+
+**4. Flash.**
+
+```bash
+esptool --chip esp32c5 -p <port> write-flash 0x0 \
+    esp32c5-zigbee-esphome-<version>-merged.bin
+```
+
+That is 16 MB and takes a couple of minutes. Most boards drop into download
+mode on their own; if esptool cannot connect, hold **BOOT**, tap **RESET**,
+let go of **BOOT**, and run it again.
+
+**5. Give it Wi-Fi.** The board knows no network yet, so it opens an **open**
+access point named `ESP32-C5-Setup-XXYY` — the last two bytes of its MAC. Join
+it and the setup page usually opens by itself; if it does not, go to
+**http://192.168.4.1/**.
+
+It asks for three things: the Wi-Fi network, its password, and an **encryption
+key** for Home Assistant. The 🎲 button beside the key field generates one in
+your browser — keep a copy, Home Assistant wants the same value in the next
+step.
+
+**6. Add it to Home Assistant.** The gateway announces itself over mDNS as
+`_esphomelib._tcp`, so **Settings → Devices & Services** should already be
+offering it as a discovered ESPHome device. If not, add **ESPHome** manually
+with the board's IP and port `6053`. Paste the encryption key when asked.
+
+**7. Pair a Zigbee device.** In **Developer Tools → Actions**:
+
+```yaml
+action: esphome.esp32c5_gateway_permit_join
+data:
+  duration: 120
+```
+
+Then put the device into pairing mode — usually a long press until it blinks.
+It joins as **its own device** in Home Assistant, not as extra entities on the
+gateway.
+
+### What the gateway can be told to do
+
+| service | argument | effect |
+|---|---|---|
+| `permit_join` | `duration` (seconds) | opens the network for new devices |
+| `remove_device` | `device` | unpairs a device and forgets it |
+| `reconfigure_device` | `device` | interviews the device again |
+| `update_converter_db` | `url` | fetches a new device database over HTTP |
+
+Prefix each with `esphome.` and the device name, e.g.
+`esphome.esp32c5_gateway_permit_join`.
+
+### Careful: what a full flash erases
+
+`write-flash 0x0` with the merged image writes all 16 MB, and that includes the
+partitions holding your settings and the Zigbee network itself:
+
+    nvs         0x9000     Wi-Fi credentials, encryption key
+    zb_storage  0x820000   the Zigbee network — every paired device
+
+So re-flashing the merged image starts over: the portal comes back and every
+device has to be paired again. To update **only the firmware** and keep all of
+it:
+
+```bash
+esptool --chip esp32c5 -p <port> write-flash 0x20000 <version>-app.bin
+```
+
+### When it does not go to plan
+
+**No `ESP32-C5-Setup-` network appears.** The portal only opens when the
+gateway has no working credentials. After an app-only update it still has the
+old ones and goes straight online — which is the point. Deliberately: it also
+stays away when the stored SSID has connected successfully before, because a
+slow access point is not a wrong password. Association here has taken anywhere
+from 7 to 372 seconds on the same network; give it a few minutes before
+concluding anything.
+
+**Home Assistant does not find it.** mDNS does not cross VLANs or subnets. Add
+the integration by hand with the IP and port `6053`.
+
+**It connects, then drops every so often.** Check the antenna first — see the
+hardware section. This is a single-SoC design sharing one RF path.
+
+**A device paired but shows few entities.** The gateway matches it against
+8407 definitions by manufacturer and model. An unknown device still works
+through a generic converter, just with less. `reconfigure_device` re-runs the
+interview, and `update_converter_db` pulls a newer database.
+
 ## Hardware
 
 **ESP32-C5 with 8 MB PSRAM and 16 MB flash.** All three matter:
@@ -77,11 +192,20 @@ esptool --chip esp32c5 -p <port> write-flash 0x20000 <version>-app.bin
 | **8 MB PSRAM** | the converter database, the entity table and all of cJSON live there. Without it internal RAM does not fit the firmware |
 | **16 MB flash** | 4 MB app partition plus a 7.2 MB LittleFS partition for the 4.9 MB device database |
 
-Reference board: **ESP32-C5-DevKitC-1** (the variant with PSRAM). Any C5 module
-with the same memory works; check the PSRAM, some C5 boards ship without.
+**Recommended module: ESP32-C5-WROOM-1U-N16R8.** The suffixes are the whole
+point. `N16` is 16 MB flash, `R8` is 8 MB PSRAM — the two numbers the table
+above asks for — and `U` is the variant with a u.FL connector for an **external
+antenna** instead of the printed one.
 
-An external antenna helps. Zigbee, Wi-Fi and BLE share one RF path, and this is
-a single-SoC design — see the honesty section below.
+The antenna is not decoration here. Zigbee, Wi-Fi and BLE share a single RF
+path on one SoC, and it is the Wi-Fi uplink that pays for it: when the link
+drops, Home Assistant loses the gateway while Zigbee carries on underneath. An
+external antenna is the cheapest thing that helps, and it is why the `1U` is
+worth picking over the `1`.
+
+Reference dev board: **ESP32-C5-DevKitC-1** (the PSRAM variant) — good for
+bringing the firmware up, and it carries the same module. Any C5 module with
+N16R8 works; check the PSRAM, some C5 boards ship without it.
 
 **Wiring**: none required for the gateway itself. The optional mmWave presence
 sensor (S3KM1110) is UART, pins in `CONFIG_MMWAVE_*`.
