@@ -48,7 +48,8 @@ typedef struct {
  * ============================================================================ */
 
 typedef struct {
-    const char *model;              /* interned — cache key */
+    const char *manufacturer;       /* interned — part of the cache key */
+    const char *model;              /* interned — part of the cache key */
     zb_converter_def_t *def;        /* heap-allocated definition */
 } cache_entry_t;
 
@@ -757,10 +758,26 @@ static const char *find_filename(const char *manufacturer)
  * Internal: search cache
  * ============================================================================ */
 
-static const zb_converter_def_t *cache_lookup(const char *model)
+static bool cache_key_equal(const char *a, const char *b)
+{
+    if (a == NULL || b == NULL) {
+        return a == b;
+    }
+    return strcmp(a, b) == 0;
+}
+
+/**
+ * @brief Look a converter up by manufacturer and model
+ *
+ * Both halves are the key. Keyed on the model alone, the first Tuya "TS0601"
+ * to be looked up answered for every other one — and that is most of the Tuya
+ * catalogue.
+ */
+static const zb_converter_def_t *cache_lookup(const char *manufacturer, const char *model)
 {
     for (size_t i = 0; i < s_cache_count; i++) {
-        if (s_cache[i].model && strcmp(s_cache[i].model, model) == 0) {
+        if (s_cache[i].model && strcmp(s_cache[i].model, model) == 0 &&
+            cache_key_equal(s_cache[i].manufacturer, manufacturer)) {
             return s_cache[i].def;
         }
     }
@@ -771,7 +788,8 @@ static const zb_converter_def_t *cache_lookup(const char *model)
  * Internal: add to cache
  * ============================================================================ */
 
-static void cache_add(const char *model, zb_converter_def_t *def)
+static void cache_add(const char *manufacturer, const char *model,
+                      zb_converter_def_t *def)
 {
     if (s_cache_count >= MAX_CACHED_CONVERTERS) {
         /* Evict oldest (index 0), shift everything down */
@@ -801,6 +819,8 @@ static void cache_add(const char *model, zb_converter_def_t *def)
     entry_bytes += def->expose_count * sizeof(zb_expose_t);
     entry_bytes += def->tuya_dp_count * sizeof(tuya_dp_entry_t);
 
+    s_cache[s_cache_count].manufacturer =
+        (manufacturer != NULL && manufacturer[0] != '\0') ? string_intern(manufacturer) : NULL;
     s_cache[s_cache_count].model = string_intern(model);
     s_cache[s_cache_count].def = def;
     s_cache_count++;
@@ -885,7 +905,30 @@ bool zb_converter_loader_is_available(void)
  * @brief Load and search a single JSON file for a model.
  * @return Parsed converter definition, or NULL if not found.
  */
-static zb_converter_def_t *load_model_from_file(const char *path, const char *model)
+/**
+ * @brief Does this entry's manufacturer field match the device's?
+ *
+ * The database mixes exact ids ("_TZE204_rkbxtclc") with prefixes ("_TZE200"),
+ * which is why an entry is allowed to be a prefix of what the device reports.
+ */
+static bool manufacturer_matches(const char *entry_mf, const char *manufacturer, bool exact_only)
+{
+    if (entry_mf == NULL || manufacturer == NULL || manufacturer[0] == '\0') {
+        return false;
+    }
+    if (strcmp(entry_mf, manufacturer) == 0) {
+        return true;
+    }
+    if (exact_only) {
+        return false;
+    }
+    size_t elen = strlen(entry_mf);
+    return elen >= 4 && entry_mf[0] == '_' && strncmp(entry_mf, manufacturer, elen) == 0;
+}
+
+static zb_converter_def_t *load_model_from_file(const char *path,
+                                                const char *manufacturer,
+                                                const char *model)
 {
     size_t file_len = 0;
     char *json_str = read_file_to_psram(path, &file_len);
@@ -905,13 +948,49 @@ static zb_converter_def_t *load_model_from_file(const char *path, const char *mo
         return NULL;
     }
 
+    /* Three passes, most specific first.
+     *
+     * Matching on the model alone was enough to bind the wrong device: Tuya
+     * ships hundreds of unrelated products — thermostats, blind motors,
+     * sensors, switches — all reporting model "TS0601", and they are told apart
+     * only by the manufacturer id. _other_16.json holds both _TZE204_rkbxtclc
+     * and _TZE204_t1blo2bj under that model, so whichever came first in the
+     * array won for both, and a device was presented in Home Assistant as
+     * something it is not.
+     *
+     * The manufacturer picked the file and was then discarded. It is used here
+     * too now — but the model-only pass stays as a last resort, because the
+     * index maps some devices to a file through a vendor name the device never
+     * reports, and those matches were working. */
     zb_converter_def_t *found = NULL;
     cJSON *dev_json = NULL;
-    cJSON_ArrayForEach(dev_json, devices) {
-        cJSON *m = cJSON_GetObjectItem(dev_json, "m");
-        if (m && cJSON_IsString(m) && strcmp(cJSON_GetStringValue(m), model) == 0) {
+
+    for (int pass = 0; pass < 3 && found == NULL; pass++) {
+        cJSON_ArrayForEach(dev_json, devices) {
+            cJSON *m = cJSON_GetObjectItem(dev_json, "m");
+            if (m == NULL || !cJSON_IsString(m) ||
+                strcmp(cJSON_GetStringValue(m), model) != 0) {
+                continue;
+            }
+
+            if (pass < 2) {
+                cJSON *mf = cJSON_GetObjectItem(dev_json, "mf");
+                const char *entry_mf = (mf && cJSON_IsString(mf))
+                                       ? cJSON_GetStringValue(mf) : NULL;
+                if (!manufacturer_matches(entry_mf, manufacturer, pass == 0)) {
+                    continue;
+                }
+            }
+
             found = zb_converter_loader_parse_device(dev_json);
-            break;
+            if (found != NULL) {
+                if (pass == 2 && manufacturer != NULL && manufacturer[0] != '\0') {
+                    ESP_LOGW(TAG, "No entry for manufacturer '%s' with model '%s' — "
+                             "using the first '%s' in %s instead",
+                             manufacturer, model, model, path);
+                }
+                break;
+            }
         }
     }
 
@@ -932,7 +1011,7 @@ const zb_converter_def_t *zb_converter_loader_find(
     }
 
     /* Check cache first */
-    const zb_converter_def_t *cached = cache_lookup(model);
+    const zb_converter_def_t *cached = cache_lookup(manufacturer, model);
     if (cached != NULL) {
         xSemaphoreGive(s_mutex);
         ESP_LOGD(TAG, "Cache hit: %s", model);
@@ -949,7 +1028,7 @@ const zb_converter_def_t *zb_converter_loader_find(
         /* Direct lookup: load manufacturer's file and search for model */
         char path[80];
         snprintf(path, sizeof(path), "%s/%s", CONVERTER_DB_PATH, filename);
-        found_def = load_model_from_file(path, model);
+        found_def = load_model_from_file(path, manufacturer, model);
     }
 
     /* Fallback: manufacturer known but not in index, or model not in expected file.
@@ -996,7 +1075,7 @@ const zb_converter_def_t *zb_converter_loader_find(
 
             char path[80];
             snprintf(path, sizeof(path), "%s/%s", CONVERTER_DB_PATH, fn);
-            found_def = load_model_from_file(path, model);
+            found_def = load_model_from_file(path, manufacturer, model);
 
             if (xSemaphoreTake(s_mutex, GW_TIMEOUT_LONG_TICKS) != pdTRUE) {
                 return found_def;  /* Got it but can't cache — still return */
@@ -1021,7 +1100,7 @@ const zb_converter_def_t *zb_converter_loader_find(
     }
 
     /* Double-check cache (another thread may have loaded it) */
-    cached = cache_lookup(model);
+    cached = cache_lookup(manufacturer, model);
     if (cached != NULL) {
         /* Another thread beat us — free our copy and return theirs */
         if (found_def->from_zigbee) mem_ng_free((void *)found_def->from_zigbee);
@@ -1040,7 +1119,7 @@ const zb_converter_def_t *zb_converter_loader_find(
         return cached;
     }
 
-    cache_add(model, found_def);
+    cache_add(manufacturer, model, found_def);
     xSemaphoreGive(s_mutex);
 
     ESP_LOGI(TAG, "Loaded converter from LittleFS: %s (%s)",
