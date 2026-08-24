@@ -74,3 +74,5 @@ screenlog.*
 sdkconfig.backup
 build_release/
 build_relwork/
+build61/
+sdkconfig.61*
