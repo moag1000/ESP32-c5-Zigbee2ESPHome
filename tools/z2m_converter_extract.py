@@ -1626,6 +1626,30 @@ def _parse_definition_block(block, file_manuf):
     # Added rather than replacing what the extend path found: a definition can
     # carry both, and duplicates by property are dropped so a device declaring
     # e.switch() next to m.onOff() does not end up with two switches.
+    # Datapoint map from hand-written legacy converters. Without this the
+    # exposes filter below drops everything such a device declares, because
+    # nothing appears to feed it — see _legacy_datapoints().
+    legacy_names = set(re.findall(r'legacy\.(?:fz|tz)\.(\w+)', block))
+    if legacy_names and _ZHC_SOURCE[0]:
+        legacy_src = _legacy_source(_ZHC_SOURCE[0])
+        if legacy_src:
+            dps = _legacy_datapoints(legacy_src, _legacy_datapoint_table(legacy_src), legacy_names)
+            if dps:
+                existing = device.get("tuya_dp") or {}
+                existing.update(dps)
+                device["tuya_dp"] = existing
+                served_keys = {e["k"] for e in dps.values()}
+                if not any(x.get("k") == "tuya_dp" for x in device["fz"]):
+                    device["fz"].append({"c": 61184, "a": 65535, "k": "tuya_dp", "fn": "fz_tuya_dp"})
+                if not any(x.get("k") == "tuya_dp" for x in device["tz"]):
+                    device["tz"].append({"k": "tuya_dp", "c": 61184, "fn": "tz_tuya_dp"})
+                # The datapoints are the source these exposes read from, so
+                # record them as served under their own names.
+                for k in served_keys:
+                    device["fz"].append({"c": 61184, "a": 65535, "k": k, "fn": "fz_tuya_dp"})
+                if device["_coverage"] == "NO_MATCH":
+                    device["_coverage"] = "PARTIAL"
+
     exposes_str = extract_bracket_content(block, "exposes")
     parsed_exposes = _parse_exposes_array(exposes_str)
     if parsed_exposes:
@@ -1642,18 +1666,180 @@ def _parse_definition_block(block, file_manuf):
         if added and device["_coverage"] == "NO_MATCH":
             device["_coverage"] = "PARTIAL"
 
-    # Include if we got converter info, OR always include with at least model/vendor info
-    if device["fz"] or device["e"]:
-        devices.append(device)
-    elif vendor and model:
-        # Include minimal entry for identification purposes
+    keep = bool(device["fz"] or device["e"])
+    if not keep and vendor and model:
+        # Minimal entry, still worth having for identification.
         device["_coverage"] = "PARTIAL" if device["_coverage"] == "NO_MATCH" else device["_coverage"]
-        # Add a generic fallback based on what the block contains
         if 'fromZigbee:' in block or 'extend:' in block:
             device["_coverage"] = "PARTIAL"
+        keep = True
+
+    if not keep:
+        return devices
+
+    # One entry per identity the device can actually announce. The definition's
+    # own model/vendor stay as a further entry, because some devices really do
+    # report those and the index reaches others through them.
+    identities = _fingerprint_identities(block)
+    for model_id, manuf in identities:
+        variant = dict(device)
+        variant["m"] = model_id
+        variant["mf"] = manuf
+        devices.append(variant)
+
+    if not identities or (device["m"], device["mf"]) not in identities:
         devices.append(device)
 
     return devices
+
+
+
+
+# ---------------------------------------------------------------------------
+# Legacy Tuya converters
+# ---------------------------------------------------------------------------
+#
+# A large part of the Tuya catalogue is still served by hand-written converters
+# in lib/legacy.ts rather than by declarative tuyaDatapoints tables. The
+# extractor could not see inside them, so it learned nothing about which
+# properties they feed — and because an expose is only kept when something
+# feeds it, every one of those devices came out with an empty exposes list. The
+# NEO alarm is the case that surfaced this: upstream it has alarm, melody,
+# duration, volume, battery_low and battpercentage; the database had none.
+#
+# The bodies are regular enough to read:
+#
+#     case dataPoints.neoAOAlarm:   // 0x13 [TRUE,FALSE]
+#         return {alarm: value};
+#     case dataPoints.neoAOVolume:
+#         return {volume: {0: "low", 1: "medium", 2: "high"}[value]};
+#
+# The datapoint number comes from the dataPoints table, never from the comment
+# beside it: `neoAOAlarm: 13` sits under a comment reading "0x13", which would
+# be 19. Upstream's comments are decimal written with an 0x prefix in places,
+# and trusting them would map datapoints to the wrong properties silently.
+
+_LEGACY_CACHE = {}
+_ZHC_SOURCE = [None]
+
+
+def _legacy_source(zhc_src):
+    """Read and cache lib/legacy.ts next to the devices directory."""
+    if zhc_src in _LEGACY_CACHE:
+        return _LEGACY_CACHE[zhc_src]
+    path = os.path.join(os.path.dirname(os.path.normpath(zhc_src)), "lib", "legacy.ts")
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+    except OSError:
+        text = ""
+    _LEGACY_CACHE[zhc_src] = text
+    return text
+
+
+def _legacy_datapoint_table(legacy_src):
+    """name -> datapoint number, for the flat entries of `const dataPoints`."""
+    table = {}
+    start = legacy_src.find("const dataPoints = {")
+    if start < 0:
+        return table
+    end = find_matching_brace(legacy_src, legacy_src.index("{", start))
+    if end < 0:
+        return table
+    body = legacy_src[start:end]
+    for m in re.finditer(r'^\s{4}(\w+)\s*:\s*(\d+)\s*,', body, re.M):
+        table[m.group(1)] = int(m.group(2))
+    return table
+
+
+def _legacy_converter_block(legacy_src, name):
+    """The body of a `<name>: {` entry in legacy.ts, or None."""
+    for m in re.finditer(r'^\s{4}' + re.escape(name) + r'\s*:\s*\{', legacy_src, re.M):
+        brace = legacy_src.index("{", m.start())
+        end = find_matching_brace(legacy_src, brace)
+        if end > 0:
+            return legacy_src[brace:end + 1]
+    return None
+
+
+def _legacy_datapoints(legacy_src, table, names):
+    """Datapoint map for a set of legacy converter names, in database shape."""
+    dps = {}
+    for name in names:
+        block = _legacy_converter_block(legacy_src, name)
+        if not block:
+            continue
+        for m in re.finditer(
+                r'case\s+dataPoints\.(\w+)\s*:(.*?)(?=case\s+dataPoints\.|default\s*:|\Z)',
+                block, re.S):
+            dp_name, body = m.group(1), m.group(2)
+            if dp_name not in table:
+                continue
+            ret = re.search(r'return\s*\{\s*([A-Za-z_]\w*)\s*:\s*(.*?)\}\s*;', body, re.S)
+            if not ret:
+                continue
+            prop, expr = ret.group(1), ret.group(2)
+
+            entry = {"k": prop, "t": "int"}
+            enum_m = re.search(r'\{\s*((?:\d+\s*:\s*["\'][^"\']+["\']\s*,?\s*)+)\}', expr)
+            if enum_m:
+                values = {}
+                for v, label in re.findall(r'(\d+)\s*:\s*["\']([^"\']+)["\']', enum_m.group(1)):
+                    values[label] = int(v)
+                if values:
+                    entry = {"k": prop, "t": "enum", "v": values}
+            elif re.search(r'\b(TRUE|FALSE|true|false)\b', body) or prop in ("alarm", "state"):
+                entry = {"k": prop, "t": "bool"}
+
+            dps[str(table[dp_name])] = entry
+    return dps
+
+
+def _fingerprint_identities(block):
+    """Every (modelID, manufacturerName) pair a definition can be recognised by.
+
+    A Zigbee device announces the model and manufacturer strings it was flashed
+    with, and for Tuya hardware those are almost never the ones in `model:` and
+    `vendor:`. The NEO alarm reports TS0601 / _TZE204_t1blo2bj while its
+    definition says model "NAS-AB02B2", vendor "NEO" — keyed on the latter it can
+    never be matched, and it never was.
+
+    Two shapes appear upstream:
+
+        fingerprint: tuya.fingerprint("TS0601", ["_TZE200_x", "_TZE204_x"])
+        fingerprint: [{modelID: "TS0601", manufacturerName: "_TZE204_x"}, ...]
+
+    The old code looked for the literal "manufacturerName", which the helper form
+    does not contain, and took a single regex group even when it did — so a
+    definition covering three manufacturers produced at most one entry, under the
+    wrong key. Across the upstream tree that is 773 definitions and 1941
+    manufacturer ids.
+    """
+    ids = []
+
+    for m in re.finditer(r'tuya\.fingerprint\(\s*["\']([^"\']+)["\']\s*,\s*\[(.*?)\]', block, re.S):
+        model_id = m.group(1)
+        for mf in re.findall(r'["\']([^"\']+)["\']', m.group(2)):
+            ids.append((model_id, mf))
+
+    fp = extract_bracket_content(block, "fingerprint")
+    if fp:
+        for entry in re.finditer(
+                r'modelID\s*:\s*["\']([^"\']+)["\'][^}]*?manufacturerName\s*:\s*["\']([^"\']+)["\']',
+                fp, re.S):
+            ids.append((entry.group(1), entry.group(2)))
+        for entry in re.finditer(
+                r'manufacturerName\s*:\s*["\']([^"\']+)["\'][^}]*?modelID\s*:\s*["\']([^"\']+)["\']',
+                fp, re.S):
+            ids.append((entry.group(2), entry.group(1)))
+
+    seen = set()
+    unique = []
+    for pair in ids:
+        if pair not in seen:
+            seen.add(pair)
+            unique.append(pair)
+    return unique
 
 
 def _extract_definitions_fallback(filepath, content, file_manuf):
@@ -1859,6 +2045,7 @@ def main():
     args = parser.parse_args()
 
     source_dir = Path(args.source)
+    _ZHC_SOURCE[0] = str(source_dir)
     if not source_dir.is_dir():
         print(f"Error: {source_dir} is not a directory", file=sys.stderr)
         sys.exit(1)
@@ -1930,18 +2117,35 @@ def main():
     manuf_info = {}
     total_devices = 0
 
+    # Group by the file each manufacturer maps to, not by the manufacturer.
+    #
+    # manufacturer_to_filename() lowercases and strips punctuation, so distinct
+    # manufacturers can share a filename — "IMMAX" and "Immax" both become
+    # immax.json. Writing per manufacturer meant the second open(..., 'w')
+    # truncated the first one's devices while the index still pointed both
+    # names at that file, with each one's original count. Twenty Immax devices
+    # vanished this way and the index went on claiming they were there.
+    by_file = defaultdict(list)
     for manuf, devices in sorted(groups.items()):
-        filename = manufacturer_to_filename(manuf)
+        by_file[manufacturer_to_filename(manuf)].append((manuf, devices))
 
-        cleaned = [clean_device(d) for d in devices]
+    for filename, members in sorted(by_file.items()):
+        cleaned = []
+        for manuf, devices in members:
+            own = [clean_device(d) for d in devices]
+            manuf_info[manuf] = {"file": filename, "count": len(own)}
+            cleaned.extend(own)
         total_devices += len(cleaned)
 
         out_path = out_dir / filename
         with open(out_path, 'w') as f:
             json.dump({"devices": cleaned}, f, separators=(',', ':'), ensure_ascii=False)
 
-        manuf_info[manuf] = {"file": filename, "count": len(cleaned)}
-        print(f"  {filename}: {len(cleaned)} devices")
+        if len(members) > 1:
+            print(f"  {filename}: {len(cleaned)} devices "
+                  f"({len(members)} manufacturers share this file)")
+        else:
+            print(f"  {filename}: {len(cleaned)} devices")
 
     # Generate index.json (v2 format)
     index = {
