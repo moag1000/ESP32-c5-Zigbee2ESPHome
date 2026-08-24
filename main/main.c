@@ -733,7 +733,12 @@ void app_main(void)
          *
          * Both the entry table and the pool live in PSRAM (see
          * string_intern.c), so this costs nothing scarce. */
-        esp_err_t intern_ret = string_intern_init(8192, 256 * 1024);
+        /* Sized for the converter index: one interned string per manufacturer plus
+         * one per file, and the pool overflowed once already — converters came
+         * back with "(null)" for a name. The database grew from 1338
+         * manufacturers to 2545 when the fingerprint identities were restored,
+         * so the headroom goes up with it. PSRAM, and 99 % of it is idle. */
+        esp_err_t intern_ret = string_intern_init(16384, 512 * 1024);
         if (intern_ret != ESP_OK) {
             ESP_LOGW(TAG_MAIN, "String intern init failed: %s (converter loader will use raw strings)",
                      esp_err_to_name(intern_ret));

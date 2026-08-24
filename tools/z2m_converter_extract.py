@@ -1475,6 +1475,36 @@ def _parse_exposes_array(exposes_str):
         if cat_m and cat_m.group(1) in ("config", "diagnostic"):
             entry["cat"] = cat_m.group(1)
 
+        # Numeric bounds. Without them a number entity reaches Home Assistant
+        # with a range of 0 to 0 and cannot be set to anything.
+        num = {}
+        min_m = re.search(r'\.withValueMin\(\s*(-?\d+(?:\.\d+)?)\s*\)', call)
+        max_m = re.search(r'\.withValueMax\(\s*(-?\d+(?:\.\d+)?)\s*\)', call)
+        step_m = re.search(r'\.withValueStep\(\s*(-?\d+(?:\.\d+)?)\s*\)', call)
+        for key, match in (("min", min_m), ("max", max_m), ("step", step_m)):
+            if match:
+                raw = match.group(1)
+                num[key] = float(raw) if "." in raw else int(raw)
+        if num:
+            entry["num"] = num
+
+        # Enum options, the third argument of e.enum(). A select that arrives
+        # with an empty option list is an entity nobody can use.
+        if builder == "enum":
+            opts = None
+            lit = re.search(r'e\.enum\(\s*["\'][^"\']+["\']\s*,\s*[^,]+,\s*\[(.*?)\]', call, re.S)
+            if lit:
+                opts = re.findall(r'["\']([^"\']+)["\']', lit.group(1))
+            else:
+                # Array.from(Array(N).keys()).map((x) => (x + 1).toString())
+                gen = re.search(r'Array\.from\(\s*Array\(\s*(\d+)\s*\)\.keys\(\)\s*\)'
+                                r'\s*\.map\([^)]*\)\s*=>\s*\(\s*x\s*\+\s*(\d+)\s*\)', call, re.S)
+                if gen:
+                    count, offset = int(gen.group(1)), int(gen.group(2))
+                    opts = [str(i + offset) for i in range(count)]
+            if opts:
+                entry["sel"] = {"v": opts}
+
         exposes.append(entry)
 
     return exposes
@@ -1987,14 +2017,41 @@ def clean_expose(e):
     return {k: v for k, v in e.items() if v is not None and v != ""}
 
 
+
+# The firmware interns every one of these strings, and its pool refuses
+# anything at or beyond STRING_INTERN_MAX_LENGTH (128). A refusal is not
+# loud: the field comes back NULL, and a NULL manufacturer in the index was
+# a load access fault on the next comparison — a boot loop that took a while
+# to trace. Descriptions upstream run to 564 characters.
+#
+# The NUL sequences are the other half. Some upstream manufacturer strings
+# are NUL-padded to a fixed width, and JSON-escaping them wrote the six
+# characters \u0000 into the file rather than the byte. The shipped database
+# was cleaned of these by hand once; the extractor kept producing them, so
+# they came straight back on the next run. Fixed here instead.
+_INTERN_LIMIT = 127
+
+
+def sanitise_string(value):
+    """Trim a string to what the firmware's intern pool will accept."""
+    if not isinstance(value, str):
+        return value
+    value = value.replace("\\u0000", "").replace("\u0000", "")
+    value = "".join(ch for ch in value if ch >= " " or ch == "\t")
+    value = value.strip()
+    if len(value) > _INTERN_LIMIT:
+        value = value[:_INTERN_LIMIT].rstrip()
+    return value
+
+
 def clean_device(dev):
     """Remove internal fields and clean up device for output."""
     compat = check_device_compat(dev)
     out = {
-        "m": dev["m"],
-        "mf": dev.get("mf", ""),
-        "v": dev.get("v", ""),
-        "d": dev.get("d", ""),
+        "m": sanitise_string(dev["m"]),
+        "mf": sanitise_string(dev.get("mf", "")),
+        "v": sanitise_string(dev.get("v", "")),
+        "d": sanitise_string(dev.get("d", "")),
         "src": "z2m",
         "pri": 2,
         "fz": dev["fz"],

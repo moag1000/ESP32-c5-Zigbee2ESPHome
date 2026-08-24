@@ -27,6 +27,36 @@ from pathlib import Path
 # Helpers
 # ============================================================================
 
+
+# Last gate before the database is shipped. The firmware interns m/mf/v/d and
+# its pool rejects anything at or beyond STRING_INTERN_MAX_LENGTH (128) — a
+# rejection returns NULL silently, and a NULL manufacturer in the index was once
+# a load access fault on the next comparison. Some upstream manufacturer strings
+# are NUL-padded, and JSON-escaping wrote the literal characters \u0000 into the
+# files; the shipped database was cleaned of those by hand once and they came
+# straight back with the next extraction.
+#
+# Both extractors clean their own output now. This runs anyway, because it is
+# the one place every device passes through no matter which source it came from.
+_INTERN_LIMIT = 127
+
+
+def sanitise_string(value):
+    if not isinstance(value, str):
+        return value
+    value = value.replace("\\u0000", "").replace("\u0000", "")
+    value = "".join(ch for ch in value if ch >= " " or ch == "\t")
+    value = value.strip()
+    return value[:_INTERN_LIMIT].rstrip() if len(value) > _INTERN_LIMIT else value
+
+
+def sanitise_device(dev):
+    for key in ("m", "mf", "v", "d"):
+        if key in dev:
+            dev[key] = sanitise_string(dev[key])
+    return dev
+
+
 def normalize_manufacturer(mf):
     """Normalize manufacturer name to lowercase for matching."""
     return mf.strip().lower()
@@ -284,7 +314,7 @@ def write_output(merged_devices, output_dir, z2m_meta, zhq_meta):
     small_devs = []    # (mf_name, cleaned devices) to bundle
 
     for mf_name, devices in sorted(merged_devices.items()):
-        cleaned = [clean_device(d) for d in devices]
+        cleaned = [sanitise_device(clean_device(d)) for d in devices]
         est_size = len(json.dumps({"devices": cleaned}, separators=(',', ':')))
 
         if est_size >= BUNDLE_THRESHOLD:

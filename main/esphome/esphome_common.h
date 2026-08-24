@@ -339,7 +339,14 @@ extern "C" {
 #define ESPHOME_MAX_SERVICES            16
 
 /** @brief Maximum select options per entity */
-#define ESPHOME_MAX_SELECT_OPTIONS      8
+/* Options a select entity can carry.
+ *
+ * At 8 this truncated in silence: 777 of the 5928 selects in the converter
+ * database declare more, up to 18, and a select showing eight of sixteen
+ * colours looks perfectly normal while the other eight are simply unreachable.
+ * The storage is options[N][32] inside the entity table, which lives in PSRAM,
+ * so the whole increase costs 4 KB of memory that is otherwise idle. */
+#define ESPHOME_MAX_SELECT_OPTIONS      24
 
 /** @brief Maximum light effects per entity */
 #define ESPHOME_MAX_LIGHT_EFFECTS       8

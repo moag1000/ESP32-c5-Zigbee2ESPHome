@@ -556,8 +556,18 @@ static esp_err_t register_expose_select(const device_t *dev, const zb_expose_t *
     }
 
     if (expose->ext.select.values && expose->ext.select.count > 0) {
+        /* Bound by the array being written into, not by a literal. The 8 that
+         * stood here was independent of ESPHOME_MAX_SELECT_OPTIONS, so raising
+         * that constant changed nothing and the truncation stayed — silently,
+         * which is the whole problem with a select: eight of eighteen melodies
+         * looks like the complete list. */
         uint8_t max_opts = expose->ext.select.count;
-        if (max_opts > 8) max_opts = 8;
+        if (max_opts > ESPHOME_MAX_SELECT_OPTIONS) {
+            ESP_LOGW(TAG, "Select '%s' declares %u options, keeping the first %d",
+                     expose->name ? expose->name : "(unnamed)",
+                     (unsigned)max_opts, ESPHOME_MAX_SELECT_OPTIONS);
+            max_opts = ESPHOME_MAX_SELECT_OPTIONS;
+        }
         for (uint8_t oi = 0; oi < max_opts; oi++) {
             if (expose->ext.select.values[oi]) {
                 strncpy(config.options[oi], expose->ext.select.values[oi], 31);

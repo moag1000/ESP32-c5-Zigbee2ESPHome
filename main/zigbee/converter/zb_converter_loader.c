@@ -28,7 +28,19 @@ static const char *TAG = "CONV_LOAD";
 /* The converter database ships 447 manufacturer files; at 256 the index
  * silently stopped taking entries ("Index full at 256 entries") and those
  * devices simply never matched a converter. The table is 8 bytes per entry. */
-#define MAX_INDEX_ENTRIES        2048
+/* Every manufacturer in the database needs a slot. Overrunning this is not an
+ * error the gateway reports to anyone — the loader logs one line and the
+ * manufacturers past the limit simply cannot be found, so their devices pair
+ * and then sit there with no converter. It has happened twice: at 256 the
+ * database had 1109 manufacturers and 853 were silently unreachable, and a
+ * database with the fingerprint identities restored carries 2545, which would
+ * have overrun 2048 the same way. 4096 leaves room; the table is 8 bytes an
+ * entry in PSRAM, so the headroom costs 32 KB of memory that is otherwise
+ * unused. */
+#define MAX_INDEX_ENTRIES        4096
+
+/** @brief Largest converter file the loader will read, in bytes */
+#define CONVERTER_FILE_MAX_BYTES (512 * 1024)
 #define MAX_CACHED_CONVERTERS    32
 #define MAX_FZ_PER_DEVICE        16
 #define MAX_TZ_PER_DEVICE        8
@@ -115,8 +127,17 @@ static char *read_file_to_psram(const char *path, size_t *out_len)
     long size = ftell(f);
     fseek(f, 0, SEEK_SET);
 
-    if (size <= 0 || size > 128 * 1024) {
-        ESP_LOGW(TAG, "File %s: invalid size %ld", path, size);
+    /* The ceiling is a sanity check on a corrupt filesystem, not a budget: the
+     * buffer is PSRAM, of which six megabytes sit idle. It used to be 128 KB,
+     * and index.json crossed it at 135934 bytes when the database grew to 2538
+     * manufacturers. The result was one warning and a gateway where every
+     * device fell back to a generic converter — an Aqara vibration sensor came
+     * up as "Generic temperature/humidity sensor". Sized well clear of the
+     * largest file the database produces (index.json, then the per-vendor files
+     * at about 100 KB). */
+    if (size <= 0 || size > CONVERTER_FILE_MAX_BYTES) {
+        ESP_LOGE(TAG, "File %s: size %ld is outside the readable range (max %d)",
+                 path, size, CONVERTER_FILE_MAX_BYTES);
         fclose(f);
         return NULL;
     }
@@ -459,8 +480,20 @@ zb_converter_def_t *zb_converter_loader_parse_device(const cJSON *dev_json)
                     map_expose_type((int)cJSON_GetNumberValue(t)) : ZB_EXPOSE_SENSOR;
                 exposes[i].features = (f && cJSON_IsNumber(f)) ?
                     (uint32_t)cJSON_GetNumberValue(f) : 0;
-                exposes[i].name = (n && cJSON_IsString(n)) ?
-                    string_intern(cJSON_GetStringValue(n)) : NULL;
+                /* Fall back to the property when no display name is given.
+                 *
+                 * esphome_adapter.c skips any expose with a NULL name, so an
+                 * entry carrying only "p" produced no entity at all — the NEO
+                 * siren declared alarm, melody, duration, volume and
+                 * battpercentage and Home Assistant got a switch and a battery
+                 * sensor, both inferred from capability bits instead. Upstream
+                 * an expose's name *is* its property unless one is set
+                 * explicitly, so this reproduces their behaviour rather than
+                 * inventing a name. */
+                exposes[i].name = (n && cJSON_IsString(n))
+                    ? string_intern(cJSON_GetStringValue(n))
+                    : ((p && cJSON_IsString(p))
+                        ? string_intern(cJSON_GetStringValue(p)) : NULL);
                 exposes[i].property = (p && cJSON_IsString(p)) ?
                     string_intern(cJSON_GetStringValue(p)) : NULL;
                 exposes[i].access = (ac && cJSON_IsNumber(ac)) ?
@@ -857,7 +890,13 @@ esp_err_t zb_converter_loader_init(void)
     if (s_available) {
         ESP_LOGI(TAG, "Converter loader ready: %zu manufacturers indexed", s_index_count);
     } else {
-        ESP_LOGW(TAG, "Converter DB not found or invalid (non-fatal)");
+        /* "non-fatal" is true of the boot and misleading about everything
+         * else: without the database every device that pairs gets a generic
+         * converter chosen from its capability bits, so a vibration sensor
+         * comes up as a temperature sensor and a siren as an on/off light.
+         * Worth an error, not a warning. */
+        ESP_LOGE(TAG, "Converter database unavailable — every device will fall "
+                 "back to a generic converter");
     }
 
     return ret;
