@@ -1,7 +1,7 @@
 # ESP32-C5 Zigbee → ESPHome converter
 
-That is the whole idea: a **Zigbee 3.0 coordinator** that converts its paired
-devices into **ESPHome native API** entities, on a single ESP32-C5.
+A **Zigbee 3.0 coordinator** that converts its paired devices into **ESPHome
+native API** entities, on a single ESP32-C5.
 
 No MQTT broker. No zigbee2mqtt. No ZHA. One device, one integration.
 
@@ -20,7 +20,7 @@ pairs show up as **ESPHome sub-devices** in Home Assistant.
 Wi-Fi — competes with itself for the band. The C5 is dual-band, so the uplink
 sits on 5 GHz while Zigbee keeps 2.4 GHz:
 
-    Wi-Fi   channel 64, 5 GHz, -41 dBm
+    Wi-Fi   channel 48, 5 GHz, -57 dBm
     Zigbee  channel 25, 2.4 GHz
 
 C6 and H2 cannot do this at all.
@@ -30,28 +30,30 @@ What follows from that:
 - **No broker in the path.** Nothing to install, nothing to keep running,
   one less thing that can be down.
 - **Zigbee does not depend on the uplink.** The coordinator comes up before
-  Wi-Fi and MQTT. With the network gone, paired devices stay reachable.
+  Wi-Fi. With the network gone, paired devices stay reachable.
 - **Devices are real HA devices**, with entities sorted into Controls,
   Configuration and Diagnostic — not MQTT topics plus discovery payloads.
-- **8407 device definitions loaded at runtime** from LittleFS, from 525
+- **8481 device definitions loaded at runtime** from LittleFS, from 525
   brands, replaceable without recompiling.
 
 ## Install
 
-Pre-built images are on the releases page. One file, flashed at offset 0:
+Pre-built images are on the [releases
+page](https://github.com/moag1000/ESP32-c5-Zigbee2ESPHome/releases). One file,
+flashed at offset 0:
 
 ```bash
 esptool --chip esp32c5 -p /dev/ttyUSB0 write-flash 0x0 \
     esp32c5-zigbee-esphome-<version>-merged.bin
 ```
 
-That contains bootloader, partition table, firmware and the 8407-device
-converter database. The board then brings up a **captive portal** — join the
-`ESP32-C5-Setup-XXXX` access point and enter your Wi-Fi credentials.
+That contains bootloader, partition table, firmware and the device database. The
+board then brings up a **captive portal** — join the `ESP32-C5-Setup-XXYY`
+access point and enter your Wi-Fi credentials.
 
-The portal also takes the **Home Assistant encryption key**, with a button to
-generate one. Paste the same value into Home Assistant when it asks. Nothing
-needs compiling.
+The portal also takes the **Home Assistant encryption key**, with a 🎲 button
+that generates one in your browser. Paste the same value into Home Assistant
+when it asks. Nothing needs compiling.
 
 The released images carry **no credentials of any kind**, including no
 encryption key — one baked into a public binary would be shared by everybody who
@@ -178,9 +180,9 @@ the integration by hand with the IP and port `6053`.
 hardware section. This is a single-SoC design sharing one RF path.
 
 **A device paired but shows few entities.** The gateway matches it against
-8407 definitions by manufacturer and model. An unknown device still works
+8481 definitions by manufacturer and model. An unknown device still works
 through a generic converter, just with less. `reconfigure_device` re-runs the
-interview, and `update_converter_db` pulls a newer database.
+interview.
 
 ## Hardware
 
@@ -190,7 +192,7 @@ interview, and `update_converter_db` pulls a newer database.
 |---|---|
 | **C5, not C6/H2** | dual-band Wi-Fi. The C5 can put the uplink on 5 GHz and leave 2.4 GHz to Zigbee; C6 and H2 are 2.4 GHz only and share the band with what they are trying to talk to |
 | **8 MB PSRAM** | the converter database, the entity table and all of cJSON live there. Without it internal RAM does not fit the firmware |
-| **16 MB flash** | 4 MB app partition plus a 7.2 MB LittleFS partition for the 4.9 MB device database |
+| **16 MB flash** | two 4 MB app partitions for OTA plus a 7.2 MB LittleFS partition for the device database |
 
 **Recommended module: ESP32-C5-WROOM-1U-N16R8.** The suffixes are the whole
 point. `N16` is 16 MB flash, `R8` is 8 MB PSRAM — the two numbers the table
@@ -206,6 +208,11 @@ worth picking over the `1`.
 Reference dev board: **ESP32-C5-DevKitC-1** (the PSRAM variant) — good for
 bringing the firmware up, and it carries the same module. Any C5 module with
 N16R8 works; check the PSRAM, some C5 boards ship without it.
+
+**Prefer a non-DFS 5 GHz channel** (36, 40, 44, 48). On DFS channel 64 an API
+login took 10-28 seconds and frequently timed out; on channel 48 the same login
+takes 0.8-2.6 seconds. Espressif documents that the ESP32-C5 cannot detect
+radar and cannot vacate DFS channels itself.
 
 **Wiring**: none required for the gateway itself. The optional mmWave presence
 sensor (S3KM1110) is UART, pins in `CONFIG_MMWAVE_*`.
@@ -227,18 +234,27 @@ Measured on hardware (ESP32-C5, ESP-IDF v6.0.2):
 | | |
 |---|---|
 | Wi-Fi association | 25-27 s from boot, 0 failed attempts |
-| Devices in converter DB | 8407, from 2555 manufacturers, 525 brands |
-| Converter DB on flash | 2700 KB of a 7036 KB partition (38 %) |
+| Devices in converter DB | 8481, from 2555 manufacturer ids, 525 brands |
+| Distinct behaviours | 2003 shared profiles |
+| Converter DB on flash | 2618 KB of a 7036 KB partition (37 %) |
 | Internal heap, steady state | 82 KB free, BLE on |
 | Internal heap, low-water mark | 77 KB |
 | Test suite | 169 tests, on-device |
 | Entity capacity | about 15 Zigbee devices (190 KB table in PSRAM) |
+| Source | ~164,000 lines across 293 files in `main/` |
 
-Known gaps, and they are real:
+### Known gaps, and they are real
 
 - **Three devices, one network, one developer.** A Fingerbot Plus, an Aqara
   vibration sensor and a Tuya siren. Everything else in the converter database
   is untested here.
+- **The converter database cannot yet be updated over HTTP.** The
+  `update_converter_db` service starts, the board fetches `index.json` and then
+  stops without finishing the transfer — measured twice against an instrumented
+  server. Worse, the reason is invisible: `converter_db_ota_status()` exists but
+  is wired to no entity, so a failure leaves nothing behind in Home Assistant.
+  Flashing `converters-<version>.bin` to `0x921000` works and is the way to
+  update the database today.
 - **Tuya devices were write-only until recently, and nothing said so.** Their
   datapoint reports were parsed against the wrong header and then handed to a
   driver table that only the Fingerbot is in, so every other Tuya device could
@@ -246,26 +262,24 @@ Known gaps, and they are real:
   (0x04) for all of them, which is what one Fingerbot needs and what a siren
   acknowledges and ignores. Both are fixed and both were invisible: the device
   answers `OK` either way.
-- **The Wi-Fi escalation has now been seen through, once, end to end.** The
-  gateway lost its access point, the driver restart at five minutes changed
-  nothing, and the reboot that follows brought it back on its own — boot counter
-  32 to 33, reset reason `software`, roughly eleven minutes off the network with
-  nobody touching it. One observation, not a guarantee, and the underlying fault
-  is still below this firmware.
-- **GATT initializes but has not been tested** against a peripheral.
-- **Most testing runs in minutes.** Both of the worst faults found so far needed
-  conditions a short test does not produce: one took nine hours of uptime, the
-  other three simultaneous clients. Users produce both without trying.
 - **The C5 loses its access point periodically and does not find it again.**
   Reason 201, NO_AP_FOUND, with the AP sitting there at -50 dBm. Seen on both a
   DFS and a non-DFS channel, so it is not only a DFS effect. The watchdog
   recovers it — a driver restart, then a reboot after fifteen minutes — and that
   has now brought the gateway back three times without anyone touching it. It is
   a mitigation, not a fix; the fault is below this firmware.
-- **Prefer a non-DFS 5 GHz channel** (36, 40, 44, 48). On DFS channel 64 an API
-  login took 10-28 seconds and frequently timed out; on channel 48 the same
-  login takes 0.8-2.6 seconds. Espressif documents that the ESP32-C5 cannot
-  detect radar and cannot vacate DFS channels itself.
+- **The Wi-Fi escalation has been seen through once, end to end.** The gateway
+  lost its access point, the driver restart at five minutes changed nothing, and
+  the reboot that follows brought it back on its own — boot counter 32 to 33,
+  reset reason `software`, roughly eleven minutes off the network with nobody
+  touching it. One observation, not a guarantee.
+- **App OTA has no automatic rollback.**
+  `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE` is not set, so a bad image is not
+  backed out of by the bootloader.
+- **GATT initializes but has not been tested** against a peripheral.
+- **Most testing runs in minutes.** Both of the worst faults found so far needed
+  conditions a short test does not produce: one took nine hours of uptime, the
+  other three simultaneous clients. Users produce both without trying.
 - The C5's Wi-Fi scan returns nothing useful, so anything scan-based (the
   captive portal's network list) is unreliable.
 - A good deal of the codebase has never been read.
@@ -279,12 +293,8 @@ Known gaps, and they are real:
 | Broker required | no | yes (z2m) | no |
 | Runs on | ESP32-C5 alone | Pi/server + USB stick | ESP32-C6/H2/C5 |
 | Wi-Fi band vs Zigbee | **5 GHz uplink, 2.4 GHz Zigbee** | depends on host | shares 2.4 GHz |
-| Device definitions | 8407, runtime-loadable | thousands, mature | n/a |
+| Device definitions | 8481, runtime-loadable | thousands, mature | n/a |
 | Maturity | hobby project | production, years of it | official ESPHome |
-
-**Keywords**: ESP32-C5, Zigbee coordinator, ESPHome native API, Home Assistant,
-Zigbee gateway without MQTT, zigbee2mqtt alternative, ESP32 Zigbee bridge,
-dual-band Zigbee gateway, ESP-IDF, zigbee-herdsman-converters.
 
 ## Features
 
@@ -299,29 +309,184 @@ tables and the hand-written converters in `legacy.ts`. 672 of the 2003 shared
 profiles carry one, 847 of their enums have names rather than raw numbers, and
 513 exposes keep the endpoint suffix that tells a three-gang switch's gangs
 apart. Writes go out as `dataRequest`, matching zigbee-herdsman-converters, with
-`sendData` kept for the devices measured to need it. Link quality comes from the
-stack's neighbour table, so RSSI is a measurement rather than a number derived
-from LQI — an unheard device reads `unknown` instead of a confident -100 dBm.
+`sendData` kept for the devices measured to need it.
 
-**The converter database is deduplicated.** 8407 devices describe 2003 distinct
-behaviours, because the same hardware is sold under many manufacturer ids. Each
-device carries its identity and a profile id; the behaviour is stored once in
-`profiles_N.json`, where N follows from the id. That is 2700 KB of the 7036 KB
-partition instead of 6876 KB, and it is what made room for the datapoint maps.
+**Link quality is measured, not inferred.** LQI and RSSI come from the stack's
+neighbour table, so an unheard device reads `unknown` rather than a confident
+-100 dBm.
 
 **Home Assistant** — ESPHome native API on port 6053 with Noise encryption,
-sub-devices, 15 entity types, entity categories, OTA on port 3232, and the
-service calls `permit_join`, `remove_device`, `reconfigure_device`.
+sub-devices, 15 entity types, entity categories, app OTA on port 3232, and the
+service calls listed above.
 
 **Bluetooth** — NimBLE scanner, passive or active, switchable from Home
 Assistant at runtime. Re-enabled after the original reason for disabling it
 turned out to be a Wi-Fi coexistence bug rather than a BLE problem.
 
-**MQTT** — secondary. Bridge management, diagnostics, converter database
-updates. Not required for Home Assistant.
+**MQTT** — optional and secondary. Bridge management and diagnostics. Not
+required for Home Assistant, and off the critical path; the whole point of the
+project is that you do not need it.
 
 **Other** — S3KM1110 mmWave presence over UART, captive portal for Wi-Fi setup,
 crash reporting, LED status, performance metrics.
+
+## The converter database
+
+Pairing gives you an address. Turning that into "Fingerbot Plus, with a mode
+selector and a sustain time" takes a device database, and that is the part this
+project did not invent — it is distilled from
+[zigbee-herdsman-converters](https://github.com/Koenkk/zigbee-herdsman-converters)
+and [zha-device-handlers](https://github.com/zigpy/zha-device-handlers).
+
+**It is deduplicated.** 8481 devices describe 2003 distinct behaviours, because
+the same hardware is sold under many manufacturer ids. Each device carries its
+identity and a profile id; the behaviour is stored once in `profiles_N.json`,
+where `N = id / 256`. That is 2618 KB of the 7036 KB partition instead of
+6876 KB, and it is what made room for the datapoint maps.
+
+The extraction tooling lives in `tools/` and `scripts/`:
+
+| | |
+|---|---|
+| `tools/z2m_converter_extract.py` | parses the TypeScript converters |
+| `tools/merge_z2m_extracts.py` | combines two extraction runs, keeping the richer entry |
+| `tools/merge_converter_dbs.py` | merges z2m and zhaquirks, builds the shared profiles |
+| `tools/validate_converter_db.py` | checks every profile reference resolves |
+| `scripts/build_converter_db.sh` | builds the LittleFS image |
+
+Rebuilding the database does not require rebuilding the firmware. Write the
+image on its own:
+
+```bash
+esptool --chip esp32c5 -p <port> write-flash 0x921000 converters-<version>.bin
+```
+
+## Building from source
+
+Only needed if you want to change the firmware — the releases are ready to
+flash.
+
+### ESP-IDF v6.0.2
+
+```bash
+mkdir -p ~/esp && cd ~/esp
+git clone -b v6.0.2 --recursive https://github.com/espressif/esp-idf.git esp-idf-v6
+cd esp-idf-v6
+./install.sh esp32c5
+alias get_idf='source $HOME/esp/esp-idf-v6/export.sh'
+```
+
+v6.0.2 is the current stable release; the v5.5 line is older despite the higher
+patch numbers, and v6.1 is still a release candidate.
+
+The Python virtualenv that `install.sh` creates is named after the **host**
+Python version (e.g. `idf6.0_py3.14_env`). Upgrading the system Python
+invalidates it: `export.sh` still exits 0, but `idf.py` is then not on the PATH
+and the log says `ESP-IDF Python virtual environment ... not found`. Re-run
+`./install.sh esp32c5` to fix it.
+
+### ESP-Zigbee-SDK
+
+```bash
+cd ~/esp
+git clone --recursive https://github.com/espressif/esp-zigbee-sdk.git
+export ESP_ZIGBEE_SDK_PATH=$HOME/esp/esp-zigbee-sdk
+```
+
+### Build, flash, test
+
+```bash
+git clone https://github.com/moag1000/ESP32-c5-Zigbee2ESPHome.git
+cd ESP32-c5-Zigbee2ESPHome
+source ./scripts/setup_env.sh
+
+./scripts/build.sh
+./scripts/flash.sh            # or: ./scripts/flash.sh /dev/ttyUSB0
+./scripts/monitor.sh
+./scripts/run_tests.sh        # 169 tests, run on the device
+```
+
+Machine-specific settings — Wi-Fi credentials, the Noise key — go in
+`sdkconfig.local`, which is gitignored and picked up automatically by
+`CMakeLists.txt`. Never commit it.
+
+Building a publishable image:
+
+```bash
+scripts/release.sh v0.3.1
+```
+
+That blanks every credential, builds, and then greps the result for your own
+secrets before producing anything. If it finds one, it stops.
+
+## Partitions and memory
+
+16 MB flash, dual OTA slots, LittleFS for the database:
+
+| partition | offset | size | purpose |
+|---|---|---|---|
+| `nvs` | 0x9000 | 24 KB | Wi-Fi credentials, encryption key, settings |
+| `otadata` | 0xF000 | 8 KB | which app slot is active |
+| `phy_init` | 0x11000 | 4 KB | PHY calibration |
+| `ota_0` | 0x20000 | 4 MB | application slot 0 |
+| `ota_1` | 0x420000 | 4 MB | application slot 1 (OTA target) |
+| `zb_storage` | 0x820000 | 1 MB | the Zigbee network — paired devices |
+| `zb_fct` | 0x920000 | 4 KB | Zigbee factory data |
+| `spiffs` | 0x921000 | 7036 KB | LittleFS, the converter database |
+
+Internal SRAM is the scarce resource, not flash. Measured steady state:
+
+| configuration | free internal heap | low-water mark |
+|---|---|---|
+| Zigbee only (2026-08-05) | 122 KB | 121 KB |
+| Zigbee + BLE (2026-08-05) | 65 KB | 64 KB |
+| Zigbee + BLE, current | 82 KB | 77 KB |
+
+The low-water mark used to be 30 KB regardless of the steady-state figure,
+because the tightest moment is early boot rather than operation — loading the
+converter index briefly took 158 KB. That allocation now goes to PSRAM, along
+with the entity table and all of cJSON.
+
+PSRAM is 8 MB and still barely used, so it is the place to move anything large
+that is not touched from an ISR. What is holding internal RAM:
+
+```bash
+riscv32-esp-elf-nm --print-size --size-sort --radix=d build/*.elf \
+  | awk '$3=="b" || $3=="B" {print $2, $4}' | sort -rn | head -20
+```
+
+## Project layout
+
+```
+main/
+├── zigbee/        coordinator, interview, converters, Tuya, topology (53 .c)
+├── core/          bridge, config, adapters, monitoring (43 .c)
+├── bluetooth/     NimBLE scanner and GATT client (16 .c)
+├── esphome/       native API server, entities, services (14 .c)
+├── ota/           app OTA and converter database OTA (4 .c)
+├── mqtt/          optional MQTT client (4 .c)
+├── wifi/          manager, coexistence, captive portal (3 .c)
+├── led/  mmwave/  utils/
+data/converters_merged/   the device database, 39 JSON files
+tools/                    database extraction and validation
+scripts/                  build, flash, monitor, test, release
+tests/                    on-device unit and integration tests
+docs/                     23 documents
+```
+
+## Configuration
+
+Everything is under `idf.py menuconfig` → **ESP32-C5 Zigbee Gateway
+Configuration**.
+
+| group | what matters |
+|---|---|
+| **Wi-Fi** | SSID and password, WPA/WPA2/WPA3, `CONFIG_WIFI_PREFER_5GHZ` with an RSSI adjustment so a dual-band SSID picks 5 GHz |
+| **Zigbee** | PAN id (default 0x1A62), channel 11-26 — 15, 20 or 25 avoid Wi-Fi overlap — and the network key |
+| **ESPHome** | port 6053, device name, friendly name, Noise key (leave blank and set it through the portal) |
+| **Bluetooth** | `CONFIG_BT_SCANNER_ENABLED`, `CONFIG_BT_PROXY_ENABLED`, scan interval |
+| **Coexistence** | Wi-Fi priority (recommended), balanced, BT priority, Zigbee priority |
+| **MQTT** | optional; broker URL, credentials, topic base |
 
 ## Credit where it is due
 
@@ -368,317 +533,18 @@ symptom of that same bug.
 If you find this useful, the credit for it being *the right thing to build*
 belongs to the person who kept asking why.
 
-<!-- If you want a funding link of your own, add .github/FUNDING.yml and
-     reference it here. Left out rather than guessed at. -->
-
-## Hardware Requirements
-
-### ESP32-C5 Specifications
-- **SoC**: ESP32-C5 (RISC-V @ 240MHz, single-core)
-- **RAM**: 384KB SRAM + 8MB PSRAM
-- **Flash**: 16MB (required for OTA plus the LittleFS converter database)
-- **Wireless**:
-  - WiFi 6 (2.4/5GHz dual-band)
-  - Zigbee 3.0 (IEEE 802.15.4 @ 2.4GHz)
-  - Bluetooth 5.0 LE (2.4GHz) — present in silicon, disabled in firmware
-- **Coexistence**: Hardware support for simultaneous WiFi/Zigbee operation
-
-### Development Board
-- ESP32-C5-DevKitC-1 or compatible
-- USB-C cable for programming and power
-- Antenna (integrated or external)
-
-## Software Requirements
-
-### ESP-IDF
-
-- **Version**: ESP-IDF v6.0.2 (Picolibc, C23, PSA Crypto)
-- **Installation**: [ESP-IDF Getting Started Guide](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/get-started/)
-
-```bash
-# Clone ESP-IDF v6.0.2
-mkdir -p ~/esp
-cd ~/esp
-git clone -b v6.0.2 --recursive https://github.com/espressif/esp-idf.git esp-idf-v6
-cd esp-idf-v6
-
-# Install ESP-IDF
-./install.sh esp32c5
-
-# Set up environment (add to ~/.bashrc or ~/.zshrc)
-alias get_idf='source $HOME/esp/esp-idf-v6/export.sh'
-```
-
-The Python virtualenv that `install.sh` creates is named after the **host**
-Python version (e.g. `idf6.0_py3.14_env`). Upgrading the system Python
-invalidates it: `export.sh` still exits 0, but `idf.py` is then not on the PATH
-and the log says `ESP-IDF Python virtual environment ... not found`. Re-run
-`./install.sh esp32c5` to fix it.
-
-### ESP-Zigbee-SDK
-- **Repository**: [ESP-Zigbee-SDK](https://github.com/espressif/esp-zigbee-sdk)
-- **Version**: Latest (ESP-IDF v6.0 compatible)
-- ESP32-C5 supported via radio spinel interface
-
-```bash
-# Clone ESP-Zigbee-SDK
-cd ~/esp
-git clone --recursive https://github.com/espressif/esp-zigbee-sdk.git
-
-# Set environment variable (add to ~/.bashrc or ~/.zshrc)
-export ESP_ZIGBEE_SDK_PATH=$HOME/esp/esp-zigbee-sdk
-```
-
-## Quick Start
-
-### 1. Environment Setup
-
-```bash
-# Clone this repository
-git clone https://github.com/yourusername/esp32-c5-zigbee2mqtt.git
-cd esp32-c5-zigbee2mqtt
-
-# Run setup script (must be sourced)
-source ./scripts/setup_env.sh
-```
-
-### 2. Configuration
-
-Configure project settings using menuconfig:
-
-```bash
-idf.py menuconfig
-```
-
-Navigate to: `ESP32-C5 Zigbee2MQTT Gateway Configuration`
-
-Configure:
-- **WiFi**: SSID and password
-- **MQTT**: Broker URL, credentials, topics
-- **Zigbee**: PAN ID, channel, network settings
-
-### 3. Build
-
-```bash
-./scripts/build.sh
-```
-
-### 4. Flash
-
-```bash
-# Auto-detect port and flash
-./scripts/flash.sh
-
-# Or specify port manually
-./scripts/flash.sh /dev/ttyUSB0
-```
-
-### 5. Monitor
-
-```bash
-./scripts/monitor.sh
-```
-
-## Project Structure
-
-```
-esp32-c5-unified-gateway/
-├── CMakeLists.txt              # Root build configuration
-├── sdkconfig.defaults          # Default SDK configuration
-├── partitions.csv              # Custom partition table (16MB with OTA)
-├── README.md                   # This file
-├── main/
-│   ├── CMakeLists.txt          # Main component build config
-│   ├── main.c                  # Application entry point
-│   ├── Kconfig.projbuild       # Project configuration menu
-│   ├── zigbee/                 # Zigbee coordinator (8 files)
-│   ├── bluetooth/              # 🔵 BLE Scanner + Proxy (12 files)
-│   ├── esphome/                # 🔵 ESPHome Native API (10 files)
-│   ├── mqtt/                   # MQTT client (4 files)
-│   ├── wifi/                   # WiFi manager with coexistence (4 files)
-│   ├── core/                   # Core gateway logic (bridge, config, monitor)
-│   ├── utils/                  # Utility functions (JSON, version)
-│   └── ota/                    # OTA update implementation
-├── components/                 # Custom components
-├── docs/                       # Documentation (14 files)
-│   ├── BLUETOOTH_GATEWAY.md    # 🔵 BLE Gateway Guide
-│   ├── ESPHOME_API.md          # 🔵 ESPHome API Guide
-│   ├── COEXISTENCE.md          # 🔵 WiFi/BT/Zigbee Coexistence
-│   └── BLE_DEVICES.md          # 🔵 Supported BLE Devices
-├── scripts/
-│   ├── build.sh                # Build script
-│   ├── flash.sh                # Flash script
-│   ├── monitor.sh              # Serial monitor script
-│   └── setup_env.sh            # Environment setup script
-└── tests/
-    ├── unit/                   # Unit tests (73 tests)
-    └── integration/            # Integration tests (34 tests)
-```
-
-**Total**: ~60 source files, ~18,000 lines of code
-
-## Memory Configuration
-
-The partition table is optimized for 16MB flash with OTA support and Zigbee + Bluetooth:
-
-| Partition    | Size    | Offset     | Purpose                          |
-|--------------|---------|------------|----------------------------------|
-| nvs          | 24KB    | 0x9000     | WiFi, MQTT, app data             |
-| otadata      | 8KB     | 0xF000     | OTA state tracking               |
-| phy_init     | 4KB     | 0x11000    | PHY initialization               |
-| ota_0        | 4MB     | 0x20000    | Application slot 0 (active)      |
-| ota_1        | 4MB     | 0x420000   | Application slot 1 (OTA target)  |
-| zb_storage   | 1MB     | 0x820000   | Zigbee network data              |
-| zb_fct       | 4KB     | 0x920000   | Zigbee factory data              |
-| spiffs       | ~6.9MB  | 0x921000   | Logs, config files, data storage |
-
-**Total**: 16MB (0x1000000) - Full flash utilization with dual OTA partitions
-
-### Memory budget (320 KB usable SRAM)
-
-Measured on hardware 2026-08-05, steady state with Wi-Fi, MQTT and Zigbee up:
-
-| Configuration | Free internal heap | Low-water mark |
-|---|---|---|
-| Zigbee only | **122 KB** | 121 KB |
-| Zigbee + BLE | **65 KB** | 64 KB |
-
-The low-water mark used to be 30 KB regardless of the steady-state figure,
-because the tightest moment is early boot rather than operation — loading the
-converter index briefly took 158 KB. That allocation now goes to PSRAM, along
-with the entity table and all of cJSON.
-
-PSRAM is 8 MB and still barely used, so it is the place to move anything large
-that is not touched from an ISR:
-
-```bash
-riscv32-esp-elf-nm --print-size --size-sort --radix=d build/*.elf \
-  | awk '$3=="b" || $3=="B" {print $2, $4}' | sort -rn | head -20
-```
-
-## Development Phases
-
-### Phase 1-9: Zigbee2MQTT Core ✅ COMPLETE
-- ✅ Phase 1: Project structure and build system
-- ✅ Phase 2: Zigbee Coordinator (8 files, 2,260 LOC)
-- ✅ Phase 3: WiFi + MQTT Client (8 files, 2,408 LOC)
-- ✅ Phase 4: Zigbee-MQTT Bridge (12 files, 3,148 LOC)
-- ✅ Phase 5: Memory & Performance Optimization
-- ✅ Phase 6: Configuration System (NVS + MQTT)
-- ✅ Phase 7: OTA Updates
-- ✅ Phase 8: Testing Framework (107 tests)
-- ✅ Phase 9: Comprehensive Documentation
-
-### Phase 10-14: Bluetooth Gateway + ESPHome API ✅ COMPLETE
-- ✅ Phase 10: BLE Stack + ESPHome API Foundation
-  - Bluetooth LE Stack Integration (6 files)
-  - ESPHome Native API Protocol (5 files)
-  - BLE Scanner (passive) + BLE Proxy (active)
-  - ESPHome API Server (Port 6053, Protobuf)
-
-- ✅ Phase 11: BLE Device Support & Integration
-  - Xiaomi LYWSD03MMC support
-  - Govee H5075 support
-  - iBeacon/Eddystone tracking
-  - Bluetooth-MQTT Bridge
-
-- ✅ Phase 12: Resource Management & Coexistence
-  - Memory pool management (BT/Zigbee/MQTT)
-  - CPU load balancing
-  - WiFi Coexistence configuration (5GHz priority)
-  - Dynamic priority adjustment
-
-- ✅ Phase 13: Configuration & Integration
-  - Kconfig extensions (BT/ESPHome options)
-  - Config Manager updates
-  - Partition table update
-
-- ✅ Phase 14: Testing & Documentation
-  - BT/Zigbee coexistence tests
-  - ESPHome integration tests
-  - Updated documentation (4 new files)
-
-**Current Status**: Phase 1-14 complete (~34,000 LOC: ~12,000 Zigbee2MQTT + ~22,000 Bluetooth/ESPHome)
-
-## Configuration
-
-### WiFi Configuration
-- Configure via menuconfig or Kconfig
-- Supports WPA/WPA2/WPA3
-- Auto-reconnect with exponential backoff
-
-### MQTT Configuration
-- Supports MQTT/MQTTS/WebSocket
-- QoS levels 0, 1, 2
-- Customizable topics and base path
-- Username/password authentication
-
-### Zigbee Configuration
-- PAN ID: Configurable (default: 0x1A62)
-- Channel: 11-26 (avoid WiFi interference, recommend 15/20/25)
-- Max devices: 50 (Zigbee only) or 30 (with Bluetooth enabled)
-- Network key: Random or custom
-
-### Bluetooth Configuration 🔵 NEW
-- BLE Scanner: Enabled/disabled via Kconfig (`CONFIG_BT_SCANNER_ENABLED`)
-- BLE Proxy: Enabled/disabled via Kconfig (`CONFIG_BT_PROXY_ENABLED`)
-- Max BLE devices: Up to 50 tracked devices
-- Scan interval: 100-10000ms (default: 1000ms)
-- Supported modes: Passive scanning + Active GATT proxy
-
-### ESPHome API Configuration 🔵 NEW
-- API Port: 6053 (standard ESPHome port)
-- Password: Optional authentication
-- Device Name: Configurable friendly name
-- Auto-Discovery: mDNS-based discovery in Home Assistant
-- Protocol: Native API over TCP (Protobuf)
-
-### WiFi Coexistence 🔵 NEW
-- **5GHz Preferred**: Configurable via `CONFIG_WIFI_PREFER_5GHZ` (default: enabled)
-  - Uses RSSI adjustment (`CONFIG_WIFI_5GHZ_RSSI_ADJUSTMENT`, default: 10dB) to prefer 5GHz
-  - Requires dual-band router with same SSID on both bands
-- **Coexistence Mode**: WiFi Priority (recommended), Balanced, BT Priority, Zigbee Priority
-- **Channel Planning**: Zigbee channels 15/20/25 avoid WiFi overlap
-
 ## Contributing
 
-Contributions are welcome! Please follow these guidelines:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Follow ESP-IDF coding standards
-4. Add tests for new features
-5. Commit with clear messages
-6. Push to your fork and submit a Pull Request
-
-### Coding Standards
-
-For detailed coding standards, see [docs/CODE_STYLE.md](docs/CODE_STYLE.md).
-
-## Troubleshooting
-
-### Build Issues
-- Ensure ESP-IDF master branch is used (ESP32-C5 support)
-- Check `ESP_ZIGBEE_SDK_PATH` environment variable
-- Run `idf.py fullclean` and rebuild
-
-### Flash Issues
-- Check USB cable and port permissions
-- Try different USB ports
-- Reset device manually during flash
-
-### Runtime Issues
-- Check WiFi credentials in menuconfig
-- Verify MQTT broker is reachable
-- Monitor heap memory usage
-- Review logs with `./scripts/monitor.sh`
+Issues and pull requests are welcome. Coding standards are in
+[docs/CODE_STYLE.md](docs/CODE_STYLE.md); add tests under `tests/` for anything
+new, and run `./scripts/run_tests.sh` on hardware before submitting.
 
 ## License
 
-This project is licensed under the Apache License 2.0 - see below for details.
+Apache License 2.0. See [LICENSE](LICENSE).
 
 ```
-Copyright 2026 ESP32-C5 Zigbee2MQTT Contributors
+Copyright 2026 ESP32-C5 Zigbee2ESPHome Contributors
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -695,62 +561,23 @@ limitations under the License.
 
 ## Resources
 
-### ESP32 & Zigbee
-- [ESP32-C5 Datasheet](https://www.espressif.com/sites/default/files/documentation/esp32-c5_datasheet_en.pdf)
-- [ESP-IDF Documentation](https://docs.espressif.com/projects/esp-idf/en/latest/)
-- [ESP-Zigbee-SDK Documentation](https://github.com/espressif/esp-zigbee-sdk)
-- [Zigbee Specification](https://zigbeealliance.org/solution/zigbee/)
+**ESP32-C5 and Zigbee** —
+[C5 datasheet](https://www.espressif.com/sites/default/files/documentation/esp32-c5_datasheet_en.pdf) ·
+[WROOM-1/1U datasheet](https://documentation.espressif.com/esp32-c5-wroom-1_wroom-1u_datasheet_en.html) ·
+[ESP-IDF](https://docs.espressif.com/projects/esp-idf/en/latest/) ·
+[ESP-Zigbee-SDK](https://github.com/espressif/esp-zigbee-sdk)
 
-### Bluetooth & GATT
-- [ESP-IDF Bluetooth API](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/bluetooth/index.html)
-- [ESP-IDF BLE GATT Server](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/bluetooth/esp_gatts.html)
-- [ESP-IDF BLE GATT Client](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/bluetooth/esp_gattc.html)
-- [Bluetooth SIG GATT Specifications](https://www.bluetooth.com/specifications/specs/gatt-specification-supplement/)
-- [ESP32 BLE Examples](https://github.com/espressif/esp-idf/tree/master/examples/bluetooth)
-- [NimBLE Stack for ESP32](https://github.com/espressif/esp-nimble)
+**ESPHome** —
+[documentation](https://esphome.io/) ·
+[native API](https://esphome.io/components/api.html) ·
+[aioesphomeapi](https://github.com/esphome/aioesphomeapi)
 
-### ESPHome
-- [ESPHome Documentation](https://esphome.io/)
-- [ESPHome Native API](https://esphome.io/components/api.html)
-- [ESPHome Native API Protocol (Protobuf)](https://github.com/esphome/aioesphome/tree/main/aioesphome)
-- [ESPHome Developer Documentation](https://esphome.io/guides/contributing.html)
-- [ESPHome Custom Components](https://esphome.io/custom/custom_component.html)
-
-### Home Assistant Integration
-- [Home Assistant MQTT Discovery](https://www.home-assistant.io/docs/mqtt/discovery/)
-- [Home Assistant ESPHome Integration](https://www.home-assistant.io/integrations/esphome/)
-- [Home Assistant Bluetooth Integration](https://www.home-assistant.io/integrations/bluetooth/)
-- [Home Assistant Device Automation](https://www.home-assistant.io/docs/automation/trigger/#device-triggers)
-- [Home Assistant ESP32 Bluetooth Proxy](https://esphome.io/components/bluetooth_proxy.html)
-
-## Support
-
-For issues, questions, or contributions:
-- Open an issue on GitHub
-- Join the ESP32 community forums
-- Check existing documentation
-
-## Acknowledgments
-
-- Espressif Systems for ESP-IDF and ESP-Zigbee-SDK
-- Zigbee Alliance for specifications
-- Home Assistant community
-- All contributors to this project
+**Home Assistant** —
+[ESPHome integration](https://www.home-assistant.io/integrations/esphome/) ·
+[Bluetooth integration](https://www.home-assistant.io/integrations/bluetooth/)
 
 ---
 
-**Status**:
-- ✅ Phase 1-9 Complete - Zigbee2MQTT fully functional (~12,000 LOC)
-- ✅ Phase 10-14 Complete - Bluetooth Gateway + ESPHome API (~22,000 LOC)
-
-**Device Support**:
-- Zigbee Devices: 30-50 (depending on Bluetooth enablement)
-- Bluetooth Devices: 50
-- Total Capacity: Up to 80 devices with both protocols
-
-**Recommended Setup**:
-- WiFi: 5GHz (minimize 2.4GHz crowding)
-- Zigbee Channel: 15, 20, or 25
-- Memory: Enable Bluetooth only if needed (reduces available heap)
-
-**Last Updated**: January 23, 2026 (Bluetooth Gateway documentation added)
+**Keywords**: ESP32-C5, Zigbee coordinator, ESPHome native API, Home Assistant,
+Zigbee gateway without MQTT, zigbee2mqtt alternative, ESP32 Zigbee bridge,
+dual-band Zigbee gateway, ESP-IDF, zigbee-herdsman-converters.
