@@ -247,13 +247,27 @@ esp_err_t zb_binding_create(uint64_t source_ieee, uint8_t source_ep,
 
     xSemaphoreTake(s_binding_mutex, GW_TIMEOUT_LONG_TICKS);
 
-    /* Check if binding already exists */
+    /* Check if binding already exists.
+     *
+     * This returns ESP_OK. The contract of this function is "make sure this
+     * binding exists", and it already does — there is nothing for the caller to
+     * do differently. It used to return ESP_ERR_INVALID_ARG, which put a normal
+     * outcome behind an error code and cost both callers: zb_reporting logged
+     * every re-provisioned binding as a failure
+
+         W ZB_REPORTING: Bind ssIasZone failed: ESP_ERR_INVALID_ARG
+         W ZB_REPORTING: Bind genPowerCfg failed: ESP_ERR_INVALID_ARG
+
+     * on a device whose bindings were perfectly fine, and zb_backup could only
+     * guess, logging "Binding may already exist" because ESP_ERR_INVALID_ARG
+     * also means an argument really was invalid. Provisioning runs on every
+     * boot and is deliberately idempotent, so this is the common path, not an
+     * edge case. */
     if (find_binding_entry(source_ieee, source_ep, cluster_id, dest_ieee, dest_ep) != NULL) {
         xSemaphoreGive(s_binding_mutex);
-        /* Provisioning runs on every boot and is deliberately idempotent, so
-         * an existing binding is the normal case, not a problem. */
-        ESP_LOGD(TAG, "Binding already exists");
-        return ESP_ERR_INVALID_ARG;
+        ESP_LOGD(TAG, "Binding 0x%016" PRIX64 ":%d cluster 0x%04X already present",
+                 source_ieee, source_ep, cluster_id);
+        return ESP_OK;
     }
 
     /* Find free slot */

@@ -1430,12 +1430,15 @@ static esp_err_t restore_bindings(const zb_backup_binding_t *bindings, uint16_t 
                                           bind->cluster_id,
                                           bind->dest_ieee, bind->dest_endpoint);
         if (ret == ESP_OK) {
+            /* Covers both "created" and "was already there" — zb_binding_create()
+             * is idempotent, and either way the binding the backup asked for now
+             * exists. This branch used to guess at ESP_ERR_INVALID_ARG meaning
+             * "already exists", which was indistinguishable from a genuinely bad
+             * argument. */
             result->restored_bindings++;
-        } else if (ret == ESP_ERR_INVALID_ARG) {
-            /* Binding might already exist */
-            ESP_LOGW(TAG, "Binding may already exist");
         } else {
-            ESP_LOGW(TAG, "Failed to restore binding");
+            ESP_LOGW(TAG, "Failed to restore binding for 0x%016" PRIX64 " cluster 0x%04X: %s",
+                     bind->source_ieee, bind->cluster_id, esp_err_to_name(ret));
         }
     }
 
