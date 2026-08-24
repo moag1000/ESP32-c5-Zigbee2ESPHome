@@ -102,6 +102,14 @@ typedef struct {
     uint8_t zcl_attr_type;              /**< ZCL attribute data type */
     uint16_t cluster_id;                /**< Matched cluster ID */
     uint16_t attr_id;                   /**< Matched attribute ID */
+    /** @brief JSON key of the matched to_zigbee entry, NULL when dispatching a report.
+     *
+     * tz_tuya_dp() needs to know which datapoint it was called for, and used to
+     * recover that by scanning to_zigbee for the first Tuya entry — which is
+     * the right answer only when there is exactly one. A device with several
+     * writable datapoints would have written all of them to whichever came
+     * first in the array. */
+    const char *json_key;
 } zb_dispatch_ctx_t;
 
 /**

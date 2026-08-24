@@ -1675,8 +1675,16 @@ def _parse_definition_block(block, file_manuf):
                     device["tz"].append({"k": "tuya_dp", "c": 61184, "fn": "tz_tuya_dp"})
                 # The datapoints are the source these exposes read from, so
                 # record them as served under their own names.
+                #
+                # And one to_zigbee entry each, because the command dispatcher
+                # matches a tz entry's key against the keys in the command
+                # object: a switch for "alarm" sends {"alarm": true}, which
+                # matched nothing when the only Tuya tz entry was called
+                # "tuya_dp". The command was dropped with ESP_ERR_NOT_FOUND and
+                # the siren stayed silent.
                 for k in served_keys:
                     device["fz"].append({"c": 61184, "a": 65535, "k": k, "fn": "fz_tuya_dp"})
+                    device["tz"].append({"k": k, "c": 61184, "fn": "tz_tuya_dp"})
                 if device["_coverage"] == "NO_MATCH":
                     device["_coverage"] = "PARTIAL"
 

@@ -238,13 +238,18 @@ esp_err_t tz_tuya_dp(uint16_t short_addr, uint8_t endpoint, const cJSON *value)
         return ESP_ERR_INVALID_STATE;
     }
 
-    /* Find the matched to_zigbee entry to get the json_key */
-    const char *json_key = NULL;
-    for (uint8_t i = 0; i < ctx->conv->to_zigbee_count; i++) {
-        if (ctx->conv->to_zigbee[i].convert == tz_tuya_dp &&
-            ctx->conv->to_zigbee[i].cluster_id == ZB_TUYA_CLUSTER_ID) {
-            json_key = ctx->conv->to_zigbee[i].json_key;
-            break;
+    /* Which datapoint this call is for. The dispatcher knows, because it is
+     * what matched the command; falling back to a scan picks whichever Tuya
+     * entry happens to come first, so a device with several writable
+     * datapoints wrote all of them to that one. */
+    const char *json_key = ctx->json_key;
+    if (json_key == NULL) {
+        for (uint8_t i = 0; i < ctx->conv->to_zigbee_count; i++) {
+            if (ctx->conv->to_zigbee[i].convert == tz_tuya_dp &&
+                ctx->conv->to_zigbee[i].cluster_id == ZB_TUYA_CLUSTER_ID) {
+                json_key = ctx->conv->to_zigbee[i].json_key;
+                break;
+            }
         }
     }
 

@@ -605,8 +605,11 @@ esp_err_t zb_converter_handle_command(uint16_t short_addr, uint8_t endpoint,
         cJSON *item = cJSON_GetObjectItem(json, tz->json_key);
         if (item != NULL) {
             found = true;
-            /* Update dispatch context with matched tz entry's cluster */
+            /* Update dispatch context with the matched tz entry's cluster and
+             * key. The key is what tells tz_tuya_dp() which datapoint this
+             * call is for. */
             tz_ctx.cluster_id = tz->cluster_id;
+            tz_ctx.json_key = tz->json_key;
             zb_converter_set_dispatch_ctx(&tz_ctx);
             /* Tuya devices expect the full JSON command object, not individual values */
             const cJSON *convert_arg = (def->quirk_flags & ZB_QUIRK_TUYA_DEVICE) ? json : item;
