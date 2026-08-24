@@ -33,8 +33,8 @@ What follows from that:
   Wi-Fi and MQTT. With the network gone, paired devices stay reachable.
 - **Devices are real HA devices**, with entities sorted into Controls,
   Configuration and Diagnostic — not MQTT topics plus discovery payloads.
-- **8481 device definitions loaded at runtime** from LittleFS, replaceable
-  without recompiling.
+- **8407 device definitions loaded at runtime** from LittleFS, from 525
+  brands, replaceable without recompiling.
 
 ## Install
 
@@ -45,7 +45,7 @@ esptool --chip esp32c5 -p /dev/ttyUSB0 write-flash 0x0 \
     esp32c5-zigbee-esphome-<version>-merged.bin
 ```
 
-That contains bootloader, partition table, firmware and the 8481-device
+That contains bootloader, partition table, firmware and the 8407-device
 converter database. The board then brings up a **captive portal** — join the
 `ESP32-C5-Setup-XXXX` access point and enter your Wi-Fi credentials.
 
@@ -103,7 +103,8 @@ Measured on hardware (ESP32-C5, ESP-IDF v6.0.2):
 | | |
 |---|---|
 | Wi-Fi association | 25-27 s from boot, 0 failed attempts |
-| Devices in converter DB | 8481, from 2559 manufacturers |
+| Devices in converter DB | 8407, from 2555 manufacturers, 525 brands |
+| Converter DB on flash | 2700 KB of a 7036 KB partition (38 %) |
 | Internal heap, steady state | 82 KB free, BLE on |
 | Internal heap, low-water mark | 77 KB |
 | Test suite | 169 tests, on-device |
@@ -154,7 +155,7 @@ Known gaps, and they are real:
 | Broker required | no | yes (z2m) | no |
 | Runs on | ESP32-C5 alone | Pi/server + USB stick | ESP32-C6/H2/C5 |
 | Wi-Fi band vs Zigbee | **5 GHz uplink, 2.4 GHz Zigbee** | depends on host | shares 2.4 GHz |
-| Device definitions | 8481, runtime-loadable | thousands, mature | n/a |
+| Device definitions | 8407, runtime-loadable | thousands, mature | n/a |
 | Maturity | hobby project | production, years of it | official ESPHome |
 
 **Keywords**: ESP32-C5, Zigbee coordinator, ESPHome native API, Home Assistant,
@@ -168,12 +169,21 @@ direct binding, network topology and heal, availability tracking, backup and
 restore. Scenes, Touchlink and Zigbee OTA are complete but off by default
 (`CONFIG_ZB_SCENES_ENABLE`, `CONFIG_ZB_TOUCHLINK_ENABLE`, `CONFIG_ZB_OTA_ENABLE`).
 
-**Tuya** — the 0xEF00 datapoint protocol in both directions, with datapoint maps
-for 341 devices. Writes go out as `dataRequest`, matching
-zigbee-herdsman-converters, with `sendData` kept for the devices measured to
-need it. Link quality comes from the stack's neighbour table, so RSSI is a
-measurement rather than a number derived from LQI — an unheard device reads
-`unknown` instead of a confident -100 dBm.
+**Tuya** — the 0xEF00 datapoint protocol in both directions. Datapoint maps come
+from both sources upstream keeps them in: the declarative `meta.tuyaDatapoints`
+tables and the hand-written converters in `legacy.ts`. 672 of the 2003 shared
+profiles carry one, 847 of their enums have names rather than raw numbers, and
+513 exposes keep the endpoint suffix that tells a three-gang switch's gangs
+apart. Writes go out as `dataRequest`, matching zigbee-herdsman-converters, with
+`sendData` kept for the devices measured to need it. Link quality comes from the
+stack's neighbour table, so RSSI is a measurement rather than a number derived
+from LQI — an unheard device reads `unknown` instead of a confident -100 dBm.
+
+**The converter database is deduplicated.** 8407 devices describe 2003 distinct
+behaviours, because the same hardware is sold under many manufacturer ids. Each
+device carries its identity and a profile id; the behaviour is stored once in
+`profiles_N.json`, where N follows from the id. That is 2700 KB of the 7036 KB
+partition instead of 6876 KB, and it is what made room for the datapoint maps.
 
 **Home Assistant** — ESPHome native API on port 6053 with Noise encryption,
 sub-devices, 15 entity types, entity categories, OTA on port 3232, and the
