@@ -218,10 +218,10 @@ esp_err_t zb_coordinator_init(void)
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "HVAC cluster init failed: %s", esp_err_to_name(ret));
     }
-    ret = zb_cluster_measurement_init();
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "Measurement cluster init failed: %s", esp_err_to_name(ret));
-    }
+    /* zb_cluster_measurement_init() removed: Measurement clusters are handled by zb_callbacks.c and the converter.
+     * This allocated illuminance, pressure and PM2.5 state arrays that no
+     * reachable code ever read: all 20 of its accessors are discarded by
+     * the linker. */
     ret = zb_cluster_electrical_init();
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Electrical cluster init failed: %s", esp_err_to_name(ret));
@@ -279,11 +279,10 @@ esp_err_t zb_coordinator_init(void)
                  zb_install_codes_count());
     }
 
-    ret = zb_diagnostics_init();
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to initialize diagnostics: %s", esp_err_to_name(ret));
-        /* Non-fatal - continue without diagnostics support */
-    }
+    /* zb_diagnostics_init() removed: This kept a second reset counter, incremented and written to NVS on
+     * every boot, that nothing read — all 23 of its accessors are
+     * discarded by the linker. Home Assistant's Boot Count comes from
+     * crash_reporter_get_boot_count(), which works. */
 
     ret = zb_time_server_init();
     if (ret != ESP_OK) {

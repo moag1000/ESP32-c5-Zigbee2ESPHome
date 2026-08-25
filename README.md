@@ -318,14 +318,22 @@ Measured on hardware (ESP32-C5, ESP-IDF v6.0.2):
 - The C5's Wi-Fi scan returns nothing useful, so anything scan-based (the
   captive portal's network list) is unreliable.
 - **Half the codebase cannot run.** Of the functions defined in files that are
-  compiled unconditionally, 1007 of 2077 are discarded by the linker as
+  compiled unconditionally, 859 of 1927 are discarded by the linker as
   unreachable — measured, not estimated, by comparing definitions against the
-  symbols in the linked image. Nine files are compiled and dropped in their
-  entirety, among them every per-device BLE decoder
-  (`ble_ruuvi.c`, `ble_switchbot.c`, `ble_qingping.c`, `ble_inkbird.c`,
-  `ble_beacon.c`), `ble_battery_service.c`, `ble_esphome_bridge.c` and
-  `ble_gatt_discovery.c`. Generic BLE scanning works and reports devices; none
-  of the decoding does.
+  symbols in the linked image. Eleven files that were compiled and dropped
+  in their entirety have since been taken out of the build — the sources remain,
+  with a note in `main/CMakeLists.txt` saying what they were and how to bring
+  them back.
+
+  They were superseded rather than unfinished. The per-device BLE decoders
+  (Ruuvi, SwitchBot, Qingping, Inkbird, iBeacon/Eddystone) duplicate what the
+  ESPHome Bluetooth proxy already does better: it forwards raw advertisements to
+  Home Assistant, whose integrations know far more device types and are updated
+  without reflashing. `zb_cluster_measurement.c` allocated illuminance, pressure
+  and PM2.5 buffers nothing read, while the clusters themselves are handled by
+  `zb_callbacks.c` and the converter. `zb_diagnostics.c` incremented a second
+  reset counter into NVS on every boot that nothing reported, next to the Boot
+  Count that works.
 
   This is not merely untidy. Log forwarding to Home Assistant was exactly this
   — a complete implementation nothing called — and it was invisible until

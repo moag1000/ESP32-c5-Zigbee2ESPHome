@@ -8,7 +8,6 @@ set(COMPONENT_SRCS
     "zigbee/zb_network.c"
     "zigbee/zb_cluster_multistate.c"
     "zigbee/zb_cluster_hvac.c"
-    "zigbee/zb_cluster_measurement.c"
     "zigbee/zb_cluster_electrical.c"
     "zigbee/zb_cluster_security.c"
     "zigbee/zb_cluster_closures.c"
@@ -23,7 +22,6 @@ set(COMPONENT_SRCS
     "zigbee/zb_leave_helper.c"
     "zigbee/zb_reporting.c"
     "zigbee/zb_install_codes.c"
-    "zigbee/zb_diagnostics.c"
     "zigbee/zb_time_server.c"
     "zigbee/zb_poll_control.c"
     "zigbee/zb_zcl_helpers.c"
@@ -148,17 +146,8 @@ set(BT_SRCS
     "bluetooth/ble_scanner.c"
     "bluetooth/ble_security.c"
     "bluetooth/ble_gatt_client.c"
-    "bluetooth/ble_battery_service.c"
-    "bluetooth/ble_gatt_discovery.c"
-    "bluetooth/devices/ble_device_registry.c"
     "bluetooth/devices/ble_xiaomi.c"
     "bluetooth/devices/ble_govee.c"
-    "bluetooth/devices/ble_beacon.c"
-    "bluetooth/devices/ble_ruuvi.c"
-    "bluetooth/devices/ble_qingping.c"
-    "bluetooth/devices/ble_switchbot.c"
-    "bluetooth/devices/ble_inkbird.c"
-    "bluetooth/ble_esphome_bridge.c"
     "esphome/esphome_ble_proxy.c"
 )
 
@@ -306,3 +295,39 @@ if(GW_GIT_HASH)
     target_compile_definitions(${COMPONENT_LIB} PUBLIC
         GIT_COMMIT="${GW_GIT_HASH}")
 endif()
+
+# Not built: the second BLE path.
+#
+# These decode advertisements on the board — Ruuvi, SwitchBot, Qingping,
+# Inkbird, iBeacon/Eddystone — dispatch them through a device registry and turn
+# them into ESPHome entities. The linker was already discarding all of it:
+# nothing called any of it, and a comparison of definitions against the symbols
+# in the linked image put 1007 of 2077 functions in that category.
+#
+# It is superseded rather than unfinished. The ESPHome Bluetooth proxy runs and
+# forwards raw advertisements to Home Assistant, whose own integrations decode
+# far more device types than these five and are updated without reflashing this
+# firmware. Compiling a worse copy of that alongside it only obscures which path
+# is real.
+#
+# The sources stay in the tree. To bring them back, add them here and wire
+# ble_device_registry_init() and ble_esphome_bridge_init() into ble_adapter.c —
+# and turn the BLE proxy off, or the same advertisement is handled twice.
+#
+#   bluetooth/ble_battery_service.c        bluetooth/devices/ble_beacon.c
+#   bluetooth/ble_gatt_discovery.c         bluetooth/devices/ble_ruuvi.c
+#   bluetooth/ble_esphome_bridge.c         bluetooth/devices/ble_qingping.c
+#   bluetooth/devices/ble_device_registry.c bluetooth/devices/ble_switchbot.c
+#                                          bluetooth/devices/ble_inkbird.c
+
+# Not built: two subsystems that only ever initialised.
+#
+#   zigbee/zb_cluster_measurement.c  illuminance, pressure and PM2.5 state
+#   zigbee/zb_diagnostics.c          a second reset counter
+#
+# Both were called once from zb_coordinator.c and never again — every accessor
+# they declare is discarded by the linker. The measurement clusters they claim
+# are handled by zb_callbacks.c and the converter; the reset count Home
+# Assistant shows comes from crash_reporter_get_boot_count(). Between them they
+# allocated twelve buffers nothing read and wrote NVS on every boot for a
+# counter nothing reported.

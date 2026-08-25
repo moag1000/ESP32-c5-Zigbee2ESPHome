@@ -26,8 +26,6 @@
 
 #include "bluetooth/ble_scanner.h"
 #include "bluetooth/ble_common.h"
-#include "bluetooth/devices/ble_device_registry.h"
-
 static const char *TAG = "BLE_ADAPTER";
 
 /* ============================================================================
