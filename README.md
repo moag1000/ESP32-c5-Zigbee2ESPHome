@@ -18,12 +18,28 @@ pairs show up as **ESPHome sub-devices** in Home Assistant.
 **The ESP32-C5 is the reason it is worth doing.** Zigbee lives on 2.4 GHz. Every
 2.4 GHz-only gateway — ESP32-C6, ESP32-H2, and any USB stick in a Pi on 2.4 GHz
 Wi-Fi — competes with itself for the band. The C5 is dual-band, so the uplink
-sits on 5 GHz while Zigbee keeps 2.4 GHz:
+*can* sit on 5 GHz while Zigbee keeps 2.4 GHz:
 
     Wi-Fi   channel 48, 5 GHz, -57 dBm
     Zigbee  channel 25, 2.4 GHz
 
 C6 and H2 cannot do this at all.
+
+Whether it *should* depends on the access point, and the honest answer is to
+measure. On the network this is developed against — a FRITZ!Box running 160 MHz
+on 5 GHz — the gateway lost 30-45 % of its packets there against 10-20 % on
+2.4 GHz, and moved two to five times as much data per minute on 2.4 GHz. The
+cause is width rather than band: a 160 MHz block anchored at channel 36 spans
+channels 36 to 64, and the upper half is DFS, which this chip cannot handle.
+Narrowing the access point to 80 MHz on channels 36-48 keeps the whole block
+clear of DFS and is the better fix where the access point allows it — a
+FRITZ!Box does not expose the setting.
+
+The dual-band capability is real and worth having, because it lets you put the
+uplink somewhere Zigbee is not. It is a choice to be measured rather than a
+guarantee. `CONFIG_WIFI_FORCE_2GHZ` exists for when the measurement says the
+crowded band is the better one, and 2.4 GHz has proven stable enough for
+day-to-day operation here.
 
 What follows from that:
 
@@ -194,16 +210,21 @@ interview.
 | **8 MB PSRAM** | the converter database, the entity table and all of cJSON live there. Without it internal RAM does not fit the firmware |
 | **16 MB flash** | two 4 MB app partitions for OTA plus a 7.2 MB LittleFS partition for the device database |
 
-**Recommended module: ESP32-C5-WROOM-1U-N16R8.** The suffixes are the whole
-point. `N16` is 16 MB flash, `R8` is 8 MB PSRAM — the two numbers the table
-above asks for — and `U` is the variant with a u.FL connector for an **external
-antenna** instead of the printed one.
+**Recommended module: ESP32-C5-WROOM-N16R8, in either antenna variant.** The
+memory suffixes are what matter: `N16` is 16 MB flash and `R8` is 8 MB PSRAM,
+the two numbers the table above asks for. The `1U` carries a u.FL connector for
+an external antenna, the `1` a printed one, and both are supported.
 
-The antenna is not decoration here. Zigbee, Wi-Fi and BLE share a single RF
-path on one SoC, and it is the Wi-Fi uplink that pays for it: when the link
-drops, Home Assistant loses the gateway while Zigbee carries on underneath. An
-external antenna is the cheapest thing that helps, and it is why the `1U` is
-worth picking over the `1`.
+An earlier version of this file recommended the `1U` specifically, reasoning
+that Zigbee, Wi-Fi and BLE share a single RF path and an external antenna is
+the cheapest thing that helps. That was plausible and unmeasured. The gateway
+this is developed on has the external antenna, sits at -51 to -55 dBm — a
+strong signal — and still lost 15 to 38 % of its packets; what fixed the
+transfers it was failing was a task priority and a change of band, nothing to
+do with the antenna. No direct comparison against the printed antenna has been
+made, so nothing is claimed in either direction — an external antenna may well
+help in a weaker spot. It is not the deciding factor here, and buying the `1U`
+for it is not advice this project can support.
 
 Reference dev board: **ESP32-C5-DevKitC-1** (the PSRAM variant) — good for
 bringing the firmware up, and it carries the same module. Any C5 module with
