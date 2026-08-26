@@ -214,10 +214,9 @@ esp_err_t zb_coordinator_init(void)
     }
 
     /* Initialize cluster modules */
-    ret = zb_cluster_hvac_init();
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "HVAC cluster init failed: %s", esp_err_to_name(ret));
-    }
+    /* zb_cluster_hvac_init() removed: thermostats and fans reach Home
+     * Assistant through the converter and register_climate_entity(); this
+     * allocated four buffers no reachable code read. */
     /* zb_cluster_measurement_init() removed: Measurement clusters are handled by zb_callbacks.c and the converter.
      * This allocated illuminance, pressure and PM2.5 state arrays that no
      * reachable code ever read: all 20 of its accessors are discarded by

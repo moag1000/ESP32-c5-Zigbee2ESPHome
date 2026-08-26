@@ -318,9 +318,9 @@ Measured on hardware (ESP32-C5, ESP-IDF v6.0.2):
 - The C5's Wi-Fi scan returns nothing useful, so anything scan-based (the
   captive portal's network list) is unreliable.
 - **Half the codebase cannot run.** Of the functions defined in files that are
-  compiled unconditionally, 859 of 1927 are discarded by the linker as
+  compiled unconditionally, 820 of 1884 are discarded by the linker as
   unreachable — measured, not estimated, by comparing definitions against the
-  symbols in the linked image. Eleven files that were compiled and dropped
+  symbols in the linked image. Fifteen files that were compiled and dropped
   in their entirety have since been taken out of the build — the sources remain,
   with a note in `main/CMakeLists.txt` saying what they were and how to bring
   them back.

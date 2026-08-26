@@ -98,9 +98,6 @@ extern const zb_converter_def_t *conv_generic_for_capabilities(uint32_t caps);
 #include "crash_reporter.h"
 #include "utils/version.h"
 #include "ota/ota_handler.h"
-#include "ota/http_ota.h"
-#include "ota/mqtt_ota.h"
-
 /* NG Architecture Foundation */
 #include "core/foundation_init.h"
 #include "core/adapters/esphome_adapter.h"
@@ -1280,20 +1277,10 @@ skip_mqtt:
     }
 
     /* Initialize HTTP OTA module (HTTPS downloads with lifecycle integration) */
-    ret = http_ota_init();
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG_OTA, "HTTP OTA init failed: %s (non-fatal)", esp_err_to_name(ret));
-    } else {
-        ESP_LOGI(TAG_OTA, "HTTP OTA module initialized");
-    }
+    /* http_ota_init() removed — see main/CMakeLists.txt */
 
     /* Initialize MQTT OTA trigger (Zigbee2MQTT compatible OTA commands) */
-    ret = mqtt_ota_init();
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG_OTA, "MQTT OTA init failed: %s (non-fatal)", esp_err_to_name(ret));
-    } else {
-        ESP_LOGI(TAG_OTA, "MQTT OTA trigger initialized");
-    }
+    /* mqtt_ota_init() removed — see main/CMakeLists.txt */
 
     /* Note: System monitor MQTT publishing and crash report are enabled
      * in the main loop after bridge start to avoid callback deadlocks */

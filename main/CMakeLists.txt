@@ -7,7 +7,6 @@ set(COMPONENT_SRCS
     "zigbee/zb_router.c"
     "zigbee/zb_network.c"
     "zigbee/zb_cluster_multistate.c"
-    "zigbee/zb_cluster_hvac.c"
     "zigbee/zb_cluster_electrical.c"
     "zigbee/zb_cluster_security.c"
     "zigbee/zb_cluster_closures.c"
@@ -98,9 +97,7 @@ set(COMPONENT_SRCS
     "utils/json_utils.c"
     "utils/version.c"
     "ota/ota_handler.c"
-    "ota/http_ota.c"
     "ota/converter_db_ota.c"
-    "ota/mqtt_ota.c"
     "esphome/esphome_api.c"
     "esphome/esphome_api_server.c"
     "esphome/esphome_api_handlers.c"
@@ -331,3 +328,25 @@ endif()
 # Assistant shows comes from crash_reporter_get_boot_count(). Between them they
 # allocated twelve buffers nothing read and wrote NVS on every boot for a
 # counter nothing reported.
+
+# Not built: a third firmware-update path that could not be started.
+#
+#   ota/http_ota.c   ota/mqtt_ota.c
+#
+# mqtt_ota_init() subscribed to zigbee2mqtt/bridge/request/device/ota_update/*
+# and nothing ever dispatched those topics to it, so anything published there
+# was received by the broker and dropped. http_ota_start() was discarded by the
+# linker: no reachable code could begin a transfer.
+#
+# Two paths that do work remain. Gateway firmware updates go over the ESPHome
+# OTA port, and Zigbee device updates over the bridge suffixes /ota_update/check
+# and /ota_update/install, handled by bridge_request_handler.c and ota_handler.c
+# — neither of which referenced these two files.
+
+# Not built: zigbee/zb_cluster_hvac.c — thermostat (0x0201) and fan (0x0202)
+# state that nothing read. Seventeen of its eighteen functions were discarded by
+# the linker; the eighteenth was its init, which allocated four buffers. HVAC
+# devices reach Home Assistant through the converter and
+# register_climate_entity() in esphome_adapter.c. Contrast zb_hvac_dehumid.c,
+# which stays: zb_callbacks.c calls zb_dehumid_handle_report() from the ZCL
+# report path, so it is genuinely in use.
