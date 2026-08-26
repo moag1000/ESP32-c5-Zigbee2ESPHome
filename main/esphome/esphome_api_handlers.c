@@ -26,6 +26,7 @@
 #include <sys/socket.h>
 #include <netinet/tcp.h>
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "esp_mac.h"
 
 /* Log tag */
@@ -843,6 +844,7 @@ static bool list_services_enum_callback(const esphome_service_t *service, void *
  */
 static esp_err_t handle_list_entities_request(esphome_client_t *client, const esphome_message_t *msg)
 {
+    const int64_t list_started_us = esp_timer_get_time();
     ESP_LOGI(TAG, "Received ListEntitiesRequest (encrypted=%s)",
              client->encryption_enabled ? "yes" : "no");
 
@@ -888,6 +890,15 @@ static esp_err_t handle_list_entities_request(esphome_client_t *client, const es
     if (ret == ESP_OK) {
         ret = esphome_api_send_message(client, output, output_len);
     }
+
+    /* How long the list took, because nothing said so.
+     *
+     * Home Assistant gives up on this and disconnects, and without a number
+     * there is no telling whether that is the link, the entity count, or this
+     * task not getting scheduled. It is one line per connection. */
+    ESP_LOGI(TAG, "ListEntities complete in %lld ms (%s)",
+             (long long)((esp_timer_get_time() - list_started_us) / 1000),
+             ret == ESP_OK ? "sent" : esp_err_to_name(ret));
 
     return (ctx.result == ESP_OK) ? ret : ctx.result;
 }
