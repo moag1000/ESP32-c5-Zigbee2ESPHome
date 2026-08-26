@@ -36,7 +36,13 @@ static const char *TAG = "DB_OTA";
 /** HTTP receive buffer. The IDF default of 512 is small against a 1440 MSS. */
 #define DB_OTA_RX_BUFFER        4096
 #define DB_OTA_TASK_STACK       8192
-#define DB_OTA_TASK_PRIO        4
+/* Above the application tasks, below lwIP's TCP/IP task at 18.
+ *
+ * At 4 this sat level with the ESPHome server on a single core that also runs
+ * Zigbee and Wi-Fi, and a task that does not drain its socket promptly has its
+ * receive window closed by the peer. Every failed transfer had the same shape:
+ * a few tens of KB, then nothing for 30 s. */
+#define DB_OTA_TASK_PRIO        10
 #define DB_OTA_URL_MAX          192
 
 static volatile bool s_running;
