@@ -104,6 +104,18 @@ zb_converter_def_t *zb_converter_loader_parse_device(const cJSON *dev_json);
  */
 void zb_converter_loader_free_def(zb_converter_def_t *def);
 
+
+/**
+ * @brief Revision of the installed converter database
+ *
+ * The "db_revision" field of index.json, an ISO date with the short commit of
+ * the tree it was built from. Empty when the installed database predates the
+ * field, in which case nothing can be said about whether an update is newer.
+ *
+ * @return Revision string, never NULL, possibly empty. Owned by the loader.
+ */
+const char *zb_converter_loader_get_revision(void);
+
 #ifdef __cplusplus
 }
 #endif

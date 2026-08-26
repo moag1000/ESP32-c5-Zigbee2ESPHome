@@ -72,6 +72,8 @@ typedef struct {
 static index_entry_t *s_index;   /* PSRAM, allocated in load_index() */
 static size_t s_index_skipped = 0;
 static size_t s_index_count = 0;
+/** Revision string from index.json, for comparing against an update source. */
+static char s_db_revision[40] = "";
 static size_t s_db_device_count = 0;
 
 static cache_entry_t s_cache[MAX_CACHED_CONVERTERS];
@@ -207,6 +209,16 @@ static esp_err_t load_index(void)
         ESP_LOGE(TAG, "Unsupported index version: %d", index_version);
         cJSON_Delete(root);
         return ESP_ERR_INVALID_VERSION;
+    }
+
+    /* The revision this database was built at. Absent in older databases, which
+     * is not an error — it only means an update source cannot be compared
+     * against it and every check will report "unknown" rather than "current". */
+    cJSON *rev = cJSON_GetObjectItem(root, "db_revision");
+    if (rev && cJSON_IsString(rev) && cJSON_GetStringValue(rev)) {
+        strlcpy(s_db_revision, cJSON_GetStringValue(rev), sizeof(s_db_revision));
+    } else {
+        s_db_revision[0] = '\0';
     }
 
     s_index_count = 0;
@@ -1296,4 +1308,9 @@ void zb_converter_loader_get_stats(size_t *db_count, size_t *loaded, size_t *byt
     if (loaded) *loaded = s_cache_count;
     if (bytes_used) *bytes_used = s_cache_bytes;
     xSemaphoreGive(s_mutex);
+}
+
+const char *zb_converter_loader_get_revision(void)
+{
+    return s_db_revision;
 }

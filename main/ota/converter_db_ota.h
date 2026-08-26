@@ -61,6 +61,31 @@ bool converter_db_ota_in_progress(void);
 /** @brief Last outcome, for the status sensor. Never NULL. */
 const char *converter_db_ota_status(void);
 
+
+/**
+ * @brief Ask a source whether it offers a different database, without taking it
+ *
+ * Fetches only index.json and compares its "db_revision" with the installed
+ * one. Runs on its own task like an update does; the answer arrives through
+ * converter_db_ota_update_available() and the status string.
+ *
+ * @param base_url Source, without a trailing slash. http:// or https://.
+ * @return ESP_OK when the check started
+ */
+esp_err_t converter_db_ota_check(const char *base_url);
+
+/**
+ * @brief Whether the last check found a revision differing from the installed one
+ *
+ * False until a check has run, and false when either side carries no revision —
+ * a database built before the field existed cannot be compared, and saying
+ * "update available" on that basis would be a guess.
+ */
+bool converter_db_ota_update_available(void);
+
+/** @brief Revision the last checked source offered, or an empty string. */
+const char *converter_db_ota_available_revision(void);
+
 #ifdef __cplusplus
 }
 #endif

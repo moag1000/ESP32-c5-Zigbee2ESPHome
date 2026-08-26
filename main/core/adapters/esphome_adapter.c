@@ -1968,8 +1968,24 @@ static void handle_device_availability_changed(event_type_t type, void *data,
              evt->online ? "online" : "offline");
 
     if (!evt->online) {
-        /* Device went offline — mark all entities as missing/unavailable */
-        esphome_adapter_remove_device(evt->device_id);
+        /* Unreachable is not the same as gone.
+         *
+         * This called esphome_adapter_remove_device(), which does what its name
+         * says: it deletes the entities. The comment claimed it marked them
+         * unavailable. A battery device that sleeps through a poll, or a route
+         * that needs rebuilding after the coordinator restarts, was therefore
+         * enough to remove a device from Home Assistant entirely — losing its
+         * history and breaking every automation and dashboard card that named
+         * it. Seen here: three devices went unreachable and the gateway's
+         * entity count in Home Assistant fell from 34 to 5.
+         *
+         * The entities stay. Their values go stale, which is honest, and the
+         * "Last Seen" diagnostic already says when the device was last heard —
+         * the same shape zigbee2mqtt and ZHA use. Removal is right when a
+         * device actually leaves the network, and that path (EVT_DEVICE_LEFT)
+         * still does it. */
+        ESP_LOGI(TAG, "Device 0x%016llX unreachable — entities kept, values now stale",
+                 (unsigned long long)evt->device_id);
     } else {
         /* Device came back online — resync entities with current state */
         esphome_adapter_sync_device(evt->device_id);

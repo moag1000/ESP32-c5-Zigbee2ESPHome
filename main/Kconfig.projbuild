@@ -98,6 +98,22 @@ menu "ESP32-C5 Zigbee Gateway Configuration"
                 association failure on its own does not. Costs a few seconds of
                 boot time, so leave it off in normal operation.
 
+        config CONVERTER_DB_UPDATE_URL
+            string "Converter database update source"
+            default "https://raw.githubusercontent.com/moag1000/ESP32-c5-Zigbee2ESPHome/main/data/converters_merged"
+            help
+                Where the "Update Converter Database" button fetches from, and
+                where the periodic check looks for a newer revision.
+
+                A directory, without a trailing slash: the gateway appends
+                /index.json and then each file the index names.
+
+                https works — the certificate bundle is in the build — but plain
+                http is easier on a link that drops packets, because a TLS record
+                that arrives incomplete ends the session rather than costing one
+                retransmission. Point this at a local server if the network is
+                unreliable.
+
         choice WIFI_BAND_SELECTION
             prompt "Wi-Fi band"
             default WIFI_PREFER_5GHZ

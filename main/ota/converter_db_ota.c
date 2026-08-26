@@ -10,6 +10,7 @@
 #include "zigbee/converter/zb_converter_loader.h"
 #include "core/memory/memory_manager_ng.h"
 #include "esp_http_client.h"
+#include "esp_crt_bundle.h"
 #include "esp_timer.h"
 #if CONFIG_BT_SCANNER_ENABLED
 #include "bluetooth/ble_scanner.h"
@@ -41,6 +42,13 @@ static const char *TAG = "DB_OTA";
 static volatile bool s_running;
 static char s_status[96] = "idle";
 static char s_base_url[DB_OTA_URL_MAX];
+
+/** Set when the run should stop after index.json and only compare revisions. */
+static bool s_check_only = false;
+/** Revision the source offers, from its index.json. Empty until a check runs. */
+static char s_available_revision[40] = "";
+/** True when the source offers a revision different from the installed one. */
+static bool s_update_available = false;
 
 static void set_status(const char *fmt, ...)
 {
@@ -92,6 +100,15 @@ static esp_err_t fetch_file(const char *name, char **out_body, size_t *out_len)
         .url = url,
         .timeout_ms = DB_OTA_HTTP_TIMEOUT_MS,
         .keep_alive_enable = true,
+        /* Lets an https:// URL work, which is the only kind GitHub serves. The
+         * certificate bundle is already in the build; it was simply never
+         * attached here, so every https source failed at the handshake.
+         *
+         * Worth knowing before reaching for it: TLS tolerates packet loss less
+         * well than plain HTTP, because a record that arrives incomplete ends
+         * the session rather than costing one retransmission. On a link that is
+         * dropping packets, a plain http:// source is the easier one. */
+        .crt_bundle_attach = esp_crt_bundle_attach,
         /* The default receive buffer is 512 bytes against a 1440-byte MSS, so
          * every segment takes three reads to drain and the socket spends most
          * of its time holding data the application has not collected yet. */
@@ -345,6 +362,38 @@ static void db_ota_task(void *arg)
         set_status("index.json is not usable");
         goto done;
     }
+    /* A check reads the revision and stops. Fetching 134 KB to answer "is there
+     * anything new" is already more than one would like; fetching the whole
+     * 2.6 MB database to find out would be absurd. */
+    {
+        cJSON *idx = cJSON_Parse(index_body);
+        if (idx != NULL) {
+            cJSON *rev = cJSON_GetObjectItem(idx, "db_revision");
+            if (rev && cJSON_IsString(rev) && cJSON_GetStringValue(rev)) {
+                strlcpy(s_available_revision, cJSON_GetStringValue(rev),
+                        sizeof(s_available_revision));
+                const char *installed = zb_converter_loader_get_revision();
+                s_update_available = (installed[0] != '\0') &&
+                                     (strcmp(installed, s_available_revision) != 0);
+            } else {
+                s_available_revision[0] = '\0';
+                s_update_available = false;
+            }
+            cJSON_Delete(idx);
+        }
+    }
+    if (s_check_only) {
+        if (s_available_revision[0] == '\0') {
+            set_status("source has no revision to compare");
+        } else if (s_update_available) {
+            set_status("update available: %.24s", s_available_revision);
+        } else {
+            set_status("up to date (%.24s)", s_available_revision);
+        }
+        ok = true;
+        goto done;
+    }
+
     if (collect_names(index_body, &names, &name_count) != ESP_OK) {
         set_status("index.json names no files");
         goto done;
@@ -438,7 +487,8 @@ done:
     vTaskDelete(NULL);
 }
 
-esp_err_t converter_db_ota_start(const char *base_url)
+/** @brief Shared by the update and the check; @p check_only stops after the index. */
+static esp_err_t db_ota_begin(const char *base_url, bool check_only)
 {
     if (base_url == NULL || base_url[0] == '\0') {
         return ESP_ERR_INVALID_ARG;
@@ -454,8 +504,9 @@ esp_err_t converter_db_ota_start(const char *base_url)
         s_base_url[--n] = '\0';
     }
 
+    s_check_only = check_only;
     s_running = true;
-    set_status("starting");
+    set_status(check_only ? "checking" : "starting");
 
     if (xTaskCreate(db_ota_task, "db_ota", DB_OTA_TASK_STACK, NULL,
                     DB_OTA_TASK_PRIO, NULL) != pdPASS) {
@@ -464,4 +515,24 @@ esp_err_t converter_db_ota_start(const char *base_url)
         return ESP_ERR_NO_MEM;
     }
     return ESP_OK;
+}
+
+esp_err_t converter_db_ota_start(const char *base_url)
+{
+    return db_ota_begin(base_url, false);
+}
+
+esp_err_t converter_db_ota_check(const char *base_url)
+{
+    return db_ota_begin(base_url, true);
+}
+
+bool converter_db_ota_update_available(void)
+{
+    return s_update_available;
+}
+
+const char *converter_db_ota_available_revision(void)
+{
+    return s_available_revision;
 }

@@ -101,6 +101,8 @@ static const char *TAG = "gw_entities";
 #define GW_KEY_BLE_DEVICES         0x40000020
 #define GW_KEY_CURRENT_TIME        0x40000021
 #define GW_KEY_DB_OTA_STATUS       0x40000022
+#define GW_KEY_DB_UPDATE_AVAILABLE 0x40000023
+#define GW_KEY_DB_UPDATE_INSTALL   0x40000024
 #endif
 
 /* ============================================================================
@@ -398,6 +400,21 @@ static esp_err_t gw_ble_scanner_command(esphome_entity_key_t key, bool state)
  * option means the trade can be made while watching what it costs, instead of
  * being decided once at compile time.
  */
+/**
+ * @brief Fetch the converter database from CONFIG_CONVERTER_DB_UPDATE_URL
+ */
+static esp_err_t gw_db_update_command(esphome_entity_key_t key)
+{
+    (void)key;
+    const char *url = CONFIG_CONVERTER_DB_UPDATE_URL;
+    if (url[0] == '\0') {
+        ESP_LOGW(TAG, "No converter database source configured");
+        return ESP_ERR_INVALID_STATE;
+    }
+    ESP_LOGI(TAG, "Converter database update requested: %s", url);
+    return converter_db_ota_start(url);
+}
+
 static esp_err_t gw_ble_active_scan_command(esphome_entity_key_t key, bool state)
 {
     (void)key;
@@ -571,6 +588,33 @@ esp_err_t esphome_adapter_gateway_register(void)
         cfg.entity_category = 2;  /* DIAGNOSTIC */
         cfg.disabled_by_default = false;
         esphome_entity_register_text_sensor(&cfg);
+    }
+
+    /* --- Converter DB: is there a newer one, and fetch it --- */
+    {
+        esphome_binary_sensor_config_t cfg = {0};
+        cfg.key = GW_KEY_DB_UPDATE_AVAILABLE;
+        cfg.device_id = 0;
+        strncpy(cfg.name, "Converter DB Update Available", sizeof(cfg.name) - 1);
+        snprintf(cfg.unique_id, sizeof(cfg.unique_id), "zbgw_db_update_available");
+        strncpy(cfg.icon, "mdi:database-arrow-up", sizeof(cfg.icon) - 1);
+        /* No device class: Home Assistant has no binary class for "an update
+         * exists", and PROBLEM would say something this is not. */
+        cfg.device_class = ESPHOME_BINARY_CLASS_NONE;
+        cfg.disabled_by_default = false;
+        esphome_entity_register_binary_sensor(&cfg);
+    }
+    {
+        esphome_button_config_t cfg = {0};
+        cfg.key = GW_KEY_DB_UPDATE_INSTALL;
+        cfg.device_id = 0;
+        strncpy(cfg.name, "Update Converter Database", sizeof(cfg.name) - 1);
+        snprintf(cfg.unique_id, sizeof(cfg.unique_id), "zbgw_db_update_install");
+        strncpy(cfg.icon, "mdi:database-sync", sizeof(cfg.icon) - 1);
+        cfg.device_class = ESPHOME_BUTTON_CLASS_UPDATE;
+        cfg.disabled_by_default = false;
+        cfg.press_callback = gw_db_update_command;
+        esphome_entity_register_button(&cfg);
     }
 
     /* --- Last Reset Reason TextSensor (diagnostic) ---
@@ -1073,8 +1117,23 @@ void esphome_adapter_gateway_update_state(void)
         esphome_entity_update_text_sensor(GW_KEY_COORDINATOR_STATE, "unknown");
     }
 
-    /* Converter database update status */
+    /* Converter database: status, and whether the source has something newer.
+     *
+     * The check costs one index.json — 134 KB — so it runs once a few minutes
+     * after boot and then daily, not on every update cycle. Without it the
+     * "available" sensor would only ever be right just after somebody pressed
+     * something. */
     esphome_entity_update_text_sensor(GW_KEY_DB_OTA_STATUS, converter_db_ota_status());
+    esphome_entity_update_binary_sensor(GW_KEY_DB_UPDATE_AVAILABLE,
+                                        converter_db_ota_update_available());
+    {
+        static int64_t s_next_db_check_us = 300LL * 1000000LL;  /* first at 5 min */
+        int64_t now = esp_timer_get_time();
+        if (CONFIG_CONVERTER_DB_UPDATE_URL[0] != '\0' && now >= s_next_db_check_us) {
+            s_next_db_check_us = now + 24LL * 3600LL * 1000000LL;
+            converter_db_ota_check(CONFIG_CONVERTER_DB_UPDATE_URL);
+        }
+    }
 
     /* Permit join state */
     esphome_entity_update_switch(GW_KEY_PERMIT_JOIN, zb_coordinator_is_permit_join_enabled());

@@ -14,6 +14,8 @@ Usage:
 
 import argparse
 import copy
+import datetime
+import subprocess
 import json
 import os
 import re
@@ -170,6 +172,19 @@ def strip_build_only_fields(dev):
 # a single file would be 1732 KB and the loader reads at most 512 KB at once.
 PROFILE_KEYS = ("fz", "tz", "e", "tuya_dp", "quirks", "q")
 PROFILES_PER_FILE = 256
+
+
+def _db_revision():
+    """Date of this build, plus the short commit if the tree is a git checkout."""
+    stamp = datetime.date.today().isoformat()
+    try:
+        rev = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
+                             capture_output=True, text=True, timeout=5).stdout.strip()
+        if rev:
+            return f"{stamp}-{rev}"
+    except Exception:
+        pass
+    return stamp
 
 
 def build_profiles(devices):
@@ -586,6 +601,12 @@ def write_output(merged_devices, output_dir, z2m_meta, zhq_meta):
 
     index = {
         "version": 2,
+        # A revision the gateway can compare against what it has installed.
+        # "version" above is the schema, which has not changed since v2 and says
+        # nothing about the contents; without this there is no way to answer
+        # "is there a newer database than mine" other than downloading all of it.
+        # ISO dates order lexicographically, so a plain string compare works.
+        "db_revision": _db_revision(),
         "sources": sources,
         "manufacturers": manuf_info,
         "total_devices": total_devices,
