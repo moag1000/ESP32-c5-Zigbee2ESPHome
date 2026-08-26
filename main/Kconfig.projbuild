@@ -98,56 +98,78 @@ menu "ESP32-C5 Zigbee Gateway Configuration"
                 association failure on its own does not. Costs a few seconds of
                 boot time, so leave it off in normal operation.
 
-        config WIFI_FORCE_5GHZ
-            bool "Force 5GHz Band"
-            default n
+        choice WIFI_BAND_SELECTION
+            prompt "Wi-Fi band"
+            default WIFI_PREFER_5GHZ
             help
-                Keep this device on 5GHz and never fall back to 2.4GHz.
+                Which band the station uses, as one decision.
 
-                Ohne diese Option startet der Treiber im AUTO-Modus und wählt
-                nach Signalstärke, mit WIFI_5GHZ_RSSI_ADJUSTMENT als Bonus für
-                5 GHz. Steht ein starker 2,4-GHz-Accesspoint daneben, gewinnt
-                der — auch wenn 5 GHz ausdrücklich gewünscht ist.
+                This was three separate booleans held apart by depends-on rules,
+                which let a config set both WIFI_PREFER_5GHZ and
+                WIFI_FORCE_5GHZ at once. Nothing broke, because the code checks
+                the force options first — but the file said two contradictory
+                things and only the reading order decided which counted. A
+                choice makes the tool enforce what the comments used to ask for.
 
-                Zum Messen ist das unbrauchbar: man weiß nicht, welches Band
-                man gerade testet. Diese Option erzwingt es.
+                The symbol names are unchanged, so existing sdkconfig files keep
+                working; a file that sets two of them now resolves to one
+                instead of quietly relying on precedence.
 
-                Vorsicht im Betrieb: ist 5 GHz schwach oder weg, gibt es keinen
-                Rückfall, und die Assoziation läuft in einen Timeout.
+            config WIFI_BAND_AUTO
+                bool "Auto — let the driver pick"
+                help
+                    The driver chooses by signal strength. No RSSI bonus for
+                    5GHz, no forcing. Use when you do not care which band, or
+                    when the access point offers only one.
 
-        config WIFI_FORCE_2GHZ
-            bool "Force 2.4GHz Band"
-            depends on !WIFI_FORCE_5GHZ
-            default n
-            help
-                Keep this device on 2.4GHz and never use 5GHz.
+            config WIFI_PREFER_5GHZ
+                bool "Prefer 5GHz"
+                help
+                    Prefer 5GHz so the uplink stays off the band Zigbee uses,
+                    with CONFIG_WIFI_5GHZ_RSSI_ADJUSTMENT as the bonus that
+                    tips the choice. Falls back to 2.4GHz if 5GHz is not
+                    available.
 
-                Sounds backwards on a dual-band chip that shares 2.4GHz with
-                Zigbee, and it was — until it was measured. On one access point
-                running 160MHz on 5GHz, this gateway lost 29-38 % of its
-                packets there and 8-12 % on 2.4GHz. Three times better on the
-                band it supposedly should avoid.
+                    Requires a dual-band router with the same SSID on both
+                    bands.
 
-                The likely reason is not the band but the width: a 160MHz block
-                anchored at channel 36 spans channels 36 to 64, and the upper
-                half of that is DFS, which this chip cannot handle. The access
-                point's 2.4GHz radio is 20MHz wide and has no such problem.
+            config WIFI_FORCE_5GHZ
+                bool "5GHz only"
+                help
+                    Keep this device on 5GHz and never fall back.
 
-                Turn this on only if 5GHz measures worse on your network, and
-                measure both before deciding. Costs throughput, which matters
-                for OTA updates and not much else here.
+                    Preferring is not enough when measuring: with AUTO the
+                    driver picks by signal strength and a strong 2.4GHz access
+                    point next door wins, so you cannot tell which band you
+                    just tested. This removes the doubt.
 
-        config WIFI_PREFER_5GHZ
-            bool "Prefer 5GHz Band"
-            depends on !WIFI_FORCE_2GHZ
-            default y
-            help
-                When enabled, prefer 5GHz WiFi networks over 2.4GHz networks
-                to minimize interference with Zigbee (which operates on 2.4GHz).
-                This uses RSSI adjustment to give 5GHz APs priority when both
-                bands have similar signal strength.
+                    In service it is a risk: if 5GHz is weak or gone there is no
+                    fallback and association runs into a timeout.
 
-                Requires a dual-band WiFi router with the same SSID on both bands.
+            config WIFI_FORCE_2GHZ
+                bool "2.4GHz only"
+                help
+                    Keep this device on 2.4GHz and never use 5GHz.
+
+                    Sounds backwards on a dual-band chip that shares 2.4GHz with
+                    Zigbee, and it was — until it was measured. On one access
+                    point running 160MHz on 5GHz, this gateway lost 29-38 % of
+                    its packets there and 8-12 % on 2.4GHz. Three times better
+                    on the band it supposedly should avoid.
+
+                    The reason is width rather than band: a 160MHz block
+                    anchored at channel 36 spans channels 36 to 64, and the
+                    upper half of that is DFS, which this chip cannot handle.
+                    The 2.4GHz radio is 20MHz wide and has no such problem.
+                    Narrowing the access point to 80MHz on channels 36-48 keeps
+                    the whole block out of DFS and is the better fix where you
+                    control the access point.
+
+                    Turn this on only if 5GHz measures worse on your network,
+                    and measure both before deciding. Costs throughput, which
+                    matters for OTA updates and not much else here.
+
+        endchoice
 
         config WIFI_5GHZ_RSSI_ADJUSTMENT
             int "5GHz RSSI Adjustment (dB)"

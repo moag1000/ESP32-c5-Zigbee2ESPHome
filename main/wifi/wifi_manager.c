@@ -162,13 +162,17 @@ bool wifi_manager_credentials_known_good(const char *ssid)
  */
 static wifi_band_mode_t preferred_band_mode(void)
 {
+    /* Exactly one of these is defined: they are a Kconfig choice, not four
+     * independent switches. The order below no longer decides anything, which
+     * is the point — it used to, and a config setting both PREFER_5GHZ and
+     * FORCE_5GHZ said two things while only one counted. */
 #if CONFIG_WIFI_FORCE_5GHZ
     return WIFI_BAND_MODE_5G_ONLY;
 #elif CONFIG_WIFI_FORCE_2GHZ
     return WIFI_BAND_MODE_2G_ONLY;
-#elif defined(CONFIG_WIFI_PREFER_5GHZ)
+#elif CONFIG_WIFI_PREFER_5GHZ
     return WIFI_BAND_MODE_5G_ONLY;
-#else
+#else   /* CONFIG_WIFI_BAND_AUTO */
     return WIFI_BAND_MODE_AUTO;
 #endif
 }
@@ -178,6 +182,9 @@ static wifi_band_mode_t preferred_band_mode(void)
  */
 static wifi_band_mode_t fallback_band_mode(void)
 {
+    /* PREFER_5GHZ falls back to AUTO on purpose: preferring is a preference,
+     * and after repeated failures the other band is better than none. The two
+     * forcing options do not, because their whole purpose is to stay put. */
 #if CONFIG_WIFI_FORCE_5GHZ
     /* Kein Rückfall auf AUTO: der Sinn dieser Option ist, dass gemessen wird,
      * was sie behauptet. Ein stiller Wechsel auf 2,4 GHz würde genau die Frage
