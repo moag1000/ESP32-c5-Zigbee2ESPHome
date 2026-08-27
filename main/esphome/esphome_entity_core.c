@@ -567,3 +567,54 @@ esp_err_t esphome_entities_test(void)
 
     return ESP_OK;
 }
+
+/**
+ * @brief Forget every entity belonging to one device
+ *
+ * The entity API had no way to take an entity back, which the adapter noted and
+ * worked around: esphome_adapter_remove_device() set values to "missing" and
+ * left the registrations standing. That was survivable until a device was
+ * paired again under a different converter — a NEO siren first matched, on an
+ * outdated database, as a three-gang wall switch, and then correctly once the
+ * database was renewed. The registration guard in the adapter saw the device
+ * already had entities and returned without building the right ones, so the
+ * siren kept a switch it does not have and lost the melody, volume and duration
+ * it does. Only a reboot cleared it, because the guard lives in RAM.
+ *
+ * @param device_id Sub-device to clear, as used in the entity configs
+ * @return Number of entities forgotten
+ */
+uint16_t esphome_entities_unregister_device(uint32_t device_id)
+{
+    if (s_entities == NULL) {
+        return 0;
+    }
+
+    uint16_t cleared = 0;
+
+#define ESPHOME_FORGET(arr, max)                                              \
+    do {                                                                      \
+        for (int i = 0; i < (max); i++) {                                     \
+            if (s_entities->arr[i].registered &&                              \
+                s_entities->arr[i].config.device_id == device_id) {           \
+                s_entities->arr[i].registered = false;                        \
+                cleared++;                                                    \
+            }                                                                 \
+        }                                                                     \
+    } while (0)
+
+    ESPHOME_FORGET(sensors,        ESPHOME_MAX_SENSORS);
+    ESPHOME_FORGET(binary_sensors, ESPHOME_MAX_BINARY_SENSORS);
+    ESPHOME_FORGET(switches,       ESPHOME_MAX_SWITCHES);
+    ESPHOME_FORGET(selects,        ESPHOME_MAX_SELECTS);
+    ESPHOME_FORGET(lights,         ESPHOME_MAX_LIGHTS);
+    ESPHOME_FORGET(covers,         ESPHOME_MAX_COVERS);
+    ESPHOME_FORGET(fans,           ESPHOME_MAX_FANS);
+    ESPHOME_FORGET(climates,       ESPHOME_MAX_CLIMATES);
+    ESPHOME_FORGET(text_sensors,   ESPHOME_MAX_TEXT_SENSORS);
+
+#undef ESPHOME_FORGET
+
+    ESP_LOGI(TAG, "Forgot %u entities of device %lu", cleared, (unsigned long)device_id);
+    return cleared;
+}

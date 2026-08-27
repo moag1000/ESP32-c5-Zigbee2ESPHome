@@ -1439,6 +1439,19 @@ esp_err_t esphome_encode_alarm_state(const esphome_alarm_entity_state_t *state,
  */
 esp_err_t esphome_entities_test(void);
 
+
+/**
+ * @brief Forget every entity belonging to one device, so it can be rebuilt
+ *
+ * Needed when a device is paired again and matches a different converter than
+ * before: without this the adapter's "already registered" guard keeps the old,
+ * wrong entities and never creates the right ones.
+ *
+ * @param device_id Sub-device to clear
+ * @return Number of entities forgotten
+ */
+uint16_t esphome_entities_unregister_device(uint32_t device_id);
+
 #ifdef __cplusplus
 }
 #endif

@@ -1913,6 +1913,27 @@ static void handle_device_joined(event_type_t type, void *data,
     ESP_LOGI(TAG, "Device joined: IEEE=0x%016llX",
              (unsigned long long)evt->ieee_addr);
 
+    /* Pairing again rebuilds the entities, whatever was there before.
+     *
+     * esphome_adapter_sync_device() returns early when a device already has
+     * entities, which is right for the repeated JOINED and INTERVIEWED events
+     * of one pairing and wrong for a new one. A NEO siren matched, on an
+     * outdated database, as a three-gang wall switch; renewing the database
+     * fixed the match, and pairing the device again could not fix the entities
+     * — the guard saw entities and returned, so the siren kept a switch it does
+     * not have and never got the melody, volume and duration it does. Only a
+     * reboot helped, because the guard lives in RAM.
+     *
+     * A join is the one moment where discarding what we knew is correct: the
+     * device has just told us who it is. */
+    uint32_t esphome_dev = (uint32_t)(evt->ieee_addr & 0xFFFFFFFF);
+    uint16_t forgotten = esphome_entities_unregister_device(esphome_dev);
+    unmark_device_entities_registered(evt->ieee_addr);
+    if (forgotten > 0) {
+        ESP_LOGI(TAG, "Rebuilding entities for 0x%016llX (%u discarded)",
+                 (unsigned long long)evt->ieee_addr, forgotten);
+    }
+
     /* Sync device to ESPHome entities */
     esphome_adapter_sync_device(evt->ieee_addr);
 }
