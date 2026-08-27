@@ -16,6 +16,7 @@ import argparse
 import copy
 import datetime
 import subprocess
+import hashlib
 import json
 import os
 import re
@@ -172,6 +173,29 @@ def strip_build_only_fields(dev):
 # a single file would be 1732 KB and the loader reads at most 512 KB at once.
 PROFILE_KEYS = ("fz", "tz", "e", "tuya_dp", "quirks", "q")
 PROFILES_PER_FILE = 256
+
+
+def _write_manifest(out_dir, index_path, revision, total_devices):
+    """A few dozen bytes saying what the database is, next to the database.
+
+    The gateway's daily check wants one question answered — is there something
+    newer than mine — and answering it by downloading a 134 KB index is absurd
+    on a link this firmware struggles to hold open. It also meant the check ran
+    a high-priority network task for minutes, which on a single core competes
+    with the Zigbee provisioning it should never delay.
+
+    Written as manifest.json so a source that predates it simply 404s and the
+    gateway falls back to reading index.json, as before.
+    """
+    digest = hashlib.sha256(pathlib.Path(index_path).read_bytes()).hexdigest()
+    manifest = {
+        "db_revision": revision,
+        "total_devices": total_devices,
+        "index_sha256": digest,
+    }
+    pathlib.Path(out_dir, "manifest.json").write_text(
+        json.dumps(manifest, separators=(",", ":")))
+    return manifest
 
 
 def _db_revision():

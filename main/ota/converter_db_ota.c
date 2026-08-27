@@ -42,7 +42,16 @@ static const char *TAG = "DB_OTA";
  * Zigbee and Wi-Fi, and a task that does not drain its socket promptly has its
  * receive window closed by the peer. Every failed transfer had the same shape:
  * a few tens of KB, then nothing for 30 s. */
+/* The download needs to outrun nothing in particular, but it must drain its
+ * socket or the peer closes the window — at 4, level with the ESPHome server on
+ * a single core that also runs Zigbee and Wi-Fi, it never finished. Ten works.
+ *
+ * A check is a different animal now that it reads a 139-byte manifest instead
+ * of a 134 KB index: it finishes in milliseconds and has no business delaying
+ * anything, least of all the priority-4 zb_prov and zb_avail tasks that a
+ * freshly paired device depends on. */
 #define DB_OTA_TASK_PRIO        10
+#define DB_OTA_CHECK_TASK_PRIO  3
 #define DB_OTA_URL_MAX          192
 
 static volatile bool s_running;
@@ -355,6 +364,41 @@ static void db_ota_task(void *arg)
         goto done;
     }
 
+    /* A check asks one question, and manifest.json answers it in 139 bytes.
+     *
+     * This used to fetch index.json — 134 KB — to compare a revision string,
+     * which on this link takes minutes and holds a network task above the
+     * Zigbee provisioning tasks for all of it. A source that predates the
+     * manifest simply 404s here and the code falls through to the index, which
+     * is what it always did. */
+    if (s_check_only) {
+        char *man = NULL;
+        size_t man_len = 0;
+        if (fetch_file("manifest.json", &man, &man_len) == ESP_OK) {
+            cJSON *mj = cJSON_Parse(man);
+            if (mj != NULL) {
+                cJSON *rev = cJSON_GetObjectItem(mj, "db_revision");
+                if (rev && cJSON_IsString(rev) && cJSON_GetStringValue(rev)) {
+                    strlcpy(s_available_revision, cJSON_GetStringValue(rev),
+                            sizeof(s_available_revision));
+                    const char *installed = zb_converter_loader_get_revision();
+                    s_update_available = (installed[0] != '\0') &&
+                                         (strcmp(installed, s_available_revision) != 0);
+                    set_status(s_update_available
+                               ? "update available: %.24s"
+                               : "up to date (%.24s)", s_available_revision);
+                    ok = true;
+                }
+                cJSON_Delete(mj);
+            }
+            mem_ng_free(man);
+            if (ok) {
+                goto done;
+            }
+        }
+        ESP_LOGI(TAG, "No usable manifest.json — falling back to index.json");
+    }
+
     if (fetch_file("index.json", &index_body, &index_len) != ESP_OK) {
         /* fetch_file() has already described what went wrong — how many bytes
          * arrived, or which HTTP status came back. Replacing that with a
@@ -514,8 +558,10 @@ static esp_err_t db_ota_begin(const char *base_url, bool check_only)
     s_running = true;
     set_status(check_only ? "checking" : "starting");
 
-    if (xTaskCreate(db_ota_task, "db_ota", DB_OTA_TASK_STACK, NULL,
-                    DB_OTA_TASK_PRIO, NULL) != pdPASS) {
+    if (xTaskCreate(db_ota_task, check_only ? "db_check" : "db_ota",
+                    DB_OTA_TASK_STACK, NULL,
+                    check_only ? DB_OTA_CHECK_TASK_PRIO : DB_OTA_TASK_PRIO,
+                    NULL) != pdPASS) {
         s_running = false;
         set_status("could not start the download task");
         return ESP_ERR_NO_MEM;

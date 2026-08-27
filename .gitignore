@@ -74,3 +74,5 @@ screenlog.*
 sdkconfig.backup
 build_release/
 build_relwork/
+sdkconfig.pcb*
+build_pcb/

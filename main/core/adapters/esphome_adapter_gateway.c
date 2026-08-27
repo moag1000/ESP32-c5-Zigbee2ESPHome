@@ -1127,7 +1127,10 @@ void esphome_adapter_gateway_update_state(void)
     esphome_entity_update_binary_sensor(GW_KEY_DB_UPDATE_AVAILABLE,
                                         converter_db_ota_update_available());
     {
-        static int64_t s_next_db_check_us = 300LL * 1000000LL;  /* first at 5 min */
+        /* Not five minutes after boot. That is exactly when somebody who just
+         * restarted the gateway is pairing a device, and the check has no
+         * business competing with an interview. Half an hour in, then daily. */
+        static int64_t s_next_db_check_us = 1800LL * 1000000LL;
         int64_t now = esp_timer_get_time();
         if (CONFIG_CONVERTER_DB_UPDATE_URL[0] != '\0' && now >= s_next_db_check_us) {
             s_next_db_check_us = now + 24LL * 3600LL * 1000000LL;
